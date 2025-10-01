@@ -34,7 +34,16 @@ interface GuestyListing {
   accommodates: number;
   bedrooms: number;
   address: any;
-  thumbnail: string;
+  picture?: {
+    thumbnail?: string;
+    _id?: string;
+    original?: string;
+  };
+  pictures?: Array<{
+    thumbnail?: string;
+    _id?: string;
+    original?: string;
+  }>;
 }
 
 async function getGuestyAccessToken(clientId: string, clientSecret: string): Promise<string> {
@@ -102,7 +111,7 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
     const data = await fetchGuestyData(apiToken, 'listings', {
       limit,
       skip,
-      fields: '_id createdAt nickname status isListed active propertyType accommodates bedrooms address thumbnail',
+      fields: '_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures',
     });
 
     const listings = data.results || [];
@@ -245,20 +254,30 @@ Deno.serve(async (req) => {
 
         await updateSyncJob(supabase, jobId, { progress_message: 'Saving listings to database...' });
 
-        const listingsToUpsert = guestyListings.map((listing: GuestyListing) => ({
-          id: listing._id,
-          guesty_account_id: accountId,
-          created_at_guesty: listing.createdAt,
-          nickname: listing.nickname,
-          status: listing.status,
-          is_listed: listing.isListed,
-          active: listing.active,
-          property_type: listing.propertyType,
-          accommodates: listing.accommodates,
-          bedrooms: listing.bedrooms,
-          address: listing.address,
-          thumbnail: listing.thumbnail,
-        }));
+        const listingsToUpsert = guestyListings.map((listing: GuestyListing) => {
+          // Extract thumbnail from picture or pictures array
+          let thumbnail = null;
+          if (listing.picture?.thumbnail) {
+            thumbnail = listing.picture.thumbnail;
+          } else if (listing.pictures && listing.pictures.length > 0 && listing.pictures[0].thumbnail) {
+            thumbnail = listing.pictures[0].thumbnail;
+          }
+          
+          return {
+            id: listing._id,
+            guesty_account_id: accountId,
+            created_at_guesty: listing.createdAt,
+            nickname: listing.nickname,
+            status: listing.status,
+            is_listed: listing.isListed,
+            active: listing.active,
+            property_type: listing.propertyType,
+            accommodates: listing.accommodates,
+            bedrooms: listing.bedrooms,
+            address: listing.address,
+            thumbnail: thumbnail,
+          };
+        });
 
         if (listingsToUpsert.length > 0) {
           const { error: listingsError } = await supabase
