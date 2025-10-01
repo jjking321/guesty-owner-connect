@@ -74,7 +74,11 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string): Pro
   return data.access_token;
 }
 
-async function fetchGuestyData(apiToken: string, endpoint: string, params: any = {}) {
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchGuestyData(apiToken: string, endpoint: string, params: any = {}, retries = 3) {
   const url = new URL(`https://open-api.guesty.com/v1/${endpoint}`);
   
   // Add query parameters
@@ -84,21 +88,51 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
     }
   });
 
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${apiToken}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // Add throttling delay between requests (except first attempt)
+      if (attempt > 0) {
+        const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Exponential backoff, max 10s
+        console.log(`Retry attempt ${attempt}/${retries}, waiting ${backoffDelay}ms...`);
+        await sleep(backoffDelay);
+      }
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error(`Guesty API error (${response.status}):`, error);
-    throw new Error(`Guesty API error: ${response.status} - ${error}`);
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        
+        // Check if it's a rate limit or timeout error (500, 429, 503)
+        if ((response.status === 500 || response.status === 429 || response.status === 503) && attempt < retries) {
+          console.error(`Guesty API error (${response.status}), will retry:`, error);
+          lastError = new Error(`Guesty API error: ${response.status} - ${error}`);
+          continue; // Retry
+        }
+        
+        // For other errors or last retry, throw immediately
+        console.error(`Guesty API error (${response.status}):`, error);
+        throw new Error(`Guesty API error: ${response.status} - ${error}`);
+      }
+
+      return await response.json();
+      
+    } catch (error) {
+      if (attempt === retries) {
+        throw lastError || error;
+      }
+      lastError = error as Error;
+    }
   }
-
-  return await response.json();
+  
+  throw lastError || new Error('Failed to fetch data from Guesty');
 }
 
 async function fetchAllListings(apiToken: string, onProgress?: (fetched: number, total?: number) => Promise<void>) {
@@ -112,7 +146,7 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
       limit,
       skip,
       fields: '_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures',
-    });
+    }, 5); // 5 retries for listings
 
     const listings = data.results || [];
     allListings.push(...listings);
@@ -128,15 +162,28 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
     }
 
     skip += limit;
+    
+    // Add small delay between requests to avoid overwhelming the API
+    await sleep(200);
   }
 
   return allListings;
 }
 
-async function fetchReservationsByCheckIn(apiToken: string, startDate: string, onProgress?: (fetched: number, total?: number) => Promise<void>) {
-  const allReservations: GuestyReservation[] = [];
+async function fetchAndSaveReservationsBatch(
+  apiToken: string,
+  startDate: string,
+  supabase: any,
+  accountId: string,
+  jobId: string,
+  onProgress?: (fetched: number, saved: number, total?: number) => Promise<void>
+) {
   let skip = 0;
   const limit = 100;
+  const batchSize = 1000; // Save every 1000 records
+  let totalFetched = 0;
+  let totalSaved = 0;
+  let batch: GuestyReservation[] = [];
 
   while (true) {
     console.log(`Fetching reservations: skip=${skip}, limit=${limit}`);
@@ -149,30 +196,140 @@ async function fetchReservationsByCheckIn(apiToken: string, startDate: string, o
       }
     ]);
 
-    const data = await fetchGuestyData(apiToken, 'reservations', {
-      limit,
-      skip,
-      filters,
-      fields: '_id status checkIn checkOut nightsCount guestsCount fareAccommodationAdjusted hostPayout totalPaid ownerRevenue listingId source confirmationCode createdAt lastUpdatedAt',
-    });
+    try {
+      const data = await fetchGuestyData(apiToken, 'reservations', {
+        limit,
+        skip,
+        filters,
+        fields: '_id status checkIn checkOut nightsCount guestsCount fareAccommodationAdjusted hostPayout totalPaid ownerRevenue listingId source confirmationCode createdAt lastUpdatedAt',
+      }, 5); // 5 retries
 
-    const reservations = data.results || [];
-    allReservations.push(...reservations);
-    
-    if (onProgress) {
-      await onProgress(allReservations.length, data.count);
+      const reservations = data.results || [];
+      batch.push(...reservations);
+      totalFetched += reservations.length;
+      
+      console.log(`Fetched ${reservations.length} reservations (total: ${totalFetched})`);
+
+      // Save batch if it reaches batch size or if it's the last batch
+      if (batch.length >= batchSize || reservations.length < limit) {
+        if (batch.length > 0) {
+          console.log(`Saving batch of ${batch.length} reservations...`);
+          
+          const reservationsToUpsert = batch.map((reservation: GuestyReservation) => ({
+            id: reservation._id,
+            guesty_account_id: accountId,
+            listing_id: reservation.listingId,
+            status: reservation.status,
+            check_in: reservation.checkIn,
+            check_out: reservation.checkOut,
+            nights_count: reservation.nightsCount,
+            guests_count: reservation.guestsCount,
+            fare_accommodation_adjusted: reservation.fareAccommodationAdjusted,
+            host_payout: reservation.hostPayout,
+            total_paid: reservation.totalPaid,
+            owner_revenue: reservation.ownerRevenue,
+            source: reservation.source,
+            confirmation_code: reservation.confirmationCode,
+            created_at_guesty: reservation.createdAt,
+            last_updated_at_guesty: reservation.lastUpdatedAt,
+            updated_at: new Date().toISOString(),
+          }));
+
+          // Deduplicate reservations by ID
+          const uniqueReservations = Array.from(
+            new Map(reservationsToUpsert.map(item => [item.id, item])).values()
+          );
+          
+          console.log(`Deduplication: ${reservationsToUpsert.length} -> ${uniqueReservations.length} unique reservations`);
+
+          const { error: reservationsError } = await supabase
+            .from('reservations')
+            .upsert(uniqueReservations, { onConflict: 'id' });
+
+          if (reservationsError) {
+            console.error('Error saving reservations batch:', reservationsError);
+            throw reservationsError;
+          }
+
+          totalSaved += uniqueReservations.length;
+          console.log(`Saved batch successfully. Total saved: ${totalSaved}`);
+          
+          // Update progress
+          if (onProgress) {
+            await onProgress(totalFetched, totalSaved, data.count);
+          }
+          
+          // Update job with last synced offset for resumability
+          await updateSyncJob(supabase, jobId, {
+            progress_message: `Saved ${totalSaved} reservations (fetched ${totalFetched}${data.count ? `/${data.count}` : ''})`,
+            items_synced: totalSaved,
+            total_items: data.count,
+          });
+          
+          // Clear batch
+          batch = [];
+        }
+      } else if (onProgress) {
+        // Update progress without saving
+        await onProgress(totalFetched, totalSaved, data.count);
+      }
+
+      if (reservations.length < limit) {
+        break;
+      }
+
+      skip += limit;
+      
+      // Add delay between requests
+      await sleep(200);
+      
+    } catch (error) {
+      console.error(`Error at skip=${skip}:`, error);
+      
+      // Save what we have so far before failing
+      if (batch.length > 0) {
+        console.log(`Attempting to save partial batch of ${batch.length} reservations before failing...`);
+        try {
+          const reservationsToUpsert = batch.map((reservation: GuestyReservation) => ({
+            id: reservation._id,
+            guesty_account_id: accountId,
+            listing_id: reservation.listingId,
+            status: reservation.status,
+            check_in: reservation.checkIn,
+            check_out: reservation.checkOut,
+            nights_count: reservation.nightsCount,
+            guests_count: reservation.guestsCount,
+            fare_accommodation_adjusted: reservation.fareAccommodationAdjusted,
+            host_payout: reservation.hostPayout,
+            total_paid: reservation.totalPaid,
+            owner_revenue: reservation.ownerRevenue,
+            source: reservation.source,
+            confirmation_code: reservation.confirmationCode,
+            created_at_guesty: reservation.createdAt,
+            last_updated_at_guesty: reservation.lastUpdatedAt,
+            updated_at: new Date().toISOString(),
+          }));
+
+          const uniqueReservations = Array.from(
+            new Map(reservationsToUpsert.map(item => [item.id, item])).values()
+          );
+
+          await supabase
+            .from('reservations')
+            .upsert(uniqueReservations, { onConflict: 'id' });
+
+          totalSaved += uniqueReservations.length;
+          console.log(`Saved partial batch. Total saved before failure: ${totalSaved}`);
+        } catch (saveError) {
+          console.error('Failed to save partial batch:', saveError);
+        }
+      }
+      
+      throw error;
     }
-    
-    console.log(`Fetched ${reservations.length} reservations`);
-
-    if (reservations.length < limit) {
-      break;
-    }
-
-    skip += limit;
   }
 
-  return allReservations;
+  return { totalFetched, totalSaved };
 }
 
 async function createSyncJob(supabase: any, accountId: string, syncType: string): Promise<string> {
@@ -319,7 +476,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Sync reservations
+    // Sync reservations with batch processing
     if (syncType === 'reservations' || syncType === 'both') {
       const jobId = await createSyncJob(supabase, accountId, 'reservations');
       
@@ -327,60 +484,30 @@ Deno.serve(async (req) => {
         const defaultStartDate = startDate || new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         
         await updateSyncJob(supabase, jobId, { 
-          progress_message: `Fetching reservations from Guesty (checkIn >= ${defaultStartDate})...` 
+          progress_message: `Starting reservations sync (checkIn >= ${defaultStartDate})...` 
         });
 
-        const guestyReservations = await fetchReservationsByCheckIn(accessToken, defaultStartDate, async (fetched, total) => {
-          await updateSyncJob(supabase, jobId, {
-            progress_message: `Fetching reservations: ${fetched}${total ? `/${total}` : ''}`,
-            items_synced: fetched,
-            total_items: total,
-          });
-        });
-
-        await updateSyncJob(supabase, jobId, { progress_message: 'Saving reservations to database...' });
-
-        const reservationsToUpsert = guestyReservations.map((reservation: GuestyReservation) => ({
-          id: reservation._id,
-          guesty_account_id: accountId,
-          listing_id: reservation.listingId,
-          status: reservation.status,
-          check_in: reservation.checkIn,
-          check_out: reservation.checkOut,
-          nights_count: reservation.nightsCount,
-          guests_count: reservation.guestsCount,
-          fare_accommodation_adjusted: reservation.fareAccommodationAdjusted,
-          host_payout: reservation.hostPayout,
-          total_paid: reservation.totalPaid,
-          owner_revenue: reservation.ownerRevenue,
-          source: reservation.source,
-          confirmation_code: reservation.confirmationCode,
-          created_at_guesty: reservation.createdAt,
-          last_updated_at_guesty: reservation.lastUpdatedAt,
-          updated_at: new Date().toISOString(),
-        }));
-
-        // Deduplicate reservations by ID (keep last occurrence)
-        const uniqueReservations = Array.from(
-          new Map(reservationsToUpsert.map(item => [item.id, item])).values()
+        const { totalFetched, totalSaved } = await fetchAndSaveReservationsBatch(
+          accessToken,
+          defaultStartDate,
+          supabase,
+          accountId,
+          jobId,
+          async (fetched, saved, total) => {
+            await updateSyncJob(supabase, jobId, {
+              progress_message: `Processing: fetched ${fetched}, saved ${saved}${total ? `/${total}` : ''}`,
+              items_synced: saved,
+              total_items: total,
+            });
+          }
         );
-        
-        console.log(`Deduplication: ${reservationsToUpsert.length} -> ${uniqueReservations.length} unique reservations`);
 
-        if (uniqueReservations.length > 0) {
-          const { error: reservationsError } = await supabase
-            .from('reservations')
-            .upsert(uniqueReservations, { onConflict: 'id' });
-
-          if (reservationsError) throw reservationsError;
-        }
-
-        reservationsCount = uniqueReservations.length;
+        reservationsCount = totalSaved;
 
         await updateSyncJob(supabase, jobId, {
           status: 'completed',
-          progress_message: `Completed: ${reservationsCount} reservations synced`,
-          items_synced: reservationsCount,
+          progress_message: `Completed: ${totalSaved} reservations synced (fetched ${totalFetched})`,
+          items_synced: totalSaved,
           completed_at: new Date().toISOString(),
         });
 
@@ -390,12 +517,17 @@ Deno.serve(async (req) => {
           .eq('id', accountId);
 
       } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Reservation sync failed:', errorMsg);
+        
         await updateSyncJob(supabase, jobId, {
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Unknown error',
+          error_message: errorMsg,
           completed_at: new Date().toISOString(),
         });
-        throw error;
+        
+        // Don't throw - let partial success be visible to user
+        console.log('Reservation sync failed but partial data may have been saved');
       }
     }
 
