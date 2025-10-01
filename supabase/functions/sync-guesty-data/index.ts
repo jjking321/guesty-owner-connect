@@ -78,8 +78,32 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string, retr
         
         // Check if it's a rate limit error (429) and we have retries left
         if (response.status === 429 && attempt < retries) {
-          console.error(`Token endpoint rate limited (${response.status}), will retry:`, error);
+          // Check for Retry-After header
+          const retryAfter = response.headers.get('Retry-After');
+          let waitTime: number;
+          
+          if (retryAfter) {
+            // Retry-After can be in seconds or a date
+            const retryAfterNum = parseInt(retryAfter);
+            if (!isNaN(retryAfterNum)) {
+              waitTime = retryAfterNum * 1000; // Convert to milliseconds
+              console.log(`Token endpoint rate limited. Retry-After header: ${retryAfterNum}s (${waitTime}ms)`);
+            } else {
+              // Try parsing as date
+              const retryDate = new Date(retryAfter);
+              waitTime = retryDate.getTime() - Date.now();
+              console.log(`Token endpoint rate limited. Retry-After date: ${retryAfter} (${waitTime}ms)`);
+            }
+          } else {
+            waitTime = Math.min(2000 * Math.pow(2, attempt), 30000); // Exponential backoff fallback
+            console.log(`Token endpoint rate limited (no Retry-After header). Using backoff: ${waitTime}ms`);
+          }
+          
+          console.error(`Rate limit error (${response.status}):`, error);
           lastError = new Error(`Authentication failed: ${response.status} - ${error}`);
+          
+          // Wait before retry
+          await sleep(Math.max(waitTime, 0));
           continue; // Retry
         }
         
@@ -141,6 +165,19 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
         
         // Check if it's a rate limit or timeout error (500, 429, 503)
         if ((response.status === 500 || response.status === 429 || response.status === 503) && attempt < retries) {
+          // Check for Retry-After header on 429 responses
+          if (response.status === 429) {
+            const retryAfter = response.headers.get('Retry-After');
+            if (retryAfter) {
+              const retryAfterNum = parseInt(retryAfter);
+              if (!isNaN(retryAfterNum)) {
+                const waitTime = retryAfterNum * 1000;
+                console.log(`API rate limited. Retry-After: ${retryAfterNum}s (${waitTime}ms)`);
+                await sleep(waitTime);
+              }
+            }
+          }
+          
           console.error(`Guesty API error (${response.status}), will retry:`, error);
           lastError = new Error(`Guesty API error: ${response.status} - ${error}`);
           continue; // Retry
