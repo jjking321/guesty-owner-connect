@@ -46,32 +46,61 @@ interface GuestyListing {
   }>;
 }
 
-async function getGuestyAccessToken(clientId: string, clientSecret: string): Promise<string> {
-  console.log('Exchanging client credentials for access token...');
+async function getGuestyAccessToken(clientId: string, clientSecret: string, retries = 5): Promise<string> {
+  let lastError: Error | null = null;
   
-  const response = await fetch('https://open-api.guesty.com/oauth2/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/json',
-    },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-      scope: 'open-api',
-    }).toString(),
-  });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const backoffDelay = Math.min(2000 * Math.pow(2, attempt - 1), 30000); // Exponential backoff, max 30s
+        console.log(`Token retry attempt ${attempt}/${retries}, waiting ${backoffDelay}ms...`);
+        await sleep(backoffDelay);
+      } else {
+        console.log('Exchanging client credentials for access token...');
+      }
+      
+      const response = await fetch('https://open-api.guesty.com/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+        },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: 'open-api',
+        }).toString(),
+      });
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error(`Failed to get access token (${response.status}):`, error);
-    throw new Error(`Authentication failed: ${response.status} - ${error}`);
+      if (!response.ok) {
+        const error = await response.text();
+        
+        // Check if it's a rate limit error (429) and we have retries left
+        if (response.status === 429 && attempt < retries) {
+          console.error(`Token endpoint rate limited (${response.status}), will retry:`, error);
+          lastError = new Error(`Authentication failed: ${response.status} - ${error}`);
+          continue; // Retry
+        }
+        
+        // For other errors or last retry, throw immediately
+        console.error(`Failed to get access token (${response.status}):`, error);
+        throw new Error(`Authentication failed: ${response.status} - ${error}`);
+      }
+
+      const data = await response.json();
+      console.log('Successfully obtained access token');
+      return data.access_token;
+      
+    } catch (error) {
+      if (attempt === retries) {
+        throw lastError || error;
+      }
+      lastError = error as Error;
+    }
   }
-
-  const data = await response.json();
-  console.log('Successfully obtained access token');
-  return data.access_token;
+  
+  throw lastError || new Error('Failed to obtain access token from Guesty');
 }
 
 async function sleep(ms: number) {
