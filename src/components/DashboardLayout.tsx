@@ -2,9 +2,11 @@ import { ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LogOut, Building2, Settings } from "lucide-react";
+import { LogOut, Building2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@supabase/supabase-js";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/AppSidebar";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -60,29 +62,32 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--gradient-subtle)" }}>
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "var(--gradient-primary)" }}>
-              <Building2 className="w-6 h-6 text-white" />
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col" style={{ background: "var(--gradient-subtle)" }}>
+          <header className="border-b bg-card sticky top-0 z-10">
+            <div className="px-4 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <SidebarTrigger />
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "var(--gradient-primary)" }}>
+                  <Building2 className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold">Revenue Manager</h1>
+                  <p className="text-sm text-muted-foreground">{user.email}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" onClick={handleSignOut}>
+                  <LogOut className="h-5 w-5" />
+                </Button>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold">Revenue Manager</h1>
-              <p className="text-sm text-muted-foreground">{user.email}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/settings")}>
-              <Settings className="h-5 w-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleSignOut}>
-              <LogOut className="h-5 w-5" />
-            </Button>
-          </div>
+          </header>
+          <main className="container mx-auto px-4 py-8">{children}</main>
         </div>
-      </header>
-      <main className="container mx-auto px-4 py-8">{children}</main>
-    </div>
+      </div>
+    </SidebarProvider>
   );
 }
