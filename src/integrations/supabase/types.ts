@@ -21,7 +21,8 @@ export type Database = {
           client_secret: string
           created_at: string
           id: string
-          last_sync_at: string | null
+          last_listings_sync: string | null
+          last_reservations_sync: string | null
           updated_at: string
           user_id: string
         }
@@ -31,7 +32,8 @@ export type Database = {
           client_secret: string
           created_at?: string
           id?: string
-          last_sync_at?: string | null
+          last_listings_sync?: string | null
+          last_reservations_sync?: string | null
           updated_at?: string
           user_id: string
         }
@@ -41,7 +43,8 @@ export type Database = {
           client_secret?: string
           created_at?: string
           id?: string
-          last_sync_at?: string | null
+          last_listings_sync?: string | null
+          last_reservations_sync?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -215,6 +218,53 @@ export type Database = {
             columns: ["listing_id"]
             isOneToOne: false
             referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sync_jobs: {
+        Row: {
+          completed_at: string | null
+          error_message: string | null
+          guesty_account_id: string
+          id: string
+          items_synced: number | null
+          progress_message: string | null
+          started_at: string
+          status: string
+          sync_type: string
+          total_items: number | null
+        }
+        Insert: {
+          completed_at?: string | null
+          error_message?: string | null
+          guesty_account_id: string
+          id?: string
+          items_synced?: number | null
+          progress_message?: string | null
+          started_at?: string
+          status: string
+          sync_type: string
+          total_items?: number | null
+        }
+        Update: {
+          completed_at?: string | null
+          error_message?: string | null
+          guesty_account_id?: string
+          id?: string
+          items_synced?: number | null
+          progress_message?: string | null
+          started_at?: string
+          status?: string
+          sync_type?: string
+          total_items?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sync_jobs_guesty_account_id_fkey"
+            columns: ["guesty_account_id"]
+            isOneToOne: false
+            referencedRelation: "guesty_accounts"
             referencedColumns: ["id"]
           },
         ]

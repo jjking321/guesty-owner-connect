@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Download } from "lucide-react";
+import { Plus, Trash2, Loader2, Key, Home, Calendar } from "lucide-react";
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +24,8 @@ export default function Settings() {
   const { toast } = useToast();
   const [guestyAccounts, setGuestyAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState<string | null>(null);
+  const [syncingListings, setSyncingListings] = useState<string | null>(null);
+  const [syncingReservations, setSyncingReservations] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
   useEffect(() => {
@@ -112,22 +114,20 @@ export default function Settings() {
     }
   };
 
-  const handleSync = async (accountId: string) => {
-    setSyncing(accountId);
+  const handleSyncListings = async (accountId: string) => {
+    setSyncingListings(accountId);
     try {
-      // Call the sync edge function
       const { data, error } = await supabase.functions.invoke("sync-guesty-data", {
-        body: { accountId },
+        body: { accountId, syncType: 'listings' },
       });
 
       if (error) throw error;
 
       toast({
-        title: "Sync started",
-        description: `Imported ${data.listingsCount} listings and ${data.reservationsCount} reservations.`,
+        title: "Listings sync started",
+        description: "Watch the progress below in real-time.",
       });
 
-      // Reload accounts to update last_sync_at
       loadAccounts();
     } catch (error: any) {
       toast({
@@ -136,7 +136,33 @@ export default function Settings() {
         variant: "destructive",
       });
     } finally {
-      setSyncing(null);
+      setSyncingListings(null);
+    }
+  };
+
+  const handleSyncReservations = async (accountId: string) => {
+    setSyncingReservations(accountId);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-guesty-data", {
+        body: { accountId, syncType: 'reservations' },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Reservations sync started",
+        description: "Watch the progress below in real-time.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Sync failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingReservations(null);
     }
   };
 
@@ -227,35 +253,30 @@ export default function Settings() {
             ) : (
               <div className="space-y-3">
                 {guestyAccounts.map((account) => (
-                  <Card key={account.id}>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-1">
-                          <p className="font-medium">{account.account_name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {account.last_sync_at
-                              ? `Last synced: ${new Date(account.last_sync_at).toLocaleString()}`
-                              : "Never synced"}
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={() => handleSync(account.id)}
-                            disabled={syncing === account.id}
-                            variant="outline"
-                          >
-                            {syncing === account.id ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (
-                              <>
-                                <Download className="mr-2 h-4 w-4" />
-                                Sync Now
-                              </>
-                            )}
-                          </Button>
+                  <div key={account.id} className="space-y-3">
+                    <Card>
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="space-y-1">
+                            <p className="font-medium">{account.account_name}</p>
+                            <div className="text-xs text-muted-foreground space-y-0.5">
+                              {account.last_listings_sync && (
+                                <div className="flex items-center gap-1">
+                                  <Home className="h-3 w-3" />
+                                  <span>Listings: {new Date(account.last_listings_sync).toLocaleString()}</span>
+                                </div>
+                              )}
+                              {account.last_reservations_sync && (
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  <span>Reservations: {new Date(account.last_reservations_sync).toLocaleString()}</span>
+                                </div>
+                              )}
+                              {!account.last_listings_sync && !account.last_reservations_sync && (
+                                <span>Never synced</span>
+                              )}
+                            </div>
+                          </div>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button variant="destructive" size="icon">
@@ -279,9 +300,54 @@ export default function Settings() {
                             </AlertDialogContent>
                           </AlertDialog>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                        
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => handleSyncListings(account.id)}
+                            disabled={syncingListings === account.id || syncingReservations === account.id}
+                            variant="outline"
+                            className="flex-1"
+                            size="sm"
+                          >
+                            {syncingListings === account.id ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Syncing...
+                              </>
+                            ) : (
+                              <>
+                                <Home className="mr-2 h-4 w-4" />
+                                Sync Listings
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            onClick={() => handleSyncReservations(account.id)}
+                            disabled={syncingListings === account.id || syncingReservations === account.id}
+                            variant="outline"
+                            className="flex-1"
+                            size="sm"
+                          >
+                            {syncingReservations === account.id ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Syncing...
+                              </>
+                            ) : (
+                              <>
+                                <Calendar className="mr-2 h-4 w-4" />
+                                Sync Reservations
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                    
+                    {/* Real-time sync progress cards */}
+                    <SyncProgressCard accountId={account.id} syncType="listings" />
+                    <SyncProgressCard accountId={account.id} syncType="reservations" />
+                  </div>
                 ))}
               </div>
             )}
