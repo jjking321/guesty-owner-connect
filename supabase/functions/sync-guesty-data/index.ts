@@ -276,6 +276,7 @@ Deno.serve(async (req) => {
             bedrooms: listing.bedrooms,
             address: listing.address,
             thumbnail: thumbnail,
+            updated_at: new Date().toISOString(),
           };
         });
 
@@ -356,6 +357,7 @@ Deno.serve(async (req) => {
           confirmation_code: reservation.confirmationCode,
           created_at_guesty: reservation.createdAt,
           last_updated_at_guesty: reservation.lastUpdatedAt,
+          updated_at: new Date().toISOString(),
         }));
 
         // Deduplicate reservations by ID (keep last occurrence)
