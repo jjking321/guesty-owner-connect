@@ -3,14 +3,16 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Home, MapPin, Users, Bed, RefreshCw } from "lucide-react";
+import { Home, MapPin, Users, Bed, RefreshCw, Search } from "lucide-react";
 
 export default function Listings() {
   const { toast } = useToast();
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     loadListings();
@@ -43,6 +45,19 @@ export default function Listings() {
     return parts.join(", ") || "N/A";
   };
 
+  const filteredListings = listings.filter((listing) => {
+    const searchLower = searchQuery.toLowerCase();
+    const nickname = listing.nickname?.toLowerCase() || "";
+    const propertyType = listing.property_type?.toLowerCase() || "";
+    const address = getAddress(listing.address).toLowerCase();
+    
+    return (
+      nickname.includes(searchLower) ||
+      propertyType.includes(searchLower) ||
+      address.includes(searchLower)
+    );
+  });
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -57,6 +72,16 @@ export default function Listings() {
           </Button>
         </div>
 
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search properties by name, type, or location..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+
         {loading ? (
           <div className="text-center py-12 text-muted-foreground">Loading properties...</div>
         ) : listings.length === 0 ? (
@@ -68,19 +93,29 @@ export default function Listings() {
               </CardDescription>
             </CardHeader>
           </Card>
+        ) : filteredListings.length === 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>No Properties Match Your Search</CardTitle>
+              <CardDescription>
+                Try adjusting your search terms.
+              </CardDescription>
+            </CardHeader>
+          </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {listings.map((listing) => (
-              <Card key={listing.id} className="overflow-hidden">
-                {listing.thumbnail && (
-                  <div className="aspect-video w-full overflow-hidden bg-muted">
-                    <img
-                      src={listing.thumbnail}
-                      alt={listing.nickname}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                )}
+            {filteredListings.map((listing) => (
+              <Card key={listing.id} className="overflow-hidden hover:shadow-lg transition-shadow">
+                <div className="aspect-video w-full overflow-hidden bg-muted">
+                  <img
+                    src={listing.thumbnail || "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800&h=600&fit=crop"}
+                    alt={listing.nickname || "Property"}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.src = "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800&h=600&fit=crop";
+                    }}
+                  />
+                </div>
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-lg line-clamp-1">{listing.nickname || "Unnamed Property"}</CardTitle>
