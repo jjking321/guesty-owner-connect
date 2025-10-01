@@ -23,6 +23,29 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
 
   useEffect(() => {
+    // Load existing active job on mount
+    const loadActiveJob = async () => {
+      const { data } = await supabase
+        .from('sync_jobs')
+        .select('*')
+        .eq('guesty_account_id', accountId)
+        .eq('sync_type', syncType)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data) {
+        setSyncJob(data as SyncJob);
+        
+        // Clear completed/failed jobs after longer delay
+        if (data.status === 'completed' || data.status === 'failed') {
+          setTimeout(() => setSyncJob(null), 30000); // 30 seconds
+        }
+      }
+    };
+    
+    loadActiveJob();
+
     // Subscribe to sync_jobs updates for this account and sync type
     const channel = supabase
       .channel(`sync_jobs_${accountId}_${syncType}`)
@@ -39,9 +62,9 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
           if (job && job.sync_type === syncType) {
             setSyncJob(job);
             
-            // Clear after completed/failed
+            // Clear after completed/failed (longer delay for better visibility)
             if (job.status === 'completed' || job.status === 'failed') {
-              setTimeout(() => setSyncJob(null), 5000);
+              setTimeout(() => setSyncJob(null), 30000); // 30 seconds
             }
           }
         }
