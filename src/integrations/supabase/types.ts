@@ -17,7 +17,8 @@ export type Database = {
       guesty_accounts: {
         Row: {
           account_name: string
-          api_token: string
+          client_id: string
+          client_secret: string
           created_at: string
           id: string
           last_sync_at: string | null
@@ -26,7 +27,8 @@ export type Database = {
         }
         Insert: {
           account_name: string
-          api_token: string
+          client_id: string
+          client_secret: string
           created_at?: string
           id?: string
           last_sync_at?: string | null
@@ -35,7 +37,8 @@ export type Database = {
         }
         Update: {
           account_name?: string
-          api_token?: string
+          client_id?: string
+          client_secret?: string
           created_at?: string
           id?: string
           last_sync_at?: string | null
