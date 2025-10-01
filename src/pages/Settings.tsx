@@ -55,7 +55,8 @@ export default function Settings() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const accountName = formData.get("account_name") as string;
-    const apiToken = formData.get("api_token") as string;
+    const clientId = formData.get("client_id") as string;
+    const clientSecret = formData.get("client_secret") as string;
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -64,7 +65,8 @@ export default function Settings() {
       const { error } = await supabase.from("guesty_accounts").insert({
         user_id: user.id,
         account_name: accountName,
-        api_token: apiToken,
+        client_id: clientId,
+        client_secret: clientSecret,
       });
 
       if (error) throw error;
@@ -182,12 +184,21 @@ export default function Settings() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="api_token">API Token</Label>
+                      <Label htmlFor="client_id">Client ID</Label>
                       <Input
-                        id="api_token"
-                        name="api_token"
+                        id="client_id"
+                        name="client_id"
+                        placeholder="Your Guesty Client ID"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="client_secret">Client Secret</Label>
+                      <Input
+                        id="client_secret"
+                        name="client_secret"
                         type="password"
-                        placeholder="Your Guesty API token"
+                        placeholder="Your Guesty Client Secret"
                         required
                       />
                     </div>
@@ -285,10 +296,10 @@ export default function Settings() {
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <p>1. Log in to your Guesty account</p>
             <p>2. Navigate to Settings → Integration → Open API</p>
-            <p>3. Click "Create Secret" to generate a new API token</p>
-            <p>4. Copy the token and paste it above</p>
+            <p>3. Click "Create Secret" to generate Client ID and Client Secret</p>
+            <p>4. Copy both credentials and paste them above</p>
             <p className="text-xs pt-2">
-              Note: The initial sync will import all reservations. Make sure you have the appropriate permissions in Guesty.
+              Note: The initial sync will import all reservations from the last 2 years by default.
             </p>
           </CardContent>
         </Card>

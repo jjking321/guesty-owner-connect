@@ -37,6 +37,34 @@ interface GuestyListing {
   thumbnail: string;
 }
 
+async function getGuestyAccessToken(clientId: string, clientSecret: string): Promise<string> {
+  console.log('Exchanging client credentials for access token...');
+  
+  const response = await fetch('https://open-api.guesty.com/oauth2/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json',
+    },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: 'open-api',
+    }).toString(),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    console.error(`Failed to get access token (${response.status}):`, error);
+    throw new Error(`Authentication failed: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  console.log('Successfully obtained access token');
+  return data.access_token;
+}
+
 async function fetchGuestyData(apiToken: string, endpoint: string, params: any = {}) {
   const url = new URL(`https://open-api.guesty.com/v1/${endpoint}`);
   
@@ -164,9 +192,12 @@ Deno.serve(async (req) => {
 
     console.log(`Starting sync for account: ${account.account_name}`);
 
+    // Exchange client credentials for access token
+    const accessToken = await getGuestyAccessToken(account.client_id, account.client_secret);
+
     // Fetch all listings
     console.log('Fetching listings from Guesty...');
-    const guestyListings = await fetchAllListings(account.api_token);
+    const guestyListings = await fetchAllListings(accessToken);
     console.log(`Fetched ${guestyListings.length} listings from Guesty`);
 
     // Upsert listings into database
@@ -201,7 +232,7 @@ Deno.serve(async (req) => {
     // Fetch reservations (filter by checkIn date, default to 2 years ago)
     const defaultStartDate = startDate || new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     console.log(`Fetching reservations from Guesty (checkIn >= ${defaultStartDate})...`);
-    const guestyReservations = await fetchReservationsByCheckIn(account.api_token, defaultStartDate);
+    const guestyReservations = await fetchReservationsByCheckIn(accessToken, defaultStartDate);
     console.log(`Fetched ${guestyReservations.length} reservations from Guesty`);
 
     // Upsert reservations into database
