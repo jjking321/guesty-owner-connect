@@ -279,15 +279,22 @@ Deno.serve(async (req) => {
           };
         });
 
-        if (listingsToUpsert.length > 0) {
+        // Deduplicate listings by ID (keep last occurrence)
+        const uniqueListings = Array.from(
+          new Map(listingsToUpsert.map(item => [item.id, item])).values()
+        );
+        
+        console.log(`Deduplication: ${listingsToUpsert.length} -> ${uniqueListings.length} unique listings`);
+
+        if (uniqueListings.length > 0) {
           const { error: listingsError } = await supabase
             .from('listings')
-            .upsert(listingsToUpsert, { onConflict: 'id' });
+            .upsert(uniqueListings, { onConflict: 'id' });
 
           if (listingsError) throw listingsError;
         }
 
-        listingsCount = listingsToUpsert.length;
+        listingsCount = uniqueListings.length;
 
         await updateSyncJob(supabase, jobId, {
           status: 'completed',
@@ -351,15 +358,22 @@ Deno.serve(async (req) => {
           last_updated_at_guesty: reservation.lastUpdatedAt,
         }));
 
-        if (reservationsToUpsert.length > 0) {
+        // Deduplicate reservations by ID (keep last occurrence)
+        const uniqueReservations = Array.from(
+          new Map(reservationsToUpsert.map(item => [item.id, item])).values()
+        );
+        
+        console.log(`Deduplication: ${reservationsToUpsert.length} -> ${uniqueReservations.length} unique reservations`);
+
+        if (uniqueReservations.length > 0) {
           const { error: reservationsError } = await supabase
             .from('reservations')
-            .upsert(reservationsToUpsert, { onConflict: 'id' });
+            .upsert(uniqueReservations, { onConflict: 'id' });
 
           if (reservationsError) throw reservationsError;
         }
 
-        reservationsCount = reservationsToUpsert.length;
+        reservationsCount = uniqueReservations.length;
 
         await updateSyncJob(supabase, jobId, {
           status: 'completed',
