@@ -10,8 +10,8 @@ import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, 
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
 import { TrendChart } from "@/components/TrendChart";
 import { PacingReport } from "@/components/PacingReport";
-import { GoalsInput } from "@/components/GoalsInput";
 import { GoalsComparison } from "@/components/GoalsComparison";
+import { PropertySettings } from "@/components/PropertySettings";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -452,17 +452,20 @@ export default function PropertyDetail() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/listings")}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h2 className="text-3xl font-bold tracking-tight">{listing.nickname || "Unnamed Property"}</h2>
-            <p className="text-muted-foreground flex items-center gap-1 mt-1">
-              <MapPin className="h-4 w-4" />
-              {getAddress(listing.address)}
-            </p>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate("/listings")}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight">{listing.nickname || "Unnamed Property"}</h2>
+              <p className="text-muted-foreground flex items-center gap-1 mt-1">
+                <MapPin className="h-4 w-4" />
+                {getAddress(listing.address)}
+              </p>
+            </div>
           </div>
+          <PropertySettings listingId={id!} />
         </div>
 
         {/* Property Image and Details */}
@@ -639,9 +642,6 @@ export default function PropertyDetail() {
 
         {/* Goals Comparison */}
         <GoalsComparison listingId={id!} reservations={reservations} />
-
-        {/* Goals Input */}
-        <GoalsInput listingId={id!} />
 
         {/* Recent Reservations */}
         <Card>
