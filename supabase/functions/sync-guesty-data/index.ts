@@ -48,11 +48,12 @@ interface GuestyListing {
 
 async function getGuestyAccessToken(clientId: string, clientSecret: string, retries = 5): Promise<string> {
   let lastError: Error | null = null;
+  const MAX_WAIT_TIME = 45000; // 45 seconds max wait (edge functions timeout at 60s)
   
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       if (attempt > 0) {
-        const backoffDelay = Math.min(2000 * Math.pow(2, attempt - 1), 30000); // Exponential backoff, max 30s
+        const backoffDelay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
         console.log(`Token retry attempt ${attempt}/${retries}, waiting ${backoffDelay}ms...`);
         await sleep(backoffDelay);
       } else {
@@ -78,36 +79,46 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string, retr
         
         // Check if it's a rate limit error (429) and we have retries left
         if (response.status === 429 && attempt < retries) {
-          // Check for Retry-After header
           const retryAfter = response.headers.get('Retry-After');
           let waitTime: number;
           
           if (retryAfter) {
-            // Retry-After can be in seconds or a date
             const retryAfterNum = parseInt(retryAfter);
             if (!isNaN(retryAfterNum)) {
-              waitTime = retryAfterNum * 1000; // Convert to milliseconds
+              waitTime = retryAfterNum * 1000;
+              
+              // Check if wait time is too long
+              if (waitTime > MAX_WAIT_TIME) {
+                const hoursToWait = Math.round(waitTime / 3600000);
+                console.error(`Rate limit requires waiting ${retryAfterNum}s (~${hoursToWait}h). Too long - failing.`);
+                throw new Error(`Guesty API rate limit: Please try again in ${hoursToWait} hour(s). Guesty has temporarily limited access to their API.`);
+              }
+              
               console.log(`Token endpoint rate limited. Retry-After header: ${retryAfterNum}s (${waitTime}ms)`);
             } else {
-              // Try parsing as date
               const retryDate = new Date(retryAfter);
               waitTime = retryDate.getTime() - Date.now();
+              
+              if (waitTime > MAX_WAIT_TIME) {
+                const hoursToWait = Math.round(waitTime / 3600000);
+                console.error(`Rate limit until ${retryAfter}. Too long - failing.`);
+                throw new Error(`Guesty API rate limit: Please try again in ${hoursToWait} hour(s). Guesty has temporarily limited access to their API.`);
+              }
+              
               console.log(`Token endpoint rate limited. Retry-After date: ${retryAfter} (${waitTime}ms)`);
             }
           } else {
-            waitTime = Math.min(2000 * Math.pow(2, attempt), 30000); // Exponential backoff fallback
+            waitTime = Math.min(2000 * Math.pow(2, attempt), 30000);
             console.log(`Token endpoint rate limited (no Retry-After header). Using backoff: ${waitTime}ms`);
           }
           
           console.error(`Rate limit error (${response.status}):`, error);
           lastError = new Error(`Authentication failed: ${response.status} - ${error}`);
           
-          // Wait before retry
           await sleep(Math.max(waitTime, 0));
-          continue; // Retry
+          continue;
         }
         
-        // For other errors or last retry, throw immediately
         console.error(`Failed to get access token (${response.status}):`, error);
         throw new Error(`Authentication failed: ${response.status} - ${error}`);
       }
