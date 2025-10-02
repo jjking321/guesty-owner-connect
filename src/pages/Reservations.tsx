@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Calendar, Users, DollarSign, RefreshCw, Search, MapPin } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 
 export default function Reservations() {
   const { toast } = useToast();
@@ -129,73 +130,73 @@ export default function Reservations() {
             </CardHeader>
           </Card>
         ) : (
-          <div className="space-y-4">
-            {filteredReservations.map((reservation) => (
-              <Card key={reservation.id} className="hover:shadow-md transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h3 className="font-semibold text-lg">{getListingName(reservation.listing_id)}</h3>
-                          {getListingAddress(reservation.listing_id) && (
-                            <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                              <MapPin className="h-3 w-3" />
-                              {getListingAddress(reservation.listing_id)}
-                            </p>
-                          )}
-                        </div>
-                        <Badge variant={getStatusColor(reservation.status)}>
-                          {reservation.status || "Unknown"}
-                        </Badge>
-                      </div>
-
-                      <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="h-4 w-4" />
-                          <span>
-                            {new Date(reservation.check_in).toLocaleDateString()} - {new Date(reservation.check_out).toLocaleDateString()}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Users className="h-4 w-4" />
-                          <span>{reservation.guests_count} guests</span>
-                        </div>
-                        <div>
-                          <span className="font-medium">{reservation.nights_count} nights</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        {reservation.source && (
-                          <span className="px-2 py-1 bg-muted rounded">
-                            {reservation.source}
-                          </span>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Property</TableHead>
+                  <TableHead>Check In</TableHead>
+                  <TableHead>Check Out</TableHead>
+                  <TableHead className="text-center">Nights</TableHead>
+                  <TableHead className="text-center">Guests</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Accommodation</TableHead>
+                  <TableHead className="text-right">Owner Revenue</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredReservations.map((reservation) => (
+                  <TableRow key={reservation.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{getListingName(reservation.listing_id)}</div>
+                        {getListingAddress(reservation.listing_id) && (
+                          <div className="text-xs text-muted-foreground">
+                            {getListingAddress(reservation.listing_id)}
+                          </div>
                         )}
                         {reservation.confirmation_code && (
-                          <span>Conf: {reservation.confirmation_code}</span>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {reservation.confirmation_code}
+                          </div>
                         )}
                       </div>
-                    </div>
-
-                    <div className="md:text-right space-y-2 md:min-w-[140px]">
-                      <div>
-                        <div className="flex items-center justify-end gap-1 text-2xl font-bold">
-                          <DollarSign className="h-5 w-5" />
-                          <span>{parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Accommodation Fare</p>
-                      </div>
-                      {reservation.owner_revenue && (
-                        <div className="text-sm text-muted-foreground">
-                          Owner: ${parseFloat(reservation.owner_revenue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </div>
+                    </TableCell>
+                    <TableCell>
+                      {new Date(reservation.check_in).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      {new Date(reservation.check_out).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {reservation.nights_count}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {reservation.guests_count}
+                    </TableCell>
+                    <TableCell>
+                      {reservation.source && (
+                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-muted">
+                          {reservation.source}
+                        </span>
                       )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusColor(reservation.status)}>
+                        {reservation.status || "Unknown"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">
+                      ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      ${parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         )}
       </div>
