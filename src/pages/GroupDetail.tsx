@@ -32,7 +32,7 @@ export default function GroupDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isCreateSubGroupOpen, setIsCreateSubGroupOpen] = useState(false);
-  const [isAddPropertiesOpen, setIsAddPropertiesOpen] = useState(false);
+  const [isEditingProperties, setIsEditingProperties] = useState(false);
   const [subGroupName, setSubGroupName] = useState("");
   const [subGroupDescription, setSubGroupDescription] = useState("");
   const [selectedListings, setSelectedListings] = useState<string[]>([]);
@@ -149,7 +149,7 @@ export default function GroupDetail() {
       if (error) throw error;
       return data;
     },
-    enabled: !!session && isAddPropertiesOpen,
+    enabled: !!session && isEditingProperties,
   });
 
   // Filter out listings that are already in this group
@@ -277,8 +277,8 @@ export default function GroupDetail() {
         description: `${selectedNewListings.length} properties added to the group`,
       });
 
-      setIsAddPropertiesOpen(false);
       setSelectedNewListings([]);
+      setIsEditingProperties(false);
       refetchGroup();
     } catch (error: any) {
       toast({
@@ -437,89 +437,6 @@ export default function GroupDetail() {
           </div>
 
           <div className="flex gap-2">
-            <Dialog open={isAddPropertiesOpen} onOpenChange={setIsAddPropertiesOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline">
-                  <UserPlus className="mr-2 h-4 w-4" />
-                  Add Properties
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Add Properties to Group</DialogTitle>
-                </DialogHeader>
-
-                <div className="space-y-4 mt-4">
-                  <div>
-                    <Label>Select Properties</Label>
-                    <div className="relative mb-2">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search properties..."
-                        value={addSearchQuery}
-                        onChange={(e) => setAddSearchQuery(e.target.value)}
-                        className="pl-9"
-                      />
-                    </div>
-                    <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
-                      {unassignedListings.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-4">
-                          All your properties are already in this group
-                        </p>
-                      ) : (
-                        unassignedListings
-                          .filter((listing) => {
-                            const query = addSearchQuery.toLowerCase();
-                            const nickname = (listing.nickname || "").toLowerCase();
-                            return nickname.includes(query);
-                          })
-                          .map((listing) => (
-                            <div key={listing.id} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`add-${listing.id}`}
-                                checked={selectedNewListings.includes(listing.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedNewListings([...selectedNewListings, listing.id]);
-                                  } else {
-                                    setSelectedNewListings(selectedNewListings.filter((id) => id !== listing.id));
-                                  }
-                                }}
-                              />
-                              <label
-                                htmlFor={`add-${listing.id}`}
-                                className="flex items-center gap-2 cursor-pointer flex-1"
-                              >
-                                {listing.thumbnail && (
-                                  <img
-                                    src={listing.thumbnail}
-                                    alt={listing.nickname || "Property"}
-                                    className="w-10 h-10 rounded object-cover"
-                                  />
-                                )}
-                                <span className="text-sm">{listing.nickname || "Unnamed Property"}</span>
-                              </label>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      {selectedNewListings.length} properties selected
-                    </p>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-4">
-                    <Button variant="outline" onClick={() => setIsAddPropertiesOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleAddProperties} disabled={isSubmitting}>
-                      {isSubmitting ? "Adding..." : "Add Properties"}
-                    </Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-
             {directListingIds.length > 0 && (
               <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
                 <DialogTrigger asChild>
@@ -748,22 +665,93 @@ export default function GroupDetail() {
         )}
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle>Properties in Group ({group.property_group_members.length})</CardTitle>
+            <Button
+              variant={isEditingProperties ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setIsEditingProperties(!isEditingProperties);
+                if (!isEditingProperties) {
+                  setSelectedNewListings([]);
+                }
+              }}
+            >
+              {isEditingProperties ? "Done Editing" : "Edit"}
+            </Button>
           </CardHeader>
           <CardContent>
+            {isEditingProperties && (
+              <div className="mb-6 p-4 border rounded-lg bg-muted/50">
+                <Label className="text-sm font-medium mb-2 block">Add Properties to Group</Label>
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search properties..."
+                    value={addSearchQuery}
+                    onChange={(e) => setAddSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2 bg-background">
+                  {unassignedListings.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      All your properties are already in this group
+                    </p>
+                  ) : (
+                    unassignedListings
+                      .filter((listing) => {
+                        const query = addSearchQuery.toLowerCase();
+                        const nickname = (listing.nickname || "").toLowerCase();
+                        return nickname.includes(query);
+                      })
+                      .map((listing) => (
+                        <div key={listing.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`add-${listing.id}`}
+                            checked={selectedNewListings.includes(listing.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedNewListings([...selectedNewListings, listing.id]);
+                              } else {
+                                setSelectedNewListings(selectedNewListings.filter((id) => id !== listing.id));
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`add-${listing.id}`}
+                            className="flex items-center gap-2 cursor-pointer flex-1"
+                          >
+                            {listing.thumbnail && (
+                              <img
+                                src={listing.thumbnail}
+                                alt={listing.nickname || "Property"}
+                                className="w-10 h-10 rounded object-cover"
+                              />
+                            )}
+                            <span className="text-sm">{listing.nickname || "Unnamed Property"}</span>
+                          </label>
+                        </div>
+                      ))
+                  )}
+                </div>
+                {selectedNewListings.length > 0 && (
+                  <div className="flex items-center justify-between mt-3">
+                    <p className="text-sm text-muted-foreground">
+                      {selectedNewListings.length} properties selected
+                    </p>
+                    <Button onClick={handleAddProperties} disabled={isSubmitting} size="sm">
+                      {isSubmitting ? "Adding..." : "Add Selected"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {group.property_group_members.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Building2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
                 <p>No properties in this group yet</p>
-                <Button
-                  variant="outline"
-                  className="mt-4"
-                  onClick={() => setIsAddPropertiesOpen(true)}
-                >
-                  <UserPlus className="mr-2 h-4 w-4" />
-                  Add Properties
-                </Button>
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -772,17 +760,19 @@ export default function GroupDetail() {
                     key={member.listing_id}
                     className="relative group/card"
                   >
-                    <Button
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-2 right-2 z-10 opacity-0 group-hover/card:opacity-100 transition-opacity h-8 w-8"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRemoveListingId(member.listing_id);
-                      }}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                    {isEditingProperties && (
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-2 right-2 z-10 h-8 w-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRemoveListingId(member.listing_id);
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
                     <div
                       className="cursor-pointer"
                       onClick={() => navigate(`/listings/${member.listing_id}`)}
