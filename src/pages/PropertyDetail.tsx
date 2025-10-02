@@ -566,7 +566,7 @@ export default function PropertyDetail() {
         </div>
 
         {/* Metrics Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -600,21 +600,6 @@ export default function PropertyDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                Avg Nights/Reservation
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {metrics.averageNightsPerReservation.toFixed(1)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Average stay length</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 RevPAR
               </CardTitle>
@@ -630,15 +615,15 @@ export default function PropertyDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                Avg Guests/Reservation
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                Avg Nights/Reservation
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {metrics.averageGuestsPerReservation.toFixed(1)}
+                {metrics.averageNightsPerReservation.toFixed(1)}
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Average party size</p>
+              <p className="text-xs text-muted-foreground mt-1">Average stay length</p>
             </CardContent>
           </Card>
         </div>
