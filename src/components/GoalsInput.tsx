@@ -4,35 +4,37 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/use-toast";
 import { Save, Copy } from "lucide-react";
 
 interface GoalsInputProps {
   listingId: string;
 }
 
-interface MonthGoal {
+interface MonthlyGoal {
   month: number;
-  budget: string;
-  projection: string;
-  goal: string;
+  budget: number;
+  projection: number;
+  goal: number;
 }
 
-export function GoalsInput({ listingId }: GoalsInputProps) {
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
-  const [goals, setGoals] = useState<MonthGoal[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function GoalsInput({ listingId }: GoalsInputProps) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [goals, setGoals] = useState<MonthlyGoal[]>(
+    monthNames.map((_, index) => ({ month: index + 1, budget: 0, projection: 0, goal: 0 }))
+  );
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadGoals();
-  }, [year, listingId]);
+  }, [listingId, year]);
 
   const loadGoals = async () => {
-    setLoading(true);
+    setIsLoading(true);
     try {
       const { data, error } = await supabase
         .from('property_goals')
@@ -42,165 +44,181 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
 
       if (error) throw error;
 
-      // Initialize with existing data or empty values
-      const goalsData: MonthGoal[] = Array.from({ length: 12 }, (_, i) => {
-        const existingGoal = data?.find(g => g.month === i + 1);
-        return {
-          month: i + 1,
-          budget: existingGoal?.budget_revenue?.toString() || '',
-          projection: existingGoal?.projection_revenue?.toString() || '',
-          goal: existingGoal?.goal_revenue?.toString() || '',
-        };
-      });
-
-      setGoals(goalsData);
+      if (data && data.length > 0) {
+        const loadedGoals = monthNames.map((_, index) => {
+          const monthData = data.find(g => g.month === index + 1);
+          return {
+            month: index + 1,
+            budget: monthData?.budget_revenue || 0,
+            projection: monthData?.projection_revenue || 0,
+            goal: monthData?.goal_revenue || 0,
+          };
+        });
+        setGoals(loadedGoals);
+      }
     } catch (error: any) {
-      console.error('Error loading goals:', error);
-      toast.error('Failed to load goals');
+      toast({
+        title: "Error loading goals",
+        description: error.message,
+        variant: "destructive",
+      });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const handleGoalChange = (monthIndex: number, field: 'budget' | 'projection' | 'goal', value: string) => {
-    const newGoals = [...goals];
-    newGoals[monthIndex] = { ...newGoals[monthIndex], [field]: value };
-    setGoals(newGoals);
-  };
-
   const saveGoals = async () => {
-    setSaving(true);
+    setIsSaving(true);
     try {
-      // Prepare upsert data
-      const upsertData = goals
-        .filter(g => g.budget || g.projection || g.goal) // Only save rows with at least one value
-        .map(g => ({
-          listing_id: listingId,
-          year,
-          month: g.month,
-          budget_revenue: parseFloat(g.budget) || 0,
-          projection_revenue: parseFloat(g.projection) || 0,
-          goal_revenue: parseFloat(g.goal) || 0,
-        }));
+      const upserts = goals.map(g => ({
+        listing_id: listingId,
+        year,
+        month: g.month,
+        budget_revenue: g.budget,
+        projection_revenue: g.projection,
+        goal_revenue: g.goal,
+      }));
 
       const { error } = await supabase
         .from('property_goals')
-        .upsert(upsertData, {
-          onConflict: 'listing_id,year,month',
-        });
+        .upsert(upserts, { onConflict: 'listing_id,year,month' });
 
       if (error) throw error;
 
-      toast.success('Goals saved successfully!');
+      toast({
+        title: "Goals saved",
+        description: `Successfully saved goals for ${year}`,
+      });
     } catch (error: any) {
-      console.error('Error saving goals:', error);
-      toast.error('Failed to save goals');
+      toast({
+        title: "Error saving goals",
+        description: error.message,
+        variant: "destructive",
+      });
     } finally {
-      setSaving(false);
+      setIsSaving(false);
     }
   };
 
   const copyFromPreviousYear = async () => {
-    setLoading(true);
+    const previousYear = year - 1;
     try {
       const { data, error } = await supabase
         .from('property_goals')
         .select('*')
         .eq('listing_id', listingId)
-        .eq('year', year - 1);
+        .eq('year', previousYear);
 
       if (error) throw error;
 
-      if (!data || data.length === 0) {
-        toast.error(`No goals found for ${year - 1}`);
-        return;
+      if (data && data.length > 0) {
+        const copiedGoals = monthNames.map((_, index) => {
+          const monthData = data.find(g => g.month === index + 1);
+          return {
+            month: index + 1,
+            budget: monthData?.budget_revenue || 0,
+            projection: monthData?.projection_revenue || 0,
+            goal: monthData?.goal_revenue || 0,
+          };
+        });
+        setGoals(copiedGoals);
+        toast({
+          title: "Goals copied",
+          description: `Copied goals from ${previousYear}`,
+        });
+      } else {
+        toast({
+          title: "No data found",
+          description: `No goals found for ${previousYear}`,
+          variant: "destructive",
+        });
       }
-
-      const copiedGoals: MonthGoal[] = Array.from({ length: 12 }, (_, i) => {
-        const previousGoal = data.find(g => g.month === i + 1);
-        return {
-          month: i + 1,
-          budget: previousGoal?.budget_revenue?.toString() || '',
-          projection: previousGoal?.projection_revenue?.toString() || '',
-          goal: previousGoal?.goal_revenue?.toString() || '',
-        };
-      });
-
-      setGoals(copiedGoals);
-      toast.success(`Copied goals from ${year - 1}`);
     } catch (error: any) {
-      console.error('Error copying goals:', error);
-      toast.error('Failed to copy goals');
-    } finally {
-      setLoading(false);
+      toast({
+        title: "Error copying goals",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
+
+  const updateGoal = (monthIndex: number, field: 'budget' | 'projection' | 'goal', value: string) => {
+    const numValue = parseFloat(value) || 0;
+    setGoals(prev => prev.map((g, i) => 
+      i === monthIndex ? { ...g, [field]: numValue } : g
+    ));
+  };
+
+  if (isLoading) {
+    return <div>Loading goals...</div>;
+  }
 
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Set Revenue Goals</CardTitle>
-            <CardDescription>
-              Define monthly budget, projection, and goal targets for {year}
-            </CardDescription>
+            <CardTitle>Revenue Goals</CardTitle>
+            <CardDescription>Set monthly revenue targets for Budget, Projection, and Goal</CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            <Label htmlFor="year" className="text-sm">Year:</Label>
             <Input
+              id="year"
               type="number"
               value={year}
               onChange={(e) => setYear(parseInt(e.target.value))}
               className="w-24"
             />
-            <Button variant="outline" onClick={copyFromPreviousYear} disabled={loading}>
-              <Copy className="mr-2 h-4 w-4" />
-              Copy {year - 1}
-            </Button>
-            <Button onClick={saveGoals} disabled={saving}>
-              <Save className="mr-2 h-4 w-4" />
-              {saving ? 'Saving...' : 'Save'}
+            <Button onClick={copyFromPreviousYear} variant="outline" size="sm">
+              <Copy className="h-4 w-4 mr-2" />
+              Copy from {year - 1}
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          {/* Header Row */}
-          <div className="grid grid-cols-4 gap-4 font-medium text-sm">
+          <div className="grid grid-cols-4 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
             <div>Month</div>
             <div>Budget (Low)</div>
             <div>Projection (Expected)</div>
             <div>Goal (High)</div>
           </div>
 
-          {/* Data Rows */}
-          {goals.map((monthGoal, index) => (
-            <div key={monthGoal.month} className="grid grid-cols-4 gap-4 items-center">
-              <Label className="font-medium">{monthNames[index]}</Label>
+          {goals.map((goal, index) => (
+            <div key={goal.month} className="grid grid-cols-4 gap-4 items-center">
+              <div className="font-medium">{monthNames[index]}</div>
               <Input
                 type="number"
-                placeholder="$0"
-                value={monthGoal.budget}
-                onChange={(e) => handleGoalChange(index, 'budget', e.target.value)}
-                className="w-full"
+                value={goal.budget}
+                onChange={(e) => updateGoal(index, 'budget', e.target.value)}
+                placeholder="0"
+                className="text-right"
               />
               <Input
                 type="number"
-                placeholder="$0"
-                value={monthGoal.projection}
-                onChange={(e) => handleGoalChange(index, 'projection', e.target.value)}
-                className="w-full"
+                value={goal.projection}
+                onChange={(e) => updateGoal(index, 'projection', e.target.value)}
+                placeholder="0"
+                className="text-right"
               />
               <Input
                 type="number"
-                placeholder="$0"
-                value={monthGoal.goal}
-                onChange={(e) => handleGoalChange(index, 'goal', e.target.value)}
-                className="w-full"
+                value={goal.goal}
+                onChange={(e) => updateGoal(index, 'goal', e.target.value)}
+                placeholder="0"
+                className="text-right"
               />
             </div>
           ))}
+
+          <div className="pt-4 flex justify-end">
+            <Button onClick={saveGoals} disabled={isSaving}>
+              <Save className="h-4 w-4 mr-2" />
+              {isSaving ? "Saving..." : "Save Goals"}
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

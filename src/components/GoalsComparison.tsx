@@ -2,48 +2,37 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
-import { Target, TrendingUp, TrendingDown } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { parseISO } from "date-fns";
+import { Target, TrendingUp, TrendingDown } from "lucide-react";
 
 interface GoalsComparisonProps {
   listingId: string;
   reservations: any[];
 }
 
-interface MonthData {
+interface GoalData {
   month: string;
-  monthIndex: number;
   actual: number;
   budget: number;
   projection: number;
   goal: number;
 }
 
-interface CumulativeData {
-  month: string;
-  actual: number;
-  budget: number;
-  projection: number;
-  goal: number;
-}
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function GoalsComparison({ listingId, reservations }: GoalsComparisonProps) {
-  const currentYear = new Date().getFullYear();
-  const [year, setYear] = useState(currentYear);
-  const [monthlyData, setMonthlyData] = useState<MonthData[]>([]);
-  const [cumulativeData, setCumulativeData] = useState<CumulativeData[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const [activeTab, setActiveTab] = useState<'monthly' | 'cumulative'>('monthly');
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
+  const [cumulativeData, setCumulativeData] = useState<GoalData[]>([]);
+  const { toast } = useToast();
 
   useEffect(() => {
-    loadGoalsAndCalculate();
-  }, [year, listingId, reservations]);
+    loadGoalsComparison();
+  }, [listingId, year, reservations]);
 
-  const loadGoalsAndCalculate = async () => {
-    setLoading(true);
+  const loadGoalsComparison = async () => {
     try {
       const { data: goalsData, error } = await supabase
         .from('property_goals')
@@ -54,47 +43,47 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
 
       if (error) throw error;
 
-      // Calculate actuals per month
-      const monthly: MonthData[] = [];
-      const cumulative: CumulativeData[] = [];
+      // Calculate actual revenue per month
+      const monthly: GoalData[] = [];
+      const cumulative: GoalData[] = [];
       let cumulativeActual = 0;
       let cumulativeBudget = 0;
       let cumulativeProjection = 0;
       let cumulativeGoal = 0;
 
-      for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
-        const goalForMonth = goalsData?.find(g => g.month === monthIndex + 1);
+      for (let month = 0; month < 12; month++) {
+        const monthGoal = goalsData?.find(g => g.month === month + 1);
         
         // Calculate actual revenue for this month
         const actualRevenue = reservations
           .filter(r => {
             if (!r.check_in) return false;
-            const checkIn = parseISO(r.check_in);
-            return checkIn.getFullYear() === year && checkIn.getMonth() === monthIndex;
+            const checkIn = new Date(r.check_in);
+            return checkIn.getFullYear() === year && checkIn.getMonth() === month;
           })
           .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
 
-        const budget = goalForMonth?.budget_revenue || 0;
-        const projection = goalForMonth?.projection_revenue || 0;
-        const goal = goalForMonth?.goal_revenue || 0;
+        const budget = monthGoal?.budget_revenue || 0;
+        const projection = monthGoal?.projection_revenue || 0;
+        const goal = monthGoal?.goal_revenue || 0;
 
+        // Monthly data
         monthly.push({
-          month: monthNames[monthIndex],
-          monthIndex,
+          month: monthNames[month],
           actual: Math.round(actualRevenue),
-          budget: parseFloat(budget.toString()),
-          projection: parseFloat(projection.toString()),
-          goal: parseFloat(goal.toString()),
+          budget: Math.round(budget),
+          projection: Math.round(projection),
+          goal: Math.round(goal),
         });
 
-        // Calculate cumulative
+        // Cumulative data
         cumulativeActual += actualRevenue;
-        cumulativeBudget += parseFloat(budget.toString());
-        cumulativeProjection += parseFloat(projection.toString());
-        cumulativeGoal += parseFloat(goal.toString());
+        cumulativeBudget += budget;
+        cumulativeProjection += projection;
+        cumulativeGoal += goal;
 
         cumulative.push({
-          month: monthNames[monthIndex],
+          month: monthNames[month],
           actual: Math.round(cumulativeActual),
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
@@ -105,10 +94,11 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
       setMonthlyData(monthly);
       setCumulativeData(cumulative);
     } catch (error: any) {
-      console.error('Error loading goals:', error);
-      toast.error('Failed to load goals comparison');
-    } finally {
-      setLoading(false);
+      toast({
+        title: "Error loading goals",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -122,7 +112,7 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
           {payload.map((entry: any, index: number) => (
             <div key={index} className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
-              <span className="text-muted-foreground">{entry.name}:</span>
+              <span className="text-muted-foreground capitalize">{entry.name}:</span>
               <span className="font-medium">${entry.value.toLocaleString()}</span>
             </div>
           ))}
@@ -131,70 +121,103 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
     );
   };
 
-  const SummaryCard = ({ title, value, target, type }: { title: string; value: number; target: number; type: string }) => {
-    const percentage = target > 0 ? ((value / target) * 100) : 0;
-    const isOnTrack = percentage >= 100;
-    const Icon = isOnTrack ? TrendingUp : TrendingDown;
-    const color = isOnTrack ? 'text-green-600 dark:text-green-500' : 'text-orange-600 dark:text-orange-500';
+  const calculateYTDComparison = () => {
+    const currentMonth = new Date().getMonth();
+    const ytdData = activeTab === 'cumulative' ? cumulativeData[currentMonth] : 
+      monthlyData.slice(0, currentMonth + 1).reduce((acc, curr) => ({
+        month: 'YTD',
+        actual: acc.actual + curr.actual,
+        budget: acc.budget + curr.budget,
+        projection: acc.projection + curr.projection,
+        goal: acc.goal + curr.goal,
+      }), { month: 'YTD', actual: 0, budget: 0, projection: 0, goal: 0 });
 
-    return (
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Target className="h-4 w-4 text-muted-foreground" />
-            vs {title}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="text-2xl font-bold">
-            ${value.toLocaleString()}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Target: ${target.toLocaleString()}
-          </div>
-          <div className={`flex items-center gap-1 text-sm font-medium ${color}`}>
-            <Icon className="h-4 w-4" />
-            {percentage.toFixed(1)}% of {type}
-          </div>
-        </CardContent>
-      </Card>
-    );
+    return {
+      vsBudget: ytdData.budget > 0 ? ((ytdData.actual - ytdData.budget) / ytdData.budget) * 100 : 0,
+      vsProjection: ytdData.projection > 0 ? ((ytdData.actual - ytdData.projection) / ytdData.projection) * 100 : 0,
+      vsGoal: ytdData.goal > 0 ? ((ytdData.actual - ytdData.goal) / ytdData.goal) * 100 : 0,
+    };
   };
 
-  const ytdActual = cumulativeData[new Date().getMonth()]?.actual || 0;
-  const ytdBudget = cumulativeData[new Date().getMonth()]?.budget || 0;
-  const ytdProjection = cumulativeData[new Date().getMonth()]?.projection || 0;
-  const ytdGoal = cumulativeData[new Date().getMonth()]?.goal || 0;
+  const ytdComparison = calculateYTDComparison();
 
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-2xl font-bold tracking-tight">Goals Comparison</h3>
+        <h3 className="text-2xl font-bold tracking-tight">Goals vs Actuals</h3>
         <p className="text-muted-foreground mt-1">
-          Track actual revenue against budget, projection, and goal targets
+          Compare actual revenue performance against Budget, Projection, and Goal targets
         </p>
       </div>
 
       {/* YTD Summary Cards */}
       <div className="grid gap-4 md:grid-cols-3">
-        <SummaryCard title="Budget" value={ytdActual} target={ytdBudget} type="budget" />
-        <SummaryCard title="Projection" value={ytdActual} target={ytdProjection} type="projection" />
-        <SummaryCard title="Goal" value={ytdActual} target={ytdGoal} type="goal" />
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Target className="h-4 w-4 text-muted-foreground" />
+              vs Budget (Low)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsBudget >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+              {ytdComparison.vsBudget >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+              {Math.abs(ytdComparison.vsBudget).toFixed(1)}%
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {ytdComparison.vsBudget >= 0 ? 'Above' : 'Below'} budget target
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Target className="h-4 w-4 text-muted-foreground" />
+              vs Projection (Expected)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsProjection >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+              {ytdComparison.vsProjection >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+              {Math.abs(ytdComparison.vsProjection).toFixed(1)}%
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {ytdComparison.vsProjection >= 0 ? 'Above' : 'Below'} projection
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Target className="h-4 w-4 text-muted-foreground" />
+              vs Goal (High)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsGoal >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+              {ytdComparison.vsGoal >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+              {Math.abs(ytdComparison.vsGoal).toFixed(1)}%
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {ytdComparison.vsGoal >= 0 ? 'Above' : 'Below'} goal target
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Charts */}
+      {/* Chart */}
       <Card>
         <CardHeader>
           <CardTitle>Revenue Performance - {year}</CardTitle>
-          <CardDescription>
-            Compare actual revenue against targets
-          </CardDescription>
+          <CardDescription>Track actual revenue against goals</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="monthly">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'monthly' | 'cumulative')}>
             <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
               <TabsTrigger value="monthly">Monthly</TabsTrigger>
-              <TabsTrigger value="cumulative">Cumulative (YTD)</TabsTrigger>
+              <TabsTrigger value="cumulative">Cumulative</TabsTrigger>
             </TabsList>
 
             <TabsContent value="monthly">
