@@ -49,7 +49,9 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
 
       // Get forecast data for this month if available
-      const monthForecast = revenueForecast?.monthlyForecasts?.find((f: any) => f.month === index);
+      // Handle both the raw DB format and the formatted format
+      const monthlyForecasts = revenueForecast?.monthly_forecasts || revenueForecast?.monthlyForecasts;
+      const monthForecast = monthlyForecasts?.find((f: any) => f.month === index);
 
       return {
         ...dataPoint,
@@ -57,7 +59,7 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
         budget: showGoals && monthGoal?.budget_revenue ? Math.round(monthGoal.budget_revenue) : undefined,
         projection: showGoals && monthGoal?.projection_revenue ? Math.round(monthGoal.projection_revenue) : undefined,
         goal: showGoals && monthGoal?.goal_revenue ? Math.round(monthGoal.goal_revenue) : undefined,
-        forecast: showForecast && monthForecast ? Math.round(monthForecast.totalForecast.p50) : undefined,
+        forecast: showForecast && monthForecast?.totalForecast?.p50 ? Math.round(monthForecast.totalForecast.p50) : undefined,
       };
     });
   }, [revenueData, goalsData, reservations, revenueForecast, showGoals, showForecast, activeTab]);
