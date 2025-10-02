@@ -6,7 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp } from "lucide-react";
+import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent } from "lucide-react";
+import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -63,6 +66,53 @@ export default function PropertyDetail() {
     return parts.join(", ") || "N/A";
   };
 
+  const calculateMonthlyOccupancy = () => {
+    if (reservations.length === 0) return [];
+
+    const monthlyData = new Map<string, { nightsBooked: number; totalDays: number }>();
+
+    // Get last 12 months
+    const currentDate = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const monthDate = subMonths(currentDate, i);
+      const monthKey = format(monthDate, 'yyyy-MM');
+      const daysInMonth = getDaysInMonth(monthDate);
+      monthlyData.set(monthKey, { nightsBooked: 0, totalDays: daysInMonth });
+    }
+
+    // Process each reservation
+    reservations.forEach((reservation) => {
+      if (!reservation.check_in || !reservation.check_out) return;
+
+      const checkIn = parseISO(reservation.check_in);
+      const checkOut = parseISO(reservation.check_out);
+      
+      // Iterate through each night of the reservation
+      let currentNight = checkIn;
+      while (currentNight < checkOut) {
+        const monthKey = format(currentNight, 'yyyy-MM');
+        
+        if (monthlyData.has(monthKey)) {
+          const data = monthlyData.get(monthKey)!;
+          data.nightsBooked++;
+        }
+        
+        currentNight = addDays(currentNight, 1);
+      }
+    });
+
+    // Convert to array and calculate occupancy rates
+    return Array.from(monthlyData.entries())
+      .map(([monthKey, data]) => ({
+        month: format(parseISO(monthKey + '-01'), 'MMM yyyy'),
+        monthKey,
+        occupancyRate: (data.nightsBooked / data.totalDays) * 100,
+        nightsBooked: data.nightsBooked,
+        totalDays: data.totalDays,
+      }))
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  };
+
   const calculateMetrics = () => {
     if (reservations.length === 0) {
       return {
@@ -73,6 +123,7 @@ export default function PropertyDetail() {
         averageNightsPerReservation: 0,
         totalGuests: 0,
         averageGuestsPerReservation: 0,
+        overallOccupancy: 0,
       };
     }
 
@@ -83,6 +134,12 @@ export default function PropertyDetail() {
     const averageNightsPerReservation = totalNights / reservations.length;
     const averageGuestsPerReservation = totalGuests / reservations.length;
 
+    // Calculate overall occupancy for last 12 months
+    const monthlyOccupancy = calculateMonthlyOccupancy();
+    const overallOccupancy = monthlyOccupancy.length > 0
+      ? monthlyOccupancy.reduce((sum, month) => sum + month.occupancyRate, 0) / monthlyOccupancy.length
+      : 0;
+
     return {
       totalReservations: reservations.length,
       totalRevenue,
@@ -91,10 +148,12 @@ export default function PropertyDetail() {
       averageNightsPerReservation,
       totalGuests,
       averageGuestsPerReservation,
+      overallOccupancy,
     };
   };
 
   const metrics = calculateMetrics();
+  const monthlyOccupancy = calculateMonthlyOccupancy();
 
   if (loading) {
     return (
@@ -224,7 +283,22 @@ export default function PropertyDetail() {
         </div>
 
         {/* Metrics Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Percent className="h-4 w-4 text-muted-foreground" />
+                Occupancy Rate
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {metrics.overallOccupancy.toFixed(1)}%
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Last 12 months</p>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -283,6 +357,68 @@ export default function PropertyDetail() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Occupancy Trend Chart */}
+        {monthlyOccupancy.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Occupancy Trend</CardTitle>
+              <CardDescription>Monthly occupancy rate over the last 12 months</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer
+                config={{
+                  occupancyRate: {
+                    label: "Occupancy Rate",
+                    color: "hsl(var(--chart-1))",
+                  },
+                }}
+                className="h-[300px]"
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={monthlyOccupancy}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="month" 
+                      className="text-xs"
+                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                    />
+                    <YAxis 
+                      className="text-xs"
+                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      label={{ value: 'Occupancy %', angle: -90, position: 'insideLeft' }}
+                    />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          formatter={(value, name) => (
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{name}:</span>
+                              <span>{Number(value).toFixed(1)}%</span>
+                            </div>
+                          )}
+                          labelFormatter={(label, payload) => {
+                            if (payload && payload[0]) {
+                              const data = payload[0].payload;
+                              return `${label} - ${data.nightsBooked}/${data.totalDays} nights`;
+                            }
+                            return label;
+                          }}
+                        />
+                      }
+                    />
+                    <Bar 
+                      dataKey="occupancyRate" 
+                      fill="hsl(var(--chart-1))" 
+                      radius={[4, 4, 0, 0]}
+                      name="Occupancy Rate"
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </ChartContainer>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Recent Reservations */}
         <Card>
