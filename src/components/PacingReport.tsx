@@ -30,26 +30,33 @@ export function PacingReport({ reservations }: PacingReportProps) {
   const currentMonth = currentDate.getMonth(); // 0-indexed
 
   const calculatePacingMetrics = (): PacingMetrics => {
+    const today = new Date();
     const currentYearStart = startOfYear(new Date(currentYear, 0, 1));
     const lastYearStart = startOfYear(new Date(lastYear, 0, 1));
     
-    // Filter reservations for current year YTD
+    // Filter reservations for current year YTD (check-in YTD, confirmed by today)
     const currentYearReservations = reservations.filter((r) => {
-      if (!r.check_in) return false;
+      if (!r.check_in || !r.created_at_guesty) return false;
       const checkIn = parseISO(r.check_in);
+      const createdAt = parseISO(r.created_at_guesty);
+      const todayThisYear = new Date(currentYear, today.getMonth(), today.getDate());
       return (
         checkIn.getFullYear() === currentYear &&
-        checkIn.getMonth() <= currentMonth
+        checkIn.getMonth() <= currentMonth &&
+        createdAt <= todayThisYear
       );
     });
 
-    // Filter reservations for last year same period
+    // Filter reservations for last year same period (check-in YTD, confirmed by same date last year)
     const lastYearReservations = reservations.filter((r) => {
-      if (!r.check_in) return false;
+      if (!r.check_in || !r.created_at_guesty) return false;
       const checkIn = parseISO(r.check_in);
+      const createdAt = parseISO(r.created_at_guesty);
+      const todayLastYear = new Date(lastYear, today.getMonth(), today.getDate());
       return (
         checkIn.getFullYear() === lastYear &&
-        checkIn.getMonth() <= currentMonth
+        checkIn.getMonth() <= currentMonth &&
+        createdAt <= todayLastYear
       );
     });
 
