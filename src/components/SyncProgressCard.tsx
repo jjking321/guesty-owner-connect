@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface SyncJob {
   id: string;
@@ -21,8 +22,12 @@ interface SyncProgressCardProps {
 
 export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps) {
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    // Reset dismissed state when account or sync type changes
+    setDismissed(false);
+    
     // Load existing active job on mount
     const loadActiveJob = async () => {
       const { data } = await supabase
@@ -36,8 +41,9 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
       
       if (data) {
         setSyncJob(data as SyncJob);
+        setDismissed(false); // Show new job
         
-        // Clear completed/failed jobs after longer delay
+        // Auto-clear completed/failed jobs after delay
         if (data.status === 'completed' || data.status === 'failed') {
           setTimeout(() => setSyncJob(null), 30000); // 30 seconds
         }
@@ -61,8 +67,9 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
           const job = payload.new as SyncJob;
           if (job && job.sync_type === syncType) {
             setSyncJob(job);
+            setDismissed(false); // Show new job, clear any previous dismissal
             
-            // Clear after completed/failed (longer delay for better visibility)
+            // Auto-clear after completed/failed
             if (job.status === 'completed' || job.status === 'failed') {
               setTimeout(() => setSyncJob(null), 30000); // 30 seconds
             }
@@ -76,7 +83,12 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     };
   }, [accountId, syncType]);
 
-  if (!syncJob) return null;
+  const handleDismiss = () => {
+    setDismissed(true);
+    setSyncJob(null);
+  };
+
+  if (!syncJob || dismissed) return null;
 
   const progress = syncJob.total_items && syncJob.items_synced
     ? (syncJob.items_synced / syncJob.total_items) * 100
@@ -104,13 +116,27 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
               </p>
             </div>
             
-            {/* Show count badge */}
-            {showProgress && (
-              <div className="text-xs font-mono bg-primary/10 px-2 py-1 rounded">
-                {syncJob.items_synced?.toLocaleString() || 0}
-                {syncJob.total_items && ` / ${syncJob.total_items.toLocaleString()}`}
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {/* Show count badge */}
+              {showProgress && (
+                <div className="text-xs font-mono bg-primary/10 px-2 py-1 rounded">
+                  {syncJob.items_synced?.toLocaleString() || 0}
+                  {syncJob.total_items && ` / ${syncJob.total_items.toLocaleString()}`}
+                </div>
+              )}
+              
+              {/* Dismiss button - only show for completed/failed */}
+              {(syncJob.status === 'completed' || syncJob.status === 'failed') && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={handleDismiss}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
