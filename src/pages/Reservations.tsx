@@ -182,13 +182,13 @@ export default function Reservations() {
                       <div>
                         <div className="flex items-center justify-end gap-1 text-2xl font-bold">
                           <DollarSign className="h-5 w-5" />
-                          <span>{parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                          <span>{parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
                         </div>
-                        <p className="text-xs text-muted-foreground">Owner Revenue</p>
+                        <p className="text-xs text-muted-foreground">Accommodation Fare</p>
                       </div>
-                      {reservation.host_payout && (
+                      {reservation.owner_revenue && (
                         <div className="text-sm text-muted-foreground">
-                          Payout: ${parseFloat(reservation.host_payout).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          Owner: ${parseFloat(reservation.owner_revenue).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                         </div>
                       )}
                     </div>
