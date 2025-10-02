@@ -171,32 +171,85 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
         },
       });
 
+      // Log rate limit headers for monitoring
+      const rateLimitSecond = response.headers.get('X-ratelimit-remaining-second');
+      const rateLimitMinute = response.headers.get('X-ratelimit-remaining-minute');
+      const rateLimitHour = response.headers.get('X-ratelimit-remaining-hour');
+      
+      if (rateLimitSecond || rateLimitMinute || rateLimitHour) {
+        console.log(`Rate limits - Second: ${rateLimitSecond}/15, Minute: ${rateLimitMinute}/120, Hour: ${rateLimitHour}/5000`);
+      }
+
       if (!response.ok) {
         const error = await response.text();
         
-        // Check if it's a rate limit or timeout error (500, 429, 503)
-        if ((response.status === 500 || response.status === 429 || response.status === 503) && attempt < retries) {
-          // Check for Retry-After header on 429 responses
-          if (response.status === 429) {
-            const retryAfter = response.headers.get('Retry-After');
-            if (retryAfter) {
-              const retryAfterNum = parseInt(retryAfter);
-              if (!isNaN(retryAfterNum)) {
-                const waitTime = retryAfterNum * 1000;
-                console.log(`API rate limited. Retry-After: ${retryAfterNum}s (${waitTime}ms)`);
+        // Handle specific error codes according to Guesty docs
+        switch (response.status) {
+          case 400:
+            throw new Error(`Bad Request - Invalid request format: ${error}`);
+          
+          case 401:
+            throw new Error(`Unauthorized - Access token expired. Please reconnect your Guesty account.`);
+          
+          case 403:
+            throw new Error(`Forbidden - Account inactive or insufficient permissions: ${error}`);
+          
+          case 404:
+            console.log(`Resource not found (404), continuing...`);
+            return { results: [], count: 0 }; // Return empty for not found
+          
+          case 405:
+            throw new Error(`Method Not Allowed - Invalid HTTP method for this endpoint`);
+          
+          case 406:
+            throw new Error(`Not Acceptable - Response format must be JSON`);
+          
+          case 410:
+            console.log(`Resource gone (410), continuing...`);
+            return { results: [], count: 0 }; // Return empty for gone resources
+          
+          case 429:
+            // Rate limit - check Retry-After and attempt retry
+            if (attempt < retries) {
+              const retryAfter = response.headers.get('Retry-After');
+              if (retryAfter) {
+                const retryAfterNum = parseInt(retryAfter);
+                const waitTime = !isNaN(retryAfterNum) ? retryAfterNum * 1000 : 5000;
+                
+                // Cap wait time at 45 seconds
+                if (waitTime > 45000) {
+                  throw new Error(`Rate limit requires waiting ${Math.round(waitTime/1000)}s. Please try again later.`);
+                }
+                
+                console.log(`Rate limited (429). Waiting ${waitTime}ms before retry...`);
                 await sleep(waitTime);
+                continue;
               }
             }
-          }
+            throw new Error(`Too Many Requests - Rate limit exceeded: ${error}`);
           
-          console.error(`Guesty API error (${response.status}), will retry:`, error);
-          lastError = new Error(`Guesty API error: ${response.status} - ${error}`);
-          continue; // Retry
+          case 500:
+            // Internal server error - retry
+            if (attempt < retries) {
+              console.error(`Server error (500), will retry:`, error);
+              lastError = new Error(`Internal Server Error: ${error}`);
+              continue;
+            }
+            throw new Error(`Guesty server error. Please try again later: ${error}`);
+          
+          case 503:
+            // Service unavailable - retry
+            if (attempt < retries) {
+              console.error(`Service unavailable (503), will retry:`, error);
+              lastError = new Error(`Service Unavailable: ${error}`);
+              continue;
+            }
+            throw new Error(`Guesty service temporarily unavailable. Please try again later.`);
+          
+          default:
+            console.error(`Guesty API error (${response.status}):`, error);
+            throw new Error(`Guesty API error: ${response.status} - ${error}`);
         }
-        
-        // For other errors or last retry, throw immediately
-        console.error(`Guesty API error (${response.status}):`, error);
-        throw new Error(`Guesty API error: ${response.status} - ${error}`);
       }
 
       return await response.json();
@@ -240,8 +293,9 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
 
     skip += limit;
     
-    // Add small delay between requests to avoid overwhelming the API
-    await sleep(200);
+    // Increased delay to stay well under rate limits (15 req/sec = 67ms min)
+    // Using 350ms = ~3 req/sec to be conservative
+    await sleep(350);
   }
 
   return allListings;
@@ -357,8 +411,9 @@ async function fetchAndSaveReservationsBatch(
 
       skip += limit;
       
-      // Add delay between requests
-      await sleep(200);
+      // Increased delay to stay well under rate limits (15 req/sec = 67ms min)
+      // Using 350ms = ~3 req/sec to be conservative
+      await sleep(350);
       
     } catch (error) {
       console.error(`Error at skip=${skip}:`, error);
