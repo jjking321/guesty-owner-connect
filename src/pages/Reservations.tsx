@@ -393,59 +393,69 @@ export default function Reservations() {
                   <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Accommodation</TableHead>
+                  <TableHead className="text-right">ADR</TableHead>
                   <TableHead className="text-right">Owner Revenue</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredReservations.map((reservation) => (
-                  <TableRow key={reservation.id}>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{getListingName(reservation.listing_id)}</div>
-                        {getListingAddress(reservation.listing_id) && (
-                          <div className="text-xs text-muted-foreground">
-                            {getListingAddress(reservation.listing_id)}
-                          </div>
+                {filteredReservations.map((reservation) => {
+                  const adr = reservation.nights_count > 0 
+                    ? parseFloat(reservation.fare_accommodation_adjusted || 0) / reservation.nights_count 
+                    : 0;
+                  
+                  return (
+                    <TableRow key={reservation.id}>
+                      <TableCell>
+                        <div>
+                          <div className="font-medium">{getListingName(reservation.listing_id)}</div>
+                          {getListingAddress(reservation.listing_id) && (
+                            <div className="text-xs text-muted-foreground">
+                              {getListingAddress(reservation.listing_id)}
+                            </div>
+                          )}
+                          {reservation.confirmation_code && (
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              {reservation.confirmation_code}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {new Date(reservation.check_in).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(reservation.check_out).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {reservation.nights_count}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {reservation.guests_count}
+                      </TableCell>
+                      <TableCell>
+                        {reservation.source && (
+                          <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-muted">
+                            {reservation.source}
+                          </span>
                         )}
-                        {reservation.confirmation_code && (
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {reservation.confirmation_code}
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {new Date(reservation.check_in).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      {new Date(reservation.check_out).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {reservation.nights_count}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {reservation.guests_count}
-                    </TableCell>
-                    <TableCell>
-                      {reservation.source && (
-                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-muted">
-                          {reservation.source}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusColor(reservation.status)}>
-                        {reservation.status || "Unknown"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">
-                      ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      ${parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusColor(reservation.status)}>
+                          {reservation.status || "Unknown"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        ${adr.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        ${parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
