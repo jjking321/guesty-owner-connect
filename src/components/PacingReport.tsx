@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendingUp, TrendingDown, DollarSign, Calendar, Moon, ArrowRight } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Calendar, Moon, Percent } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { format, parseISO, startOfYear, endOfYear, isBefore, isAfter } from "date-fns";
 import { useState } from "react";
@@ -10,10 +10,10 @@ interface PacingReportProps {
 }
 
 interface PacingMetrics {
-  ytdBookings: { current: number; last: number; change: number };
+  ytdOccupancy: { current: number; last: number; change: number };
   ytdRevenue: { current: number; last: number; change: number };
+  ytdRevPAR: { current: number; last: number; change: number };
   ytdNights: { current: number; last: number; change: number };
-  avgBookingValue: { current: number; last: number; change: number };
 }
 
 interface CumulativeDataPoint {
@@ -60,11 +60,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       );
     });
 
-    // Calculate metrics
-    const currentBookings = currentYearReservations.length;
-    const lastBookings = lastYearReservations.length;
-    const bookingsChange = lastBookings > 0 ? ((currentBookings - lastBookings) / lastBookings) * 100 : 0;
-
+    // Calculate basic metrics
     const currentRevenue = currentYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
     const lastRevenue = lastYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
     const revenueChange = lastRevenue > 0 ? ((currentRevenue - lastRevenue) / lastRevenue) * 100 : 0;
@@ -73,15 +69,22 @@ export function PacingReport({ reservations }: PacingReportProps) {
     const lastNights = lastYearReservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
     const nightsChange = lastNights > 0 ? ((currentNights - lastNights) / lastNights) * 100 : 0;
 
-    const currentAvgValue = currentBookings > 0 ? currentRevenue / currentBookings : 0;
-    const lastAvgValue = lastBookings > 0 ? lastRevenue / lastBookings : 0;
-    const avgValueChange = lastAvgValue > 0 ? ((currentAvgValue - lastAvgValue) / lastAvgValue) * 100 : 0;
+    // Calculate occupancy (nights booked / total available nights in YTD)
+    const daysYTD = (currentMonth + 1) * 30; // Approximate days in YTD
+    const currentOccupancy = daysYTD > 0 ? (currentNights / daysYTD) * 100 : 0;
+    const lastOccupancy = daysYTD > 0 ? (lastNights / daysYTD) * 100 : 0;
+    const occupancyChange = lastOccupancy > 0 ? ((currentOccupancy - lastOccupancy) / lastOccupancy) * 100 : 0;
+
+    // Calculate RevPAR (Revenue / Total Available Nights)
+    const currentRevPAR = daysYTD > 0 ? currentRevenue / daysYTD : 0;
+    const lastRevPAR = daysYTD > 0 ? lastRevenue / daysYTD : 0;
+    const revPARChange = lastRevPAR > 0 ? ((currentRevPAR - lastRevPAR) / lastRevPAR) * 100 : 0;
 
     return {
-      ytdBookings: { current: currentBookings, last: lastBookings, change: bookingsChange },
+      ytdOccupancy: { current: currentOccupancy, last: lastOccupancy, change: occupancyChange },
       ytdRevenue: { current: currentRevenue, last: lastRevenue, change: revenueChange },
+      ytdRevPAR: { current: currentRevPAR, last: lastRevPAR, change: revPARChange },
       ytdNights: { current: currentNights, last: lastNights, change: nightsChange },
-      avgBookingValue: { current: currentAvgValue, last: lastAvgValue, change: avgValueChange },
     };
   };
 
@@ -280,12 +283,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
       {/* YTD Metrics Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard
-          title="Total Bookings"
-          icon={Calendar}
-          current={metrics.ytdBookings.current}
-          last={metrics.ytdBookings.last}
-          change={metrics.ytdBookings.change}
-          format={(val) => val.toString()}
+          title="Occupancy Rate"
+          icon={Percent}
+          current={metrics.ytdOccupancy.current}
+          last={metrics.ytdOccupancy.last}
+          change={metrics.ytdOccupancy.change}
+          format={(val) => `${val.toFixed(1)}%`}
         />
         <MetricCard
           title="Total Revenue"
@@ -296,20 +299,20 @@ export function PacingReport({ reservations }: PacingReportProps) {
           format={(val) => `$${val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
         />
         <MetricCard
+          title="RevPAR"
+          icon={TrendingUp}
+          current={metrics.ytdRevPAR.current}
+          last={metrics.ytdRevPAR.last}
+          change={metrics.ytdRevPAR.change}
+          format={(val) => `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+        />
+        <MetricCard
           title="Nights Booked"
           icon={Moon}
           current={metrics.ytdNights.current}
           last={metrics.ytdNights.last}
           change={metrics.ytdNights.change}
           format={(val) => val.toString()}
-        />
-        <MetricCard
-          title="Avg Booking Value"
-          icon={ArrowRight}
-          current={metrics.avgBookingValue.current}
-          last={metrics.avgBookingValue.last}
-          change={metrics.avgBookingValue.change}
-          format={(val) => `$${val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
         />
       </div>
 
