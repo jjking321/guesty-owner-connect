@@ -1,18 +1,32 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { TrendChart } from "@/components/TrendChart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, startOfYear, endOfYear } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
 
 export default function GroupDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const [isCreateSubGroupOpen, setIsCreateSubGroupOpen] = useState(false);
+  const [subGroupName, setSubGroupName] = useState("");
+  const [subGroupDescription, setSubGroupDescription] = useState("");
+  const [selectedListings, setSelectedListings] = useState<string[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { data: group, isLoading: isGroupLoading } = useQuery({
     queryKey: ["property-group", id],
@@ -40,7 +54,56 @@ export default function GroupDetail() {
     enabled: !!id,
   });
 
-  const listingIds = group?.property_group_members.map((m: any) => m.listing_id) || [];
+  // Fetch sub-groups
+  const { data: subGroups, refetch: refetchSubGroups } = useQuery({
+    queryKey: ["sub-groups", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("property_groups")
+        .select(`
+          *,
+          property_group_members (
+            listing_id,
+            listings (
+              id,
+              nickname,
+              thumbnail
+            )
+          )
+        `)
+        .eq("parent_group_id", id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
+  // Get all listing IDs including from sub-groups
+  const directListingIds = group?.property_group_members.map((m: any) => m.listing_id) || [];
+  const subGroupListingIds = subGroups?.flatMap((sg: any) => 
+    sg.property_group_members.map((m: any) => m.listing_id)
+  ) || [];
+  const listingIds = [...directListingIds, ...subGroupListingIds];
+
+  // Get available listings for creating sub-groups (only direct members of this group)
+  const { data: availableListings } = useQuery({
+    queryKey: ["available-listings", directListingIds],
+    queryFn: async () => {
+      if (directListingIds.length === 0) return [];
+
+      const { data, error } = await supabase
+        .from("listings")
+        .select("*")
+        .in("id", directListingIds)
+        .order("nickname");
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: directListingIds.length > 0 && isCreateSubGroupOpen,
+  });
 
   const { data: reservations, isLoading: isReservationsLoading } = useQuery({
     queryKey: ["group-reservations", listingIds],
@@ -133,6 +196,77 @@ export default function GroupDetail() {
     lastYear: 0,
   }));
 
+  const handleCreateSubGroup = async () => {
+    if (!subGroupName.trim()) {
+      toast({
+        title: "Name required",
+        description: "Please enter a sub-group name",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (selectedListings.length === 0) {
+      toast({
+        title: "Select properties",
+        description: "Please select at least one property",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      
+      // Create sub-group
+      const { data: subGroup, error: subGroupError } = await supabase
+        .from("property_groups")
+        .insert({
+          user_id: session.session?.user?.id,
+          name: subGroupName,
+          description: subGroupDescription,
+          parent_group_id: id,
+        })
+        .select()
+        .single();
+
+      if (subGroupError) throw subGroupError;
+
+      // Add members
+      const members = selectedListings.map((listingId) => ({
+        group_id: subGroup.id,
+        listing_id: listingId,
+      }));
+
+      const { error: membersError } = await supabase
+        .from("property_group_members")
+        .insert(members);
+
+      if (membersError) throw membersError;
+
+      toast({
+        title: "Sub-group created",
+        description: `${subGroupName} has been created with ${selectedListings.length} properties`,
+      });
+
+      setIsCreateSubGroupOpen(false);
+      setSubGroupName("");
+      setSubGroupDescription("");
+      setSelectedListings([]);
+      refetchSubGroups();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const isLoading = isGroupLoading || isReservationsLoading;
 
   if (isLoading) {
@@ -166,19 +300,121 @@ export default function GroupDetail() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/groups")}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold flex items-center gap-2">
-              <Building2 className="h-8 w-8 text-primary" />
-              {group.name}
-            </h1>
-            {group.description && (
-              <p className="text-muted-foreground mt-1">{group.description}</p>
-            )}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate("/groups")}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold flex items-center gap-2">
+                <Building2 className="h-8 w-8 text-primary" />
+                {group.name}
+              </h1>
+              {group.description && (
+                <p className="text-muted-foreground mt-1">{group.description}</p>
+              )}
+            </div>
           </div>
+
+          {directListingIds.length > 0 && (
+            <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create Sub-Group
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Create Sub-Group</DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 mt-4">
+                  <div>
+                    <Label htmlFor="sub-name">Sub-Group Name</Label>
+                    <Input
+                      id="sub-name"
+                      placeholder="e.g., 3 Bedroom Units, 2 Bedroom Units"
+                      value={subGroupName}
+                      onChange={(e) => setSubGroupName(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="sub-description">Description (optional)</Label>
+                    <Textarea
+                      id="sub-description"
+                      placeholder="Add notes about this sub-group"
+                      value={subGroupDescription}
+                      onChange={(e) => setSubGroupDescription(e.target.value)}
+                      rows={3}
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Select Properties</Label>
+                    <div className="relative mb-2">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search properties..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                    <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
+                      {availableListings
+                        ?.filter((listing) => {
+                          const query = searchQuery.toLowerCase();
+                          const nickname = (listing.nickname || "").toLowerCase();
+                          return nickname.includes(query);
+                        })
+                        .map((listing) => (
+                        <div key={listing.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`sub-${listing.id}`}
+                            checked={selectedListings.includes(listing.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedListings([...selectedListings, listing.id]);
+                              } else {
+                                setSelectedListings(selectedListings.filter((id) => id !== listing.id));
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`sub-${listing.id}`}
+                            className="flex items-center gap-2 cursor-pointer flex-1"
+                          >
+                            {listing.thumbnail && (
+                              <img
+                                src={listing.thumbnail}
+                                alt={listing.nickname || "Property"}
+                                className="w-10 h-10 rounded object-cover"
+                              />
+                            )}
+                            <span className="text-sm">{listing.nickname || "Unnamed Property"}</span>
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {selectedListings.length} properties selected
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="outline" onClick={() => setIsCreateSubGroupOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleCreateSubGroup} disabled={isSubmitting}>
+                      {isSubmitting ? "Creating..." : "Create Sub-Group"}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
@@ -256,6 +492,55 @@ export default function GroupDetail() {
             />
           </CardContent>
         </Card>
+
+        {subGroups && subGroups.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Sub-Groups</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {subGroups.map((subGroup: any) => (
+                  <Card
+                    key={subGroup.id}
+                    className="cursor-pointer hover:shadow-lg transition-shadow"
+                    onClick={() => navigate(`/groups/${subGroup.id}`)}
+                  >
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <FolderOpen className="h-5 w-5 text-primary" />
+                        <CardTitle className="text-lg">{subGroup.name}</CardTitle>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center gap-2">
+                        <div className="flex -space-x-2">
+                          {subGroup.property_group_members.slice(0, 3).map((member: any) => (
+                            <div
+                              key={member.listing_id}
+                              className="w-8 h-8 rounded-full border-2 border-background overflow-hidden bg-muted"
+                            >
+                              {member.listings?.thumbnail && (
+                                <img
+                                  src={member.listings.thumbnail}
+                                  alt=""
+                                  className="w-full h-full object-cover"
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          {subGroup.property_group_members.length} properties
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

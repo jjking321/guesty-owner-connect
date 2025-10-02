@@ -222,6 +222,7 @@ export type Database = {
           description: string | null
           id: string
           name: string
+          parent_group_id: string | null
           updated_at: string
           user_id: string
         }
@@ -230,6 +231,7 @@ export type Database = {
           description?: string | null
           id?: string
           name: string
+          parent_group_id?: string | null
           updated_at?: string
           user_id: string
         }
@@ -238,10 +240,19 @@ export type Database = {
           description?: string | null
           id?: string
           name?: string
+          parent_group_id?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "property_groups_parent_group_id_fkey"
+            columns: ["parent_group_id"]
+            isOneToOne: false
+            referencedRelation: "property_groups"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       reservations: {
         Row: {

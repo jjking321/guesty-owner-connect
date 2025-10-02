@@ -47,6 +47,7 @@ export default function Groups() {
             )
           )
         `)
+        .is("parent_group_id", null)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
