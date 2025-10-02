@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, FolderOpen, Building2 } from "lucide-react";
+import { Plus, FolderOpen, Building2, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 
@@ -21,6 +21,7 @@ export default function Groups() {
   const [groupDescription, setGroupDescription] = useState("");
   const [selectedListings, setSelectedListings] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { data: session } = useQuery({
     queryKey: ["session"],
@@ -183,8 +184,23 @@ export default function Groups() {
 
                 <div>
                   <Label>Select Properties</Label>
+                  <div className="relative mb-2">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search properties..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
                   <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
-                    {listings?.map((listing) => (
+                    {listings
+                      ?.filter((listing) => {
+                        const query = searchQuery.toLowerCase();
+                        const nickname = (listing.nickname || "").toLowerCase();
+                        return nickname.includes(query);
+                      })
+                      .map((listing) => (
                       <div key={listing.id} className="flex items-center space-x-2">
                         <Checkbox
                           id={listing.id}
