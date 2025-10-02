@@ -15,14 +15,16 @@ interface TrendDataPoint {
 interface TrendChartProps {
   occupancyData: TrendDataPoint[];
   revenueData: TrendDataPoint[];
+  revparData: TrendDataPoint[];
 }
 
-export function TrendChart({ occupancyData, revenueData }: TrendChartProps) {
-  const [activeTab, setActiveTab] = useState<"occupancy" | "revenue">("occupancy");
+export function TrendChart({ occupancyData, revenueData, revparData }: TrendChartProps) {
+  const [activeTab, setActiveTab] = useState<"occupancy" | "revenue" | "revpar">("occupancy");
   const [showComparison, setShowComparison] = useState(true);
 
-  const data = activeTab === "occupancy" ? occupancyData : revenueData;
+  const data = activeTab === "occupancy" ? occupancyData : activeTab === "revenue" ? revenueData : revparData;
   const isOccupancy = activeTab === "occupancy";
+  const isRevPAR = activeTab === "revpar";
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -36,6 +38,8 @@ export function TrendChart({ occupancyData, revenueData }: TrendChartProps) {
               <span className="font-medium">
                 {isOccupancy
                   ? `${payload[0].value.toFixed(1)}%`
+                  : isRevPAR
+                  ? `$${payload[0].value.toFixed(2)}`
                   : `$${payload[0].value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
               </span>
             </div>
@@ -46,6 +50,8 @@ export function TrendChart({ occupancyData, revenueData }: TrendChartProps) {
                 <span className="font-medium">
                   {isOccupancy
                     ? `${payload[1].value.toFixed(1)}%`
+                    : isRevPAR
+                    ? `$${payload[1].value.toFixed(2)}`
                     : `$${payload[1].value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
                 </span>
               </div>
@@ -73,10 +79,11 @@ export function TrendChart({ occupancyData, revenueData }: TrendChartProps) {
             </Label>
           </div>
         </div>
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "occupancy" | "revenue")}>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "occupancy" | "revenue" | "revpar")}>
           <TabsList>
             <TabsTrigger value="occupancy">Occupancy</TabsTrigger>
             <TabsTrigger value="revenue">Revenue</TabsTrigger>
+            <TabsTrigger value="revpar">RevPAR</TabsTrigger>
           </TabsList>
         </Tabs>
       </CardHeader>
@@ -97,7 +104,7 @@ export function TrendChart({ occupancyData, revenueData }: TrendChartProps) {
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(value) =>
-                  isOccupancy ? `${value}%` : `$${(value / 1000).toFixed(0)}k`
+                  isOccupancy ? `${value}%` : isRevPAR ? `$${value.toFixed(0)}` : `$${(value / 1000).toFixed(0)}k`
                 }
               />
               <Tooltip content={<CustomTooltip />} />

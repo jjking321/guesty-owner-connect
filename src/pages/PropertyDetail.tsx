@@ -197,6 +197,99 @@ export default function PropertyDetail() {
     return result;
   };
 
+  const calculateYearOverYearRevPAR = () => {
+    if (reservations.length === 0) return [];
+
+    const currentYear = new Date().getFullYear();
+    const lastYear = currentYear - 1;
+
+    // Initialize data structures for both years - tracking revenue and nights
+    const currentYearData = new Map<string, { revenue: number; nightsBooked: number; totalDays: number }>();
+    const lastYearData = new Map<string, { revenue: number; nightsBooked: number; totalDays: number }>();
+
+    // Get all 12 months for both years
+    for (let month = 0; month < 12; month++) {
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      currentYearData.set(currentKey, { revenue: 0, nightsBooked: 0, totalDays: getDaysInMonth(currentDate) });
+      lastYearData.set(lastKey, { revenue: 0, nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
+    }
+
+    // Process each reservation
+    reservations.forEach((reservation) => {
+      if (!reservation.check_in || !reservation.check_out) return;
+
+      const checkIn = parseISO(reservation.check_in);
+      const checkOut = parseISO(reservation.check_out);
+      const revenue = parseFloat(reservation.fare_accommodation_adjusted || 0);
+      
+      // For revenue, assign to check-in month
+      const checkInMonthKey = format(checkIn, 'yyyy-MM');
+      const checkInYear = checkIn.getFullYear();
+      
+      if (checkInYear === currentYear && currentYearData.has(checkInMonthKey)) {
+        const data = currentYearData.get(checkInMonthKey)!;
+        data.revenue += revenue;
+      } else if (checkInYear === lastYear && lastYearData.has(checkInMonthKey)) {
+        const data = lastYearData.get(checkInMonthKey)!;
+        data.revenue += revenue;
+      }
+      
+      // For nights, iterate through each night of the reservation
+      let currentNight = checkIn;
+      while (currentNight < checkOut) {
+        const monthKey = format(currentNight, 'yyyy-MM');
+        const year = currentNight.getFullYear();
+        
+        if (year === currentYear && currentYearData.has(monthKey)) {
+          const data = currentYearData.get(monthKey)!;
+          data.nightsBooked++;
+        } else if (year === lastYear && lastYearData.has(monthKey)) {
+          const data = lastYearData.get(monthKey)!;
+          data.nightsBooked++;
+        }
+        
+        currentNight = addDays(currentNight, 1);
+      }
+    });
+
+    // Calculate RevPAR for each month
+    const result = [];
+    for (let month = 0; month < 12; month++) {
+      const monthName = format(new Date(2000, month, 1), 'MMM');
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      const currentData = currentYearData.get(currentKey)!;
+      const lastData = lastYearData.get(lastKey)!;
+      
+      // Calculate ADR and Occupancy, then RevPAR = ADR × Occupancy
+      const currentADR = currentData.nightsBooked > 0 ? currentData.revenue / currentData.nightsBooked : 0;
+      const currentOccupancy = (currentData.nightsBooked / currentData.totalDays) * 100;
+      const currentRevPAR = currentADR * (currentOccupancy / 100);
+      
+      const lastADR = lastData.nightsBooked > 0 ? lastData.revenue / lastData.nightsBooked : 0;
+      const lastOccupancy = (lastData.nightsBooked / lastData.totalDays) * 100;
+      const lastRevPAR = lastADR * (lastOccupancy / 100);
+      
+      result.push({
+        month: monthName,
+        monthKey: currentKey,
+        currentYear: currentRevPAR,
+        lastYear: lastRevPAR,
+      });
+    }
+
+    return result;
+  };
+
   const calculateMonthlyOccupancy = () => {
     if (reservations.length === 0) return [];
 
@@ -322,6 +415,7 @@ export default function PropertyDetail() {
   const metrics = calculateMetrics();
   const yearOverYearOccupancy = calculateYearOverYearOccupancy();
   const yearOverYearRevenue = calculateYearOverYearRevenue();
+  const yearOverYearRevPAR = calculateYearOverYearRevPAR();
 
   if (loading) {
     return (
@@ -530,6 +624,7 @@ export default function PropertyDetail() {
         <TrendChart 
           occupancyData={yearOverYearOccupancy}
           revenueData={yearOverYearRevenue}
+          revparData={yearOverYearRevPAR}
         />
 
         {/* Pacing Report */}
