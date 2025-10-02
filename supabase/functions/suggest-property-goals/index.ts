@@ -141,6 +141,17 @@ Target Year: ${year}`;
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
       console.error('AI gateway error:', aiResponse.status, errorText);
+      
+      if (aiResponse.status === 402) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Insufficient AI credits. Please add credits to your workspace to use AI features.',
+            code: 402 
+          }),
+          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
       throw new Error(`AI gateway error: ${aiResponse.status}`);
     }
 

@@ -152,6 +152,16 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
 
       if (error) throw error;
 
+      // Check for credit limit error
+      if (data && data.code === 402) {
+        toast({
+          title: "Insufficient AI Credits",
+          description: "Please add credits to your workspace to use AI features. Go to Settings → Workspace → Usage to add credits.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (data && data.goals) {
         const aiGoals = monthNames.map((_, index) => {
           const monthData = data.goals.find((g: any) => g.month === index + 1);
