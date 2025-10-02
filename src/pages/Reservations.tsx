@@ -55,7 +55,57 @@ export default function Reservations() {
 
   useEffect(() => {
     loadData();
+    loadDefaultView();
   }, []);
+
+  const loadDefaultView = () => {
+    const savedView = localStorage.getItem('reservations_default_view');
+    if (savedView) {
+      try {
+        const view = JSON.parse(savedView);
+        if (view.visibleColumns) setVisibleColumns(view.visibleColumns);
+        if (view.filters) {
+          setSelectedProperty(view.filters.selectedProperty || "all");
+          setSelectedSource(view.filters.selectedSource || "all");
+          setSelectedStatus(view.filters.selectedStatus || "all");
+          setMinNights(view.filters.minNights || "");
+          setMaxNights(view.filters.maxNights || "");
+          setMinGuests(view.filters.minGuests || "");
+          setMaxGuests(view.filters.maxGuests || "");
+          setMinAccommodation(view.filters.minAccommodation || "");
+          setMaxAccommodation(view.filters.maxAccommodation || "");
+        }
+        toast({
+          title: "Default view loaded",
+          description: "Your saved view has been applied.",
+        });
+      } catch (error) {
+        console.error("Error loading saved view:", error);
+      }
+    }
+  };
+
+  const saveDefaultView = () => {
+    const view = {
+      visibleColumns,
+      filters: {
+        selectedProperty,
+        selectedSource,
+        selectedStatus,
+        minNights,
+        maxNights,
+        minGuests,
+        maxGuests,
+        minAccommodation,
+        maxAccommodation,
+      },
+    };
+    localStorage.setItem('reservations_default_view', JSON.stringify(view));
+    toast({
+      title: "Default view saved",
+      description: "Your current view has been saved as default.",
+    });
+  };
 
   const loadData = async () => {
     try {
@@ -314,9 +364,8 @@ export default function Reservations() {
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">Filters</CardTitle>
-                <Button onClick={clearFilters} variant="ghost" size="sm">
-                  <X className="mr-2 h-4 w-4" />
-                  Clear All
+                <Button onClick={() => setShowFilters(false)} variant="ghost" size="sm">
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
             </CardHeader>
@@ -486,6 +535,15 @@ export default function Reservations() {
                     onChange={(e) => setMaxAccommodation(e.target.value)}
                   />
                 </div>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-6 pt-4 border-t">
+                <Button onClick={clearFilters} variant="outline" size="sm">
+                  Clear All Filters
+                </Button>
+                <Button onClick={saveDefaultView} variant="default" size="sm">
+                  Save as Default View
+                </Button>
               </div>
             </div>
           </Card>
