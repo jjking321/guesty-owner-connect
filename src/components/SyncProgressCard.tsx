@@ -82,32 +82,52 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     ? (syncJob.items_synced / syncJob.total_items) * 100
     : undefined;
 
+  const showProgress = syncJob.status === 'running' && (syncJob.items_synced !== null || syncJob.total_items !== null);
+
   return (
     <Card className="border-primary/50 bg-primary/5">
       <CardContent className="p-4">
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            {syncJob.status === 'running' && (
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {syncJob.status === 'running' && (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              )}
+              {syncJob.status === 'completed' && (
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+              )}
+              {syncJob.status === 'failed' && (
+                <XCircle className="h-4 w-4 text-destructive" />
+              )}
+              <p className="font-medium text-sm capitalize">
+                {syncType} Sync - {syncJob.status}
+              </p>
+            </div>
+            
+            {/* Show count badge */}
+            {showProgress && (
+              <div className="text-xs font-mono bg-primary/10 px-2 py-1 rounded">
+                {syncJob.items_synced?.toLocaleString() || 0}
+                {syncJob.total_items && ` / ${syncJob.total_items.toLocaleString()}`}
+              </div>
             )}
-            {syncJob.status === 'completed' && (
-              <CheckCircle2 className="h-4 w-4 text-green-600" />
-            )}
-            {syncJob.status === 'failed' && (
-              <XCircle className="h-4 w-4 text-destructive" />
-            )}
-            <p className="font-medium text-sm capitalize">
-              {syncType} Sync
-            </p>
           </div>
 
-          <p className="text-sm text-muted-foreground">
-            {syncJob.progress_message || 'Processing...'}
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              {syncJob.progress_message || 'Processing...'}
+            </p>
 
-          {progress !== undefined && syncJob.status === 'running' && (
-            <Progress value={progress} className="h-2" />
-          )}
+            {/* Always show progress bar when we have progress data */}
+            {progress !== undefined && showProgress && (
+              <div className="space-y-1">
+                <Progress value={progress} className="h-2" />
+                <p className="text-xs text-right text-muted-foreground">
+                  {Math.round(progress)}%
+                </p>
+              </div>
+            )}
+          </div>
 
           {syncJob.error_message && (
             <p className="text-sm text-destructive">
