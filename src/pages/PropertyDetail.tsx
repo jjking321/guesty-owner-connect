@@ -717,6 +717,7 @@ export default function PropertyDetail() {
           revparData={yearOverYearRevPAR}
           goalsData={goalsData}
           reservations={reservations}
+          revenueForecast={revenueForecast}
         />
 
         {/* Pacing Report */}

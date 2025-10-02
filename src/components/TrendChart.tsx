@@ -18,18 +18,20 @@ interface TrendChartProps {
   revparData: TrendDataPoint[];
   goalsData: any[];
   reservations: any[];
+  revenueForecast?: any;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function TrendChart({ occupancyData, revenueData, revparData, goalsData, reservations }: TrendChartProps) {
+export function TrendChart({ occupancyData, revenueData, revparData, goalsData, reservations, revenueForecast }: TrendChartProps) {
   const [activeTab, setActiveTab] = useState<"occupancy" | "revenue" | "revpar">("occupancy");
   const [showComparison, setShowComparison] = useState(true);
   const [showGoals, setShowGoals] = useState(false);
+  const [showForecast, setShowForecast] = useState(false);
 
-  // Calculate revenue with goals overlay
+  // Calculate revenue with goals and forecast overlay
   const revenueWithGoals = useMemo(() => {
-    if (!showGoals || activeTab !== "revenue") return revenueData;
+    if (activeTab !== "revenue") return revenueData;
 
     const currentYear = new Date().getFullYear();
     
@@ -46,15 +48,19 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
         })
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
 
+      // Get forecast data for this month if available
+      const monthForecast = revenueForecast?.monthlyForecasts?.find((f: any) => f.month === index);
+
       return {
         ...dataPoint,
         actual: Math.round(actualRevenue),
-        budget: monthGoal?.budget_revenue ? Math.round(monthGoal.budget_revenue) : undefined,
-        projection: monthGoal?.projection_revenue ? Math.round(monthGoal.projection_revenue) : undefined,
-        goal: monthGoal?.goal_revenue ? Math.round(monthGoal.goal_revenue) : undefined,
+        budget: showGoals && monthGoal?.budget_revenue ? Math.round(monthGoal.budget_revenue) : undefined,
+        projection: showGoals && monthGoal?.projection_revenue ? Math.round(monthGoal.projection_revenue) : undefined,
+        goal: showGoals && monthGoal?.goal_revenue ? Math.round(monthGoal.goal_revenue) : undefined,
+        forecast: showForecast && monthForecast ? Math.round(monthForecast.totalForecast.p50) : undefined,
       };
     });
-  }, [revenueData, goalsData, reservations, showGoals, activeTab]);
+  }, [revenueData, goalsData, reservations, revenueForecast, showGoals, showForecast, activeTab]);
 
   const data = activeTab === "occupancy" 
     ? occupancyData 
@@ -127,6 +133,18 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
                 />
                 <Label htmlFor="goals" className="text-sm font-normal cursor-pointer">
                   Show Goals
+                </Label>
+              </div>
+            )}
+            {isRevenue && revenueForecast && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="forecast"
+                  checked={showForecast}
+                  onCheckedChange={(checked) => setShowForecast(checked as boolean)}
+                />
+                <Label htmlFor="forecast" className="text-sm font-normal cursor-pointer">
+                  Show Forecast
                 </Label>
               </div>
             )}
@@ -216,6 +234,18 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
                     connectNulls
                   />
                 </>
+              )}
+              {showForecast && isRevenue && (
+                <Line
+                  type="monotone"
+                  dataKey="forecast"
+                  stroke="#06b6d4"
+                  strokeWidth={2.5}
+                  strokeDasharray="3 3"
+                  dot={{ fill: "#06b6d4", r: 4 }}
+                  name="Forecast"
+                  connectNulls
+                />
               )}
             </LineChart>
           </ResponsiveContainer>
