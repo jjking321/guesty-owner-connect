@@ -1,1 +1,7 @@
 project_id = "owsvuxxflhghlbrlhxst"
+
+[functions.sync-guesty-data]
+verify_jwt = false
+
+[functions.suggest-property-goals]
+verify_jwt = true

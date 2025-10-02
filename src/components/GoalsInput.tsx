@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy } from "lucide-react";
+import { Save, Copy, Sparkles } from "lucide-react";
 
 interface GoalsInputProps {
   listingId: string;
@@ -27,6 +27,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -142,6 +143,43 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     }
   };
 
+  const generateAIGoals = async () => {
+    setIsGenerating(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
+        body: { listingId, year }
+      });
+
+      if (error) throw error;
+
+      if (data && data.goals) {
+        const aiGoals = monthNames.map((_, index) => {
+          const monthData = data.goals.find((g: any) => g.month === index + 1);
+          return {
+            month: index + 1,
+            budget: monthData?.budget || 0,
+            projection: monthData?.projection || 0,
+            goal: monthData?.goal || 0,
+          };
+        });
+        setGoals(aiGoals);
+        toast({
+          title: "AI Goals Generated",
+          description: data.reasoning || `AI has suggested goals based on historical data`,
+        });
+      }
+    } catch (error: any) {
+      console.error('Error generating AI goals:', error);
+      toast({
+        title: "Error generating goals",
+        description: error.message || "Failed to generate AI suggestions",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const updateGoal = (monthIndex: number, field: 'budget' | 'projection' | 'goal', value: string) => {
     const numValue = parseFloat(value) || 0;
     setGoals(prev => prev.map((g, i) => 
@@ -170,6 +208,10 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
               onChange={(e) => setYear(parseInt(e.target.value))}
               className="w-24"
             />
+            <Button onClick={generateAIGoals} variant="outline" size="sm" disabled={isGenerating}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              {isGenerating ? "Generating..." : "AI Suggest Goals"}
+            </Button>
             <Button onClick={copyFromPreviousYear} variant="outline" size="sm">
               <Copy className="h-4 w-4 mr-2" />
               Copy from {year - 1}
