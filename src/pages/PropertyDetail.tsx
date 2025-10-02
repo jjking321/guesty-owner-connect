@@ -19,6 +19,7 @@ export default function PropertyDetail() {
   const { toast } = useToast();
   const [listing, setListing] = useState<any>(null);
   const [reservations, setReservations] = useState<any[]>([]);
+  const [goalsData, setGoalsData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -51,6 +52,18 @@ export default function PropertyDetail() {
 
       if (reservationsError) throw reservationsError;
       setReservations(reservationsData || []);
+
+      // Load goals data for current year
+      const currentYear = new Date().getFullYear();
+      const { data: goalsDataResult, error: goalsError } = await supabase
+        .from('property_goals')
+        .select('*')
+        .eq('listing_id', id)
+        .eq('year', currentYear)
+        .order('month');
+
+      if (goalsError) throw goalsError;
+      setGoalsData(goalsDataResult || []);
     } catch (error: any) {
       toast({
         title: "Error loading property data",
@@ -635,6 +648,8 @@ export default function PropertyDetail() {
           occupancyData={yearOverYearOccupancy}
           revenueData={yearOverYearRevenue}
           revparData={yearOverYearRevPAR}
+          goalsData={goalsData}
+          reservations={reservations}
         />
 
         {/* Pacing Report */}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,15 +16,54 @@ interface TrendChartProps {
   occupancyData: TrendDataPoint[];
   revenueData: TrendDataPoint[];
   revparData: TrendDataPoint[];
+  goalsData: any[];
+  reservations: any[];
 }
 
-export function TrendChart({ occupancyData, revenueData, revparData }: TrendChartProps) {
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function TrendChart({ occupancyData, revenueData, revparData, goalsData, reservations }: TrendChartProps) {
   const [activeTab, setActiveTab] = useState<"occupancy" | "revenue" | "revpar">("occupancy");
   const [showComparison, setShowComparison] = useState(true);
+  const [showGoals, setShowGoals] = useState(false);
 
-  const data = activeTab === "occupancy" ? occupancyData : activeTab === "revenue" ? revenueData : revparData;
+  // Calculate revenue with goals overlay
+  const revenueWithGoals = useMemo(() => {
+    if (!showGoals || activeTab !== "revenue") return revenueData;
+
+    const currentYear = new Date().getFullYear();
+    
+    return revenueData.map((dataPoint, index) => {
+      const month = index + 1;
+      const monthGoal = goalsData.find(g => g.month === month);
+      
+      // Calculate actual revenue for this month
+      const actualRevenue = reservations
+        .filter(r => {
+          if (!r.check_in) return false;
+          const checkIn = new Date(r.check_in);
+          return checkIn.getFullYear() === currentYear && checkIn.getMonth() === index;
+        })
+        .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+
+      return {
+        ...dataPoint,
+        actual: Math.round(actualRevenue),
+        budget: monthGoal?.budget_revenue ? Math.round(monthGoal.budget_revenue) : undefined,
+        projection: monthGoal?.projection_revenue ? Math.round(monthGoal.projection_revenue) : undefined,
+        goal: monthGoal?.goal_revenue ? Math.round(monthGoal.goal_revenue) : undefined,
+      };
+    });
+  }, [revenueData, goalsData, reservations, showGoals, activeTab]);
+
+  const data = activeTab === "occupancy" 
+    ? occupancyData 
+    : activeTab === "revenue" 
+    ? revenueWithGoals 
+    : revparData;
   const isOccupancy = activeTab === "occupancy";
   const isRevPAR = activeTab === "revpar";
+  const isRevenue = activeTab === "revenue";
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -68,15 +107,29 @@ export function TrendChart({ occupancyData, revenueData, revparData }: TrendChar
       <CardHeader className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold">Property Performance Trends</h3>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="compare"
-              checked={showComparison}
-              onCheckedChange={(checked) => setShowComparison(checked as boolean)}
-            />
-            <Label htmlFor="compare" className="text-sm font-normal cursor-pointer">
-              Compare with Last Year
-            </Label>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="compare"
+                checked={showComparison}
+                onCheckedChange={(checked) => setShowComparison(checked as boolean)}
+              />
+              <Label htmlFor="compare" className="text-sm font-normal cursor-pointer">
+                Compare with Last Year
+              </Label>
+            </div>
+            {isRevenue && goalsData.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="goals"
+                  checked={showGoals}
+                  onCheckedChange={(checked) => setShowGoals(checked as boolean)}
+                />
+                <Label htmlFor="goals" className="text-sm font-normal cursor-pointer">
+                  Show Goals
+                </Label>
+              </div>
+            )}
           </div>
         </div>
         <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "occupancy" | "revenue" | "revpar")}>
@@ -129,6 +182,40 @@ export function TrendChart({ occupancyData, revenueData, revparData }: TrendChar
                   name="Last Year"
                   connectNulls
                 />
+              )}
+              {showGoals && isRevenue && (
+                <>
+                  <Line
+                    type="monotone"
+                    dataKey="budget"
+                    stroke="#8b5cf6"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    name="Budget"
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="projection"
+                    stroke="#f59e0b"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    name="Projection"
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="goal"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    name="Goal"
+                    connectNulls
+                  />
+                </>
               )}
             </LineChart>
           </ResponsiveContainer>
