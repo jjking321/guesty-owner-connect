@@ -180,6 +180,69 @@ export type Database = {
         }
         Relationships: []
       }
+      property_group_members: {
+        Row: {
+          created_at: string
+          group_id: string
+          id: string
+          listing_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_id: string
+          id?: string
+          listing_id: string
+        }
+        Update: {
+          created_at?: string
+          group_id?: string
+          id?: string
+          listing_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_group_members_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "property_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_group_members_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      property_groups: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       reservations: {
         Row: {
           check_in: string | null

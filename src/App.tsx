@@ -11,6 +11,8 @@ import PropertyDetail from "./pages/PropertyDetail";
 import Reservations from "./pages/Reservations";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import Groups from "./pages/Groups";
+import GroupDetail from "./pages/GroupDetail";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +29,8 @@ const App = () => (
           <Route path="/listings" element={<Listings />} />
           <Route path="/listings/:id" element={<PropertyDetail />} />
           <Route path="/reservations" element={<Reservations />} />
+          <Route path="/groups" element={<Groups />} />
+          <Route path="/groups/:id" element={<GroupDetail />} />
           <Route path="/settings" element={<Settings />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
