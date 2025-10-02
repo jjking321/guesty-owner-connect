@@ -65,6 +65,8 @@ export default function PropertyDetail() {
     return parts.join(", ") || "N/A";
   };
 
+  // Calculate year-over-year occupancy comparison
+
   const calculateYearOverYearOccupancy = () => {
     if (reservations.length === 0) return [];
 
