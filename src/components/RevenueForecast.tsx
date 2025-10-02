@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign } from "lucide-react";
+import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatDistanceToNow } from "date-fns";
 
 interface ForecastData {
   listingId: string;
@@ -51,9 +51,13 @@ interface RevenueForecastProps {
 export function RevenueForecast({ listingId }: RevenueForecastProps) {
   const [forecast, setForecast] = useState<ForecastData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const { toast } = useToast();
 
-  // Load existing forecast from database
+  useEffect(() => {
+    loadForecast();
+  }, [listingId]);
+
   const loadForecast = async () => {
     try {
       const { data, error } = await supabase
@@ -71,11 +75,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           year: data.year,
           asOfDate: data.generated_at,
           revenueOnBooks: Number(data.revenue_on_books),
-          forecastedRevenue: data.forecasted_revenue as ForecastData['forecastedRevenue'],
-          totalForecast: data.total_forecast as ForecastData['totalForecast'],
-          goalProbabilities: data.goal_probabilities as ForecastData['goalProbabilities'],
-          monthlyForecasts: data.monthly_forecasts as ForecastData['monthlyForecasts'],
-          insights: data.insights as ForecastData['insights']
+          forecastedRevenue: data.forecasted_revenue as any,
+          totalForecast: data.total_forecast as any,
+          goalProbabilities: data.goal_probabilities as any,
+          monthlyForecasts: data.monthly_forecasts as any,
+          insights: data.insights as any
         });
       }
     } catch (error) {
@@ -85,9 +89,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
     }
   };
 
-  // Generate new forecast
   const generateForecast = async () => {
-    setLoading(true);
+    setRefreshing(true);
     try {
       const { data, error } = await supabase.functions.invoke('forecast-revenue', {
         body: { listingId, year: new Date().getFullYear() }
@@ -108,14 +111,9 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setRefreshing(false);
     }
   };
-
-  // Load forecast on mount
-  useEffect(() => {
-    loadForecast();
-  }, [listingId]);
 
   const ProbabilityGauge = ({ label, probability, target }: { label: string; probability: number; target: number }) => {
     const getColor = (prob: number) => {
@@ -178,22 +176,36 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <TrendingUp className="h-5 w-5" />
-          Revenue Forecast
-        </CardTitle>
-        <CardDescription>
-          AI-powered year-end revenue projection using Monte Carlo simulation
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Revenue Forecast
+            </CardTitle>
+            <CardDescription>
+              AI-powered year-end revenue projection using Monte Carlo simulation
+            </CardDescription>
+          </div>
+          {forecast && (
+            <Button 
+              onClick={generateForecast} 
+              variant="outline" 
+              size="sm"
+              disabled={refreshing}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {!forecast && !loading && (
           <div className="text-center py-8">
-            <p className="text-muted-foreground mb-4">
-              No forecast available yet. Click below to generate your first forecast.
-            </p>
-            <Button onClick={generateForecast} size="lg">
-              Generate Forecast
+            <p className="text-muted-foreground mb-4">No forecast available yet</p>
+            <Button onClick={generateForecast} size="lg" disabled={refreshing}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Generate First Forecast
             </Button>
           </div>
         )}
@@ -351,17 +363,12 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
             </div>
 
             <div className="pt-4 border-t flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">
-                  Last updated: {new Date(forecast.asOfDate).toLocaleString()}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Forecasts are automatically regenerated weekly
-                </p>
-              </div>
-              <Button onClick={generateForecast} variant="outline" size="sm" disabled={loading}>
-                Refresh Now
-              </Button>
+              <p className="text-xs text-muted-foreground">
+                Last updated: {formatDistanceToNow(new Date(forecast.asOfDate), { addSuffix: true })}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Forecasts regenerate weekly
+              </p>
             </div>
           </>
         )}

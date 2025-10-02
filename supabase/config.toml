@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.generate-all-forecasts]
 verify_jwt = false
+
+[functions.generate-all-forecasts]
+verify_jwt = false

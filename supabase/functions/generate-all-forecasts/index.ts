@@ -12,37 +12,30 @@ serve(async (req) => {
   }
 
   try {
-    console.log('Starting weekly forecast generation for all properties...');
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const currentYear = new Date().getFullYear();
+    console.log('Starting weekly forecast generation for all properties...');
 
     // Get all active listings
     const { data: listings, error: listingsError } = await supabase
       .from('listings')
       .select('id, nickname')
-      .eq('active', true)
-      .eq('is_listed', true);
+      .eq('active', true);
 
-    if (listingsError) {
-      console.error('Error fetching listings:', listingsError);
-      throw listingsError;
-    }
+    if (listingsError) throw listingsError;
 
-    console.log(`Found ${listings?.length || 0} active listings to process`);
+    console.log(`Found ${listings?.length || 0} active properties`);
 
     const results = [];
-    let successCount = 0;
-    let errorCount = 0;
+    const currentYear = new Date().getFullYear();
 
-    // Process each listing
+    // Generate forecast for each listing
     for (const listing of listings || []) {
       try {
-        console.log(`Generating forecast for ${listing.nickname || listing.id}...`);
-
+        console.log(`Generating forecast for ${listing.nickname} (${listing.id})`);
+        
         // Call the forecast-revenue function
         const response = await fetch(`${supabaseUrl}/functions/v1/forecast-revenue`, {
           method: 'POST',
@@ -58,53 +51,57 @@ serve(async (req) => {
         });
 
         if (response.ok) {
-          successCount++;
-          console.log(`✓ Forecast generated for ${listing.nickname || listing.id}`);
+          const data = await response.json();
           results.push({
-            listingId: listing.id,
+            listing_id: listing.id,
             nickname: listing.nickname,
-            status: 'success'
+            status: 'success',
+            forecast: data.totalForecast.p50
           });
+          console.log(`✓ Forecast generated for ${listing.nickname}: $${data.totalForecast.p50.toFixed(0)}`);
         } else {
-          errorCount++;
-          const errorText = await response.text();
-          console.error(`✗ Failed to generate forecast for ${listing.nickname || listing.id}: ${errorText}`);
+          const error = await response.text();
           results.push({
-            listingId: listing.id,
+            listing_id: listing.id,
             nickname: listing.nickname,
             status: 'error',
-            error: errorText
+            error
           });
+          console.error(`✗ Failed for ${listing.nickname}:`, error);
         }
       } catch (error) {
-        errorCount++;
-        console.error(`✗ Error processing ${listing.nickname || listing.id}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         results.push({
-          listingId: listing.id,
+          listing_id: listing.id,
           nickname: listing.nickname,
           status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: errorMessage
         });
+        console.error(`✗ Error for ${listing.nickname}:`, error);
       }
     }
 
-    console.log(`Forecast generation complete: ${successCount} succeeded, ${errorCount} failed`);
+    const successCount = results.filter(r => r.status === 'success').length;
+    const failureCount = results.filter(r => r.status === 'error').length;
+
+    console.log(`Forecast generation complete: ${successCount} success, ${failureCount} failures`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        totalListings: listings?.length || 0,
-        successCount,
-        errorCount,
+        total: listings?.length || 0,
+        successful: successCount,
+        failed: failureCount,
         results
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error in generate-all-forecasts:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
