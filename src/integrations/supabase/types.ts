@@ -144,6 +144,42 @@ export type Database = {
         }
         Relationships: []
       }
+      property_goals: {
+        Row: {
+          budget_revenue: number | null
+          created_at: string
+          goal_revenue: number | null
+          id: string
+          listing_id: string
+          month: number
+          projection_revenue: number | null
+          updated_at: string
+          year: number
+        }
+        Insert: {
+          budget_revenue?: number | null
+          created_at?: string
+          goal_revenue?: number | null
+          id?: string
+          listing_id: string
+          month: number
+          projection_revenue?: number | null
+          updated_at?: string
+          year: number
+        }
+        Update: {
+          budget_revenue?: number | null
+          created_at?: string
+          goal_revenue?: number | null
+          id?: string
+          listing_id?: string
+          month?: number
+          projection_revenue?: number | null
+          updated_at?: string
+          year?: number
+        }
+        Relationships: []
+      }
       reservations: {
         Row: {
           check_in: string | null

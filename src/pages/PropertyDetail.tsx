@@ -10,6 +10,8 @@ import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, 
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
 import { TrendChart } from "@/components/TrendChart";
 import { PacingReport } from "@/components/PacingReport";
+import { GoalsInput } from "@/components/GoalsInput";
+import { GoalsComparison } from "@/components/GoalsComparison";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -532,6 +534,12 @@ export default function PropertyDetail() {
 
         {/* Pacing Report */}
         <PacingReport reservations={reservations} />
+
+        {/* Goals Comparison */}
+        <GoalsComparison listingId={id!} reservations={reservations} />
+
+        {/* Goals Input */}
+        <GoalsInput listingId={id!} />
 
         {/* Recent Reservations */}
         <Card>
