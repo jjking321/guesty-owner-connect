@@ -8,9 +8,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, Filter, X, CalendarIcon } from "lucide-react";
+import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,24 @@ export default function Reservations() {
   const [maxGuests, setMaxGuests] = useState<string>("");
   const [minAccommodation, setMinAccommodation] = useState<string>("");
   const [maxAccommodation, setMaxAccommodation] = useState<string>("");
+
+  // Column visibility states
+  const [visibleColumns, setVisibleColumns] = useState({
+    property: true,
+    checkIn: true,
+    checkOut: true,
+    nights: true,
+    guests: true,
+    source: true,
+    status: true,
+    accommodation: true,
+    adr: true,
+    ownerRevenue: true,
+  });
+
+  // Sorting states
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     loadData();
@@ -90,6 +109,20 @@ export default function Reservations() {
     }
   };
 
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+  };
+
+  const getSortIcon = (column: string) => {
+    if (sortColumn !== column) return <ArrowUpDown className="ml-2 h-4 w-4" />;
+    return sortDirection === "asc" ? <ArrowUp className="ml-2 h-4 w-4" /> : <ArrowDown className="ml-2 h-4 w-4" />;
+  };
+
   const clearFilters = () => {
     setSelectedProperty("all");
     setSelectedSource("all");
@@ -104,10 +137,11 @@ export default function Reservations() {
     setMaxAccommodation("");
   };
 
+  
   const uniqueSources = Array.from(new Set(reservations.map(r => r.source).filter(Boolean)));
   const uniqueStatuses = Array.from(new Set(reservations.map(r => r.status).filter(Boolean)));
   
-  const filteredReservations = reservations.filter((reservation) => {
+  let filteredReservations = reservations.filter((reservation) => {
     // Property filter
     if (selectedProperty !== "all" && reservation.listing_id !== selectedProperty) {
       return false;
@@ -158,6 +192,58 @@ export default function Reservations() {
     return true;
   });
 
+  // Apply sorting
+  if (sortColumn) {
+    filteredReservations = [...filteredReservations].sort((a, b) => {
+      let aValue, bValue;
+
+      switch (sortColumn) {
+        case "property":
+          aValue = getListingName(a.listing_id).toLowerCase();
+          bValue = getListingName(b.listing_id).toLowerCase();
+          break;
+        case "checkIn":
+          aValue = new Date(a.check_in).getTime();
+          bValue = new Date(b.check_in).getTime();
+          break;
+        case "checkOut":
+          aValue = new Date(a.check_out).getTime();
+          bValue = new Date(b.check_out).getTime();
+          break;
+        case "nights":
+          aValue = a.nights_count || 0;
+          bValue = b.nights_count || 0;
+          break;
+        case "guests":
+          aValue = a.guests_count || 0;
+          bValue = b.guests_count || 0;
+          break;
+        case "source":
+          aValue = (a.source || "").toLowerCase();
+          bValue = (b.source || "").toLowerCase();
+          break;
+        case "status":
+          aValue = (a.status || "").toLowerCase();
+          bValue = (b.status || "").toLowerCase();
+          break;
+        case "accommodation":
+          aValue = parseFloat(a.fare_accommodation_adjusted || 0);
+          bValue = parseFloat(b.fare_accommodation_adjusted || 0);
+          break;
+        case "adr":
+          aValue = a.nights_count > 0 ? parseFloat(a.fare_accommodation_adjusted || 0) / a.nights_count : 0;
+          bValue = b.nights_count > 0 ? parseFloat(b.fare_accommodation_adjusted || 0) / b.nights_count : 0;
+          break;
+        default:
+          return 0;
+      }
+
+      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
+      return 0;
+    });
+  }
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -167,6 +253,51 @@ export default function Reservations() {
             <p className="text-muted-foreground">View and manage all your bookings</p>
           </div>
           <div className="flex gap-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline">
+                  <Columns className="mr-2 h-4 w-4" />
+                  Columns
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64" align="end">
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium mb-3">Toggle Columns</h4>
+                    <div className="space-y-2">
+                      {Object.entries({
+                        property: "Property",
+                        checkIn: "Check In",
+                        checkOut: "Check Out",
+                        nights: "Nights",
+                        guests: "Guests",
+                        source: "Source",
+                        status: "Status",
+                        accommodation: "Accommodation",
+                        adr: "ADR",
+                        ownerRevenue: "Owner Revenue",
+                      }).map(([key, label]) => (
+                        <div key={key} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={key}
+                            checked={visibleColumns[key as keyof typeof visibleColumns]}
+                            onCheckedChange={(checked) =>
+                              setVisibleColumns((prev) => ({ ...prev, [key]: checked }))
+                            }
+                          />
+                          <label
+                            htmlFor={key}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                          >
+                            {label}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
             <Button onClick={() => setShowFilters(!showFilters)} variant="outline">
               <Filter className="mr-2 h-4 w-4" />
               {showFilters ? "Hide" : "Show"} Filters
@@ -385,16 +516,117 @@ export default function Reservations() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Property</TableHead>
-                  <TableHead>Check In</TableHead>
-                  <TableHead>Check Out</TableHead>
-                  <TableHead className="text-center">Nights</TableHead>
-                  <TableHead className="text-center">Guests</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Accommodation</TableHead>
-                  <TableHead className="text-right">ADR</TableHead>
-                  <TableHead className="text-right">Owner Revenue</TableHead>
+                  {visibleColumns.property && (
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("property")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Property
+                        {getSortIcon("property")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.checkIn && (
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("checkIn")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Check In
+                        {getSortIcon("checkIn")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.checkOut && (
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("checkOut")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Check Out
+                        {getSortIcon("checkOut")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.nights && (
+                    <TableHead className="text-center">
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("nights")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Nights
+                        {getSortIcon("nights")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.guests && (
+                    <TableHead className="text-center">
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("guests")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Guests
+                        {getSortIcon("guests")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.source && (
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("source")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Source
+                        {getSortIcon("source")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.status && (
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("status")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Status
+                        {getSortIcon("status")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.accommodation && (
+                    <TableHead className="text-right">
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("accommodation")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        Accommodation
+                        {getSortIcon("accommodation")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.adr && (
+                    <TableHead className="text-right">
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort("adr")}
+                        className="h-auto p-0 hover:bg-transparent"
+                      >
+                        ADR
+                        {getSortIcon("adr")}
+                      </Button>
+                    </TableHead>
+                  )}
+                  {visibleColumns.ownerRevenue && (
+                    <TableHead className="text-right">Owner Revenue</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -405,54 +637,74 @@ export default function Reservations() {
                   
                   return (
                     <TableRow key={reservation.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{getListingName(reservation.listing_id)}</div>
-                          {getListingAddress(reservation.listing_id) && (
-                            <div className="text-xs text-muted-foreground">
-                              {getListingAddress(reservation.listing_id)}
-                            </div>
+                      {visibleColumns.property && (
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{getListingName(reservation.listing_id)}</div>
+                            {getListingAddress(reservation.listing_id) && (
+                              <div className="text-xs text-muted-foreground">
+                                {getListingAddress(reservation.listing_id)}
+                              </div>
+                            )}
+                            {reservation.confirmation_code && (
+                              <div className="text-xs text-muted-foreground mt-0.5">
+                                {reservation.confirmation_code}
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                      {visibleColumns.checkIn && (
+                        <TableCell>
+                          {new Date(reservation.check_in).toLocaleDateString()}
+                        </TableCell>
+                      )}
+                      {visibleColumns.checkOut && (
+                        <TableCell>
+                          {new Date(reservation.check_out).toLocaleDateString()}
+                        </TableCell>
+                      )}
+                      {visibleColumns.nights && (
+                        <TableCell className="text-center">
+                          {reservation.nights_count}
+                        </TableCell>
+                      )}
+                      {visibleColumns.guests && (
+                        <TableCell className="text-center">
+                          {reservation.guests_count}
+                        </TableCell>
+                      )}
+                      {visibleColumns.source && (
+                        <TableCell>
+                          {reservation.source && (
+                            <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-muted">
+                              {reservation.source}
+                            </span>
                           )}
-                          {reservation.confirmation_code && (
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              {reservation.confirmation_code}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {new Date(reservation.check_in).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        {new Date(reservation.check_out).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {reservation.nights_count}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {reservation.guests_count}
-                      </TableCell>
-                      <TableCell>
-                        {reservation.source && (
-                          <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-muted">
-                            {reservation.source}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusColor(reservation.status)}>
-                          {reservation.status || "Unknown"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-semibold">
-                        ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground">
-                        ${adr.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground">
-                        ${parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                      </TableCell>
+                        </TableCell>
+                      )}
+                      {visibleColumns.status && (
+                        <TableCell>
+                          <Badge variant={getStatusColor(reservation.status)}>
+                            {reservation.status || "Unknown"}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {visibleColumns.accommodation && (
+                        <TableCell className="text-right font-semibold">
+                          ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </TableCell>
+                      )}
+                      {visibleColumns.adr && (
+                        <TableCell className="text-right text-muted-foreground">
+                          ${adr.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </TableCell>
+                      )}
+                      {visibleColumns.ownerRevenue && (
+                        <TableCell className="text-right text-muted-foreground">
+                          ${parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}
