@@ -113,6 +113,42 @@ export default function PropertyDetail() {
       .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   };
 
+  const calculateMonthlyRevenue = () => {
+    if (reservations.length === 0) return [];
+
+    const monthlyData = new Map<string, number>();
+
+    // Get last 12 months
+    const currentDate = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const monthDate = subMonths(currentDate, i);
+      const monthKey = format(monthDate, 'yyyy-MM');
+      monthlyData.set(monthKey, 0);
+    }
+
+    // Process each reservation - assign revenue to check-in month
+    reservations.forEach((reservation) => {
+      if (!reservation.check_in || !reservation.fare_accommodation_adjusted) return;
+
+      const checkIn = parseISO(reservation.check_in);
+      const monthKey = format(checkIn, 'yyyy-MM');
+      
+      if (monthlyData.has(monthKey)) {
+        const currentRevenue = monthlyData.get(monthKey)!;
+        monthlyData.set(monthKey, currentRevenue + parseFloat(reservation.fare_accommodation_adjusted));
+      }
+    });
+
+    // Convert to array
+    return Array.from(monthlyData.entries())
+      .map(([monthKey, revenue]) => ({
+        month: format(parseISO(monthKey + '-01'), 'MMM yyyy'),
+        monthKey,
+        revenue,
+      }))
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  };
+
   const calculateMetrics = () => {
     if (reservations.length === 0) {
       return {
@@ -154,6 +190,7 @@ export default function PropertyDetail() {
 
   const metrics = calculateMetrics();
   const monthlyOccupancy = calculateMonthlyOccupancy();
+  const monthlyRevenue = calculateMonthlyRevenue();
 
   if (loading) {
     return (
@@ -358,67 +395,125 @@ export default function PropertyDetail() {
           </Card>
         </div>
 
-        {/* Occupancy Trend Chart */}
-        {monthlyOccupancy.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Occupancy Trend</CardTitle>
-              <CardDescription>Monthly occupancy rate over the last 12 months</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ChartContainer
-                config={{
-                  occupancyRate: {
-                    label: "Occupancy Rate",
-                    color: "hsl(var(--chart-1))",
-                  },
-                }}
-                className="h-[300px]"
-              >
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={monthlyOccupancy}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis 
-                      dataKey="month" 
-                      className="text-xs"
-                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                    />
-                    <YAxis 
-                      className="text-xs"
-                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                      label={{ value: 'Occupancy %', angle: -90, position: 'insideLeft' }}
-                    />
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          formatter={(value, name) => (
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{name}:</span>
-                              <span>{Number(value).toFixed(1)}%</span>
-                            </div>
-                          )}
-                          labelFormatter={(label, payload) => {
-                            if (payload && payload[0]) {
-                              const data = payload[0].payload;
-                              return `${label} - ${data.nightsBooked}/${data.totalDays} nights`;
-                            }
-                            return label;
-                          }}
-                        />
-                      }
-                    />
-                    <Bar 
-                      dataKey="occupancyRate" 
-                      fill="hsl(var(--chart-1))" 
-                      radius={[4, 4, 0, 0]}
-                      name="Occupancy Rate"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-        )}
+        {/* Charts */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Occupancy Trend Chart */}
+          {monthlyOccupancy.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Occupancy Trend</CardTitle>
+                <CardDescription>Monthly occupancy rate over the last 12 months</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer
+                  config={{
+                    occupancyRate: {
+                      label: "Occupancy Rate",
+                      color: "hsl(var(--chart-1))",
+                    },
+                  }}
+                  className="h-[300px]"
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyOccupancy}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis 
+                        dataKey="month" 
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <YAxis 
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                        label={{ value: 'Occupancy %', angle: -90, position: 'insideLeft' }}
+                      />
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value, name) => (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{name}:</span>
+                                <span>{Number(value).toFixed(1)}%</span>
+                              </div>
+                            )}
+                            labelFormatter={(label, payload) => {
+                              if (payload && payload[0]) {
+                                const data = payload[0].payload;
+                                return `${label} - ${data.nightsBooked}/${data.totalDays} nights`;
+                              }
+                              return label;
+                            }}
+                          />
+                        }
+                      />
+                      <Bar 
+                        dataKey="occupancyRate" 
+                        fill="hsl(var(--chart-1))" 
+                        radius={[4, 4, 0, 0]}
+                        name="Occupancy Rate"
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Revenue Trend Chart */}
+          {monthlyRevenue.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Revenue Trend</CardTitle>
+                <CardDescription>Monthly revenue over the last 12 months</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer
+                  config={{
+                    revenue: {
+                      label: "Revenue",
+                      color: "hsl(var(--chart-2))",
+                    },
+                  }}
+                  className="h-[300px]"
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyRevenue}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis 
+                        dataKey="month" 
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <YAxis 
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                        label={{ value: 'Revenue ($)', angle: -90, position: 'insideLeft' }}
+                      />
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value, name) => (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{name}:</span>
+                                <span>${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                              </div>
+                            )}
+                          />
+                        }
+                      />
+                      <Bar 
+                        dataKey="revenue" 
+                        fill="hsl(var(--chart-2))" 
+                        radius={[4, 4, 0, 0]}
+                        name="Revenue"
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
         {/* Recent Reservations */}
         <Card>
