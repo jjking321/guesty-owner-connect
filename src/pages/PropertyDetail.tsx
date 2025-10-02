@@ -384,6 +384,7 @@ export default function PropertyDetail() {
         totalGuests: 0,
         averageGuestsPerReservation: 0,
         overallOccupancy: 0,
+        revPAR: 0,
       };
     }
 
@@ -400,6 +401,9 @@ export default function PropertyDetail() {
       ? monthlyOccupancy.reduce((sum, month) => sum + month.occupancyRate, 0) / monthlyOccupancy.length
       : 0;
 
+    // Calculate RevPAR = ADR × Occupancy Rate
+    const revPAR = averageADR * (overallOccupancy / 100);
+
     return {
       totalReservations: reservations.length,
       totalRevenue,
@@ -409,6 +413,7 @@ export default function PropertyDetail() {
       totalGuests,
       averageGuestsPerReservation,
       overallOccupancy,
+      revPAR,
     };
   };
 
@@ -594,13 +599,15 @@ export default function PropertyDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Users className="h-4 w-4 text-muted-foreground" />
-                Total Guests
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                RevPAR
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{metrics.totalGuests}</div>
-              <p className="text-xs text-muted-foreground mt-1">All confirmed bookings</p>
+              <div className="text-2xl font-bold">
+                ${metrics.revPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Revenue per available room</p>
             </CardContent>
           </Card>
 
