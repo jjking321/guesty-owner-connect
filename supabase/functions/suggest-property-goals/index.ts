@@ -141,17 +141,58 @@ Target Year: ${year}`;
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
       console.error('AI gateway error:', aiResponse.status, errorText);
-      
-      if (aiResponse.status === 402) {
+
+      if (aiResponse.status === 402 || aiResponse.status === 429) {
+        // Fallback heuristic goals using historical data
+        const years = Object.keys(monthlyData)
+          .map((y) => Number(y))
+          .filter((y) => y < year)
+          .sort((a, b) => a - b);
+
+        const lastYear = years[years.length - 1];
+        const prevYear = years[years.length - 2];
+
+        const sumForYear = (y: number) =>
+          monthlyData[y]
+            ? Object.values(monthlyData[y]).reduce((s, m) => s + (m?.revenue || 0), 0)
+            : 0;
+
+        let yoy = 0.03; // default modest growth
+        if (lastYear && prevYear) {
+          const prevSum = sumForYear(prevYear);
+          const lastSum = sumForYear(lastYear);
+          if (prevSum > 0) {
+            yoy = Math.max(-0.2, Math.min(0.3, (lastSum - prevSum) / prevSum));
+          }
+        }
+
+        const roundTo = (n: number, base = 100) => Math.round((n || 0) / base) * base;
+
+        const goals = Array.from({ length: 12 }, (_, i) => {
+          const m = i + 1;
+          const vals = years
+            .map((y) => monthlyData[y]?.[m]?.revenue || 0)
+            .filter((v) => v > 0);
+          const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+          const peak = vals.length ? Math.max(...vals) : 0;
+          return {
+            month: m,
+            budget: roundTo(avg * 0.9),
+            projection: roundTo(avg * (1 + yoy)),
+            goal: roundTo(Math.max(peak * 1.05, avg * 1.2)),
+          };
+        });
+
+        const reasoning = `Heuristic fallback: used historical monthly averages (${years.join(", ")}) with YoY growth ${Math.round(
+          yoy * 100,
+        )}% and peak-based stretch targets.`;
+
         return new Response(
-          JSON.stringify({ 
-            error: 'Insufficient AI credits. Please add credits to your workspace to use AI features.',
-            code: 402 
-          }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ goals, reasoning, source: 'fallback' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
         );
       }
-      
+
       throw new Error(`AI gateway error: ${aiResponse.status}`);
     }
 
