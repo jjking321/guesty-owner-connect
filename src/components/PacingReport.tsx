@@ -95,21 +95,29 @@ export function PacingReport({ reservations }: PacingReportProps) {
       // Calculate days in this month
       const daysInMonth = new Date(year, month + 1, 0).getDate();
       
-      // Current period booked nights for this specific month
+      // Current period booked nights for this specific month (check-in in this month, confirmed by today)
       const currentNights = reservations
         .filter((r) => {
-          if (!r.check_in) return false;
+          if (!r.check_in || !r.created_at_guesty) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === year && checkIn.getMonth() === month;
+          const createdAt = parseISO(r.created_at_guesty);
+          const todayThisYear = new Date(year, today.getMonth(), today.getDate());
+          return checkIn.getFullYear() === year && 
+                 checkIn.getMonth() === month &&
+                 createdAt <= todayThisYear;
         })
         .reduce((sum, r) => sum + (r.nights_count || 0), 0);
       
-      // Last year same month booked nights
+      // Last year same month booked nights (check-in in same month last year, confirmed by same date last year)
       const lastYearNights = reservations
         .filter((r) => {
-          if (!r.check_in) return false;
+          if (!r.check_in || !r.created_at_guesty) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === year - 1 && checkIn.getMonth() === month;
+          const createdAt = parseISO(r.created_at_guesty);
+          const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
+          return checkIn.getFullYear() === year - 1 && 
+                 checkIn.getMonth() === month &&
+                 createdAt <= todayLastYear;
         })
         .reduce((sum, r) => sum + (r.nights_count || 0), 0);
       
@@ -140,21 +148,29 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const year = targetDate.getFullYear();
       const month = targetDate.getMonth();
       
-      // Current period revenue for this specific month
+      // Current period revenue for this specific month (check-in in this month, confirmed by today)
       const currentRevenue = reservations
         .filter((r) => {
-          if (!r.check_in) return false;
+          if (!r.check_in || !r.created_at_guesty) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === year && checkIn.getMonth() === month;
+          const createdAt = parseISO(r.created_at_guesty);
+          const todayThisYear = new Date(year, today.getMonth(), today.getDate());
+          return checkIn.getFullYear() === year && 
+                 checkIn.getMonth() === month &&
+                 createdAt <= todayThisYear;
         })
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
       
-      // Last year same month revenue
+      // Last year same month revenue (check-in in same month last year, confirmed by same date last year)
       const lastYearRevenue = reservations
         .filter((r) => {
-          if (!r.check_in) return false;
+          if (!r.check_in || !r.created_at_guesty) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === year - 1 && checkIn.getMonth() === month;
+          const createdAt = parseISO(r.created_at_guesty);
+          const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
+          return checkIn.getFullYear() === year - 1 && 
+                 checkIn.getMonth() === month &&
+                 createdAt <= todayLastYear;
         })
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
       
