@@ -12,6 +12,7 @@ import { TrendChart } from "@/components/TrendChart";
 import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { PropertySettings } from "@/components/PropertySettings";
+import { RevenueForecast } from "@/components/RevenueForecast";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -639,6 +640,9 @@ export default function PropertyDetail() {
 
         {/* Pacing Report */}
         <PacingReport reservations={reservations} />
+
+        {/* Revenue Forecast */}
+        <RevenueForecast listingId={id!} />
 
         {/* Goals Comparison */}
         <GoalsComparison listingId={id!} reservations={reservations} />

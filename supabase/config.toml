@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.suggest-property-goals]
 verify_jwt = true
+
+[functions.forecast-revenue]
+verify_jwt = true
