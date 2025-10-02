@@ -549,6 +549,15 @@ export default function Reservations() {
           </Card>
         )}
 
+        {!loading && reservations.length > 0 && (
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>
+              Showing <span className="font-semibold text-foreground">{filteredReservations.length}</span> of{" "}
+              <span className="font-semibold text-foreground">{reservations.length}</span> reservations
+            </span>
+          </div>
+        )}
+
         {loading ? (
           <div className="text-center py-12 text-muted-foreground">Loading reservations...</div>
         ) : reservations.length === 0 ? (
