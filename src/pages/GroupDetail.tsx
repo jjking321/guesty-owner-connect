@@ -10,7 +10,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search } from "lucide-react";
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { TrendChart } from "@/components/TrendChart";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,13 +32,17 @@ export default function GroupDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isCreateSubGroupOpen, setIsCreateSubGroupOpen] = useState(false);
+  const [isAddPropertiesOpen, setIsAddPropertiesOpen] = useState(false);
   const [subGroupName, setSubGroupName] = useState("");
   const [subGroupDescription, setSubGroupDescription] = useState("");
   const [selectedListings, setSelectedListings] = useState<string[]>([]);
+  const [selectedNewListings, setSelectedNewListings] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [addSearchQuery, setAddSearchQuery] = useState("");
+  const [removeListingId, setRemoveListingId] = useState<string | null>(null);
 
-  const { data: group, isLoading: isGroupLoading } = useQuery({
+  const { data: group, isLoading: isGroupLoading, refetch: refetchGroup } = useQuery({
     queryKey: ["property-group", id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -104,6 +118,44 @@ export default function GroupDetail() {
     },
     enabled: directListingIds.length > 0 && isCreateSubGroupOpen,
   });
+
+  // Get all user's listings that are NOT in this group (for adding properties)
+  const { data: session } = useQuery({
+    queryKey: ["session"],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getSession();
+      return data.session;
+    },
+  });
+
+  const { data: allUserListings } = useQuery({
+    queryKey: ["all-user-listings"],
+    queryFn: async () => {
+      const { data: accounts, error: accountsError } = await supabase
+        .from("guesty_accounts")
+        .select("id")
+        .eq("user_id", session?.user?.id);
+
+      if (accountsError) throw accountsError;
+
+      const accountIds = accounts.map((a) => a.id);
+
+      const { data, error } = await supabase
+        .from("listings")
+        .select("*")
+        .in("guesty_account_id", accountIds)
+        .order("nickname");
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!session && isAddPropertiesOpen,
+  });
+
+  // Filter out listings that are already in this group
+  const unassignedListings = allUserListings?.filter(
+    (listing) => !directListingIds.includes(listing.id)
+  ) || [];
 
   const { data: reservations, isLoading: isReservationsLoading } = useQuery({
     queryKey: ["group-reservations", listingIds],
@@ -196,6 +248,75 @@ export default function GroupDetail() {
     lastYear: 0,
   }));
 
+  const handleAddProperties = async () => {
+    if (selectedNewListings.length === 0) {
+      toast({
+        title: "Select properties",
+        description: "Please select at least one property to add",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const members = selectedNewListings.map((listingId) => ({
+        group_id: id,
+        listing_id: listingId,
+      }));
+
+      const { error } = await supabase
+        .from("property_group_members")
+        .insert(members);
+
+      if (error) throw error;
+
+      toast({
+        title: "Properties added",
+        description: `${selectedNewListings.length} properties added to the group`,
+      });
+
+      setIsAddPropertiesOpen(false);
+      setSelectedNewListings([]);
+      refetchGroup();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRemoveProperty = async (listingId: string) => {
+    try {
+      const { error } = await supabase
+        .from("property_group_members")
+        .delete()
+        .eq("group_id", id)
+        .eq("listing_id", listingId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Property removed",
+        description: "Property has been removed from the group",
+      });
+
+      setRemoveListingId(null);
+      refetchGroup();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleCreateSubGroup = async () => {
     if (!subGroupName.trim()) {
       toast({
@@ -218,13 +339,12 @@ export default function GroupDetail() {
     setIsSubmitting(true);
 
     try {
-      const { data: session } = await supabase.auth.getSession();
       
       // Create sub-group
       const { data: subGroup, error: subGroupError } = await supabase
         .from("property_groups")
         .insert({
-          user_id: session.session?.user?.id,
+          user_id: session?.user?.id,
           name: subGroupName,
           description: subGroupDescription,
           parent_group_id: id,
@@ -316,14 +436,98 @@ export default function GroupDetail() {
             </div>
           </div>
 
-          {directListingIds.length > 0 && (
-            <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
+          <div className="flex gap-2">
+            <Dialog open={isAddPropertiesOpen} onOpenChange={setIsAddPropertiesOpen}>
               <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Sub-Group
+                <Button variant="outline">
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Add Properties
                 </Button>
               </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Add Properties to Group</DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4 mt-4">
+                  <div>
+                    <Label>Select Properties</Label>
+                    <div className="relative mb-2">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search properties..."
+                        value={addSearchQuery}
+                        onChange={(e) => setAddSearchQuery(e.target.value)}
+                        className="pl-9"
+                      />
+                    </div>
+                    <div className="border rounded-lg p-4 max-h-60 overflow-y-auto space-y-2">
+                      {unassignedListings.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          All your properties are already in this group
+                        </p>
+                      ) : (
+                        unassignedListings
+                          .filter((listing) => {
+                            const query = addSearchQuery.toLowerCase();
+                            const nickname = (listing.nickname || "").toLowerCase();
+                            return nickname.includes(query);
+                          })
+                          .map((listing) => (
+                            <div key={listing.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`add-${listing.id}`}
+                                checked={selectedNewListings.includes(listing.id)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setSelectedNewListings([...selectedNewListings, listing.id]);
+                                  } else {
+                                    setSelectedNewListings(selectedNewListings.filter((id) => id !== listing.id));
+                                  }
+                                }}
+                              />
+                              <label
+                                htmlFor={`add-${listing.id}`}
+                                className="flex items-center gap-2 cursor-pointer flex-1"
+                              >
+                                {listing.thumbnail && (
+                                  <img
+                                    src={listing.thumbnail}
+                                    alt={listing.nickname || "Property"}
+                                    className="w-10 h-10 rounded object-cover"
+                                  />
+                                )}
+                                <span className="text-sm">{listing.nickname || "Unnamed Property"}</span>
+                              </label>
+                            </div>
+                          ))
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {selectedNewListings.length} properties selected
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-4">
+                    <Button variant="outline" onClick={() => setIsAddPropertiesOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleAddProperties} disabled={isSubmitting}>
+                      {isSubmitting ? "Adding..." : "Add Properties"}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {directListingIds.length > 0 && (
+              <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Sub-Group
+                  </Button>
+                </DialogTrigger>
               <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Create Sub-Group</DialogTitle>
@@ -414,7 +618,8 @@ export default function GroupDetail() {
                 </div>
               </DialogContent>
             </Dialog>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
@@ -544,35 +749,85 @@ export default function GroupDetail() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Properties in Group</CardTitle>
+            <CardTitle>Properties in Group ({group.property_group_members.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {group.property_group_members.map((member: any) => (
-                <Card
-                  key={member.listing_id}
-                  className="cursor-pointer hover:shadow-lg transition-shadow"
-                  onClick={() => navigate(`/listings/${member.listing_id}`)}
+            {group.property_group_members.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Building2 className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No properties in this group yet</p>
+                <Button
+                  variant="outline"
+                  className="mt-4"
+                  onClick={() => setIsAddPropertiesOpen(true)}
                 >
-                  {member.listings?.thumbnail && (
-                    <div className="aspect-video overflow-hidden rounded-t-lg">
-                      <img
-                        src={member.listings.thumbnail}
-                        alt={member.listings.nickname || "Property"}
-                        className="w-full h-full object-cover"
-                      />
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Add Properties
+                </Button>
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {group.property_group_members.map((member: any) => (
+                  <Card
+                    key={member.listing_id}
+                    className="relative group/card"
+                  >
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      className="absolute top-2 right-2 z-10 opacity-0 group-hover/card:opacity-100 transition-opacity h-8 w-8"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRemoveListingId(member.listing_id);
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                    <div
+                      className="cursor-pointer"
+                      onClick={() => navigate(`/listings/${member.listing_id}`)}
+                    >
+                      {member.listings?.thumbnail && (
+                        <div className="aspect-video overflow-hidden rounded-t-lg">
+                          <img
+                            src={member.listings.thumbnail}
+                            alt={member.listings.nickname || "Property"}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )}
+                      <CardContent className="pt-4">
+                        <h3 className="font-semibold">
+                          {member.listings?.nickname || "Unnamed Property"}
+                        </h3>
+                      </CardContent>
                     </div>
-                  )}
-                  <CardContent className="pt-4">
-                    <h3 className="font-semibold">
-                      {member.listings?.nickname || "Unnamed Property"}
-                    </h3>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                  </Card>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
+
+        <AlertDialog open={!!removeListingId} onOpenChange={() => setRemoveListingId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove Property</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to remove this property from the group? This will not delete the property itself.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => removeListingId && handleRemoveProperty(removeListingId)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </DashboardLayout>
   );
