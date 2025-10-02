@@ -401,8 +401,13 @@ export default function PropertyDetail() {
   };
 
   const calculateProjectionAchievement = () => {
+    console.log('=== Projection Achievement Debug ===');
+    console.log('Revenue Forecast:', revenueForecast);
+    console.log('Goals Data:', goalsData);
+    
     // If no forecast or goals data, return null
     if (!revenueForecast || goalsData.length === 0) {
+      console.log('Missing data - forecast:', !!revenueForecast, 'goals count:', goalsData.length);
       return null;
     }
 
@@ -410,24 +415,32 @@ export default function PropertyDetail() {
     const totalProjectionGoal = goalsData.reduce((sum, goal) => 
       sum + parseFloat(goal.projection_revenue || 0), 0
     );
+    console.log('Total Projection Goal:', totalProjectionGoal);
 
     // If no projection goal set, return null
     if (totalProjectionGoal === 0) {
+      console.log('No projection goal set');
       return null;
     }
 
     // Get projected end-of-year revenue (from forecast)
     const projectedYearEndRevenue = (revenueForecast.total_forecast as any)?.p50 || 0;
+    const revenueOnBooks = parseFloat(revenueForecast.revenue_on_books || 0);
+    
+    console.log('Projected Year-End Revenue:', projectedYearEndRevenue);
+    console.log('Revenue On Books:', revenueOnBooks);
+    console.log('Additional Forecasted:', projectedYearEndRevenue - revenueOnBooks);
 
     // Calculate percentage
     const achievementPercentage = (projectedYearEndRevenue / totalProjectionGoal) * 100;
+    console.log('Achievement Percentage:', achievementPercentage.toFixed(2) + '%');
 
     return {
       percentage: achievementPercentage,
       projectedRevenue: projectedYearEndRevenue,
       projectionGoal: totalProjectionGoal,
-      onBooks: parseFloat(revenueForecast.revenue_on_books || 0),
-      forecasted: projectedYearEndRevenue - parseFloat(revenueForecast.revenue_on_books || 0)
+      onBooks: revenueOnBooks,
+      forecasted: projectedYearEndRevenue - revenueOnBooks
     };
   };
 
