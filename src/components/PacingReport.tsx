@@ -80,40 +80,45 @@ export function PacingReport({ reservations }: PacingReportProps) {
 
   const calculateCumulativeOccupancy = (): CumulativeDataPoint[] => {
     const data: CumulativeDataPoint[] = [];
+    const today = new Date();
     
-    for (let month = 0; month <= currentMonth; month++) {
-      const monthName = format(new Date(2000, month, 1), 'MMM');
+    // Start from 12 months ago
+    const startDate = new Date(today.getFullYear(), today.getMonth() - 12, 1);
+    
+    // Generate 18 months of data (past 12 + next 6)
+    for (let i = 0; i < 18; i++) {
+      const targetDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+      const monthName = format(targetDate, 'MMM yy');
+      const year = targetDate.getFullYear();
+      const month = targetDate.getMonth();
       
-      // Calculate total days from Jan to current month
-      let totalDays = 0;
-      for (let m = 0; m <= month; m++) {
-        totalDays += new Date(currentYear, m + 1, 0).getDate();
-      }
+      // Calculate days in this month
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
       
-      // Current year booked nights YTD
-      const currentYearNights = reservations
+      // Current period booked nights for this specific month
+      const currentNights = reservations
         .filter((r) => {
           if (!r.check_in) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === currentYear && checkIn.getMonth() <= month;
+          return checkIn.getFullYear() === year && checkIn.getMonth() === month;
         })
         .reduce((sum, r) => sum + (r.nights_count || 0), 0);
       
-      // Last year booked nights YTD
+      // Last year same month booked nights
       const lastYearNights = reservations
         .filter((r) => {
           if (!r.check_in) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === lastYear && checkIn.getMonth() <= month;
+          return checkIn.getFullYear() === year - 1 && checkIn.getMonth() === month;
         })
         .reduce((sum, r) => sum + (r.nights_count || 0), 0);
       
-      const currentYearOccupancy = totalDays > 0 ? (currentYearNights / totalDays) * 100 : 0;
-      const lastYearOccupancy = totalDays > 0 ? (lastYearNights / totalDays) * 100 : 0;
+      const currentOccupancy = daysInMonth > 0 ? (currentNights / daysInMonth) * 100 : 0;
+      const lastYearOccupancy = daysInMonth > 0 ? (lastYearNights / daysInMonth) * 100 : 0;
       
       data.push({
         month: monthName,
-        currentYear: Math.round(currentYearOccupancy * 10) / 10,
+        currentYear: Math.round(currentOccupancy * 10) / 10,
         lastYear: Math.round(lastYearOccupancy * 10) / 10,
       });
     }
@@ -123,31 +128,39 @@ export function PacingReport({ reservations }: PacingReportProps) {
 
   const calculateCumulativeRevenue = (): CumulativeDataPoint[] => {
     const data: CumulativeDataPoint[] = [];
+    const today = new Date();
     
-    for (let month = 0; month <= currentMonth; month++) {
-      const monthName = format(new Date(2000, month, 1), 'MMM');
+    // Start from 12 months ago
+    const startDate = new Date(today.getFullYear(), today.getMonth() - 12, 1);
+    
+    // Generate 18 months of data (past 12 + next 6)
+    for (let i = 0; i < 18; i++) {
+      const targetDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+      const monthName = format(targetDate, 'MMM yy');
+      const year = targetDate.getFullYear();
+      const month = targetDate.getMonth();
       
-      // Current year revenue YTD
-      const currentYearRevenue = reservations
+      // Current period revenue for this specific month
+      const currentRevenue = reservations
         .filter((r) => {
           if (!r.check_in) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === currentYear && checkIn.getMonth() <= month;
+          return checkIn.getFullYear() === year && checkIn.getMonth() === month;
         })
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
       
-      // Last year revenue YTD
+      // Last year same month revenue
       const lastYearRevenue = reservations
         .filter((r) => {
           if (!r.check_in) return false;
           const checkIn = parseISO(r.check_in);
-          return checkIn.getFullYear() === lastYear && checkIn.getMonth() <= month;
+          return checkIn.getFullYear() === year - 1 && checkIn.getMonth() === month;
         })
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
       
       data.push({
         month: monthName,
-        currentYear: Math.round(currentYearRevenue),
+        currentYear: Math.round(currentRevenue),
         lastYear: Math.round(lastYearRevenue),
       });
     }
@@ -280,9 +293,9 @@ export function PacingReport({ reservations }: PacingReportProps) {
       {/* Cumulative Pacing Chart */}
       <Card>
         <CardHeader>
-          <CardTitle>Year-to-Date Performance Trends</CardTitle>
+          <CardTitle>Rolling 18-Month Performance</CardTitle>
           <CardDescription>
-            Cumulative comparison: {currentYear} vs {lastYear}
+            Past 12 months + Next 6 months: Current vs Last Year
           </CardDescription>
         </CardHeader>
         <CardContent>
