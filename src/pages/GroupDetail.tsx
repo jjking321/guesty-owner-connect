@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,8 @@ import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpe
 import { MetricCard } from "@/components/MetricCard";
 import { TrendChart } from "@/components/TrendChart";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PacingReport } from "@/components/PacingReport";
 import { format, startOfYear, endOfYear } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -199,6 +201,26 @@ export default function GroupDetail() {
     enabled: listingIds.length > 0,
   });
 
+  // Fetch all forecasts for properties in the group
+  const { data: forecasts } = useQuery({
+    queryKey: ["group-forecasts", listingIds],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const currentYear = new Date().getFullYear();
+
+      const { data, error } = await supabase
+        .from("revenue_forecasts")
+        .select("*")
+        .in("listing_id", listingIds)
+        .eq("year", currentYear);
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: listingIds.length > 0,
+  });
+
   // Calculate aggregated metrics
   const totalRevenue = reservations?.reduce((sum, r) => sum + (Number(r.owner_revenue) || 0), 0) || 0;
   const totalReservations = reservations?.length || 0;
@@ -207,6 +229,33 @@ export default function GroupDetail() {
   const totalGoalRevenue = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
   const totalBudgetRevenue = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
   const totalProjectionRevenue = goals?.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0) || 0;
+
+  // Calculate aggregated forecast
+  const aggregatedForecast = forecasts?.reduce((acc, f) => {
+    const totalForecast = (f.total_forecast as any)?.p50 || 0;
+    const revenueOnBooks = Number(f.revenue_on_books) || 0;
+    return {
+      totalProjected: acc.totalProjected + totalForecast,
+      totalOnBooks: acc.totalOnBooks + revenueOnBooks,
+    };
+  }, { totalProjected: 0, totalOnBooks: 0 });
+
+  // Calculate goal probabilities (average across all properties)
+  const avgGoalProbabilities = forecasts?.reduce((acc, f: any) => {
+    const probs = f.goal_probabilities || { budget: 0, projection: 0, goal: 0 };
+    return {
+      budget: acc.budget + probs.budget,
+      projection: acc.projection + probs.projection,
+      goal: acc.goal + probs.goal,
+      count: acc.count + 1,
+    };
+  }, { budget: 0, projection: 0, goal: 0, count: 0 });
+
+  const goalProbabilities = avgGoalProbabilities?.count ? {
+    budget: avgGoalProbabilities.budget / avgGoalProbabilities.count,
+    projection: avgGoalProbabilities.projection / avgGoalProbabilities.count,
+    goal: avgGoalProbabilities.goal / avgGoalProbabilities.count,
+  } : null;
 
   // Prepare chart data
   const monthlyData = Array.from({ length: 12 }, (_, i) => {
@@ -600,20 +649,159 @@ export default function GroupDetail() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Revenue vs Goals</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <TrendChart
-              occupancyData={occupancyData}
-              revenueData={revenueData}
-              revparData={revparData}
-              goalsData={goals || []}
-              reservations={reservations || []}
-            />
-          </CardContent>
-        </Card>
+        <Tabs defaultValue="overview" className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-3">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="forecast">Forecast</TabsTrigger>
+            <TabsTrigger value="pacing">Pacing</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Revenue vs Goals</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TrendChart
+                  occupancyData={occupancyData}
+                  revenueData={revenueData}
+                  revparData={revparData}
+                  goalsData={goals || []}
+                  reservations={reservations || []}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="forecast" className="space-y-6">
+            {aggregatedForecast && goalProbabilities ? (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Aggregated Revenue Forecast</CardTitle>
+                    <CardDescription>
+                      Combined forecast from all {listingIds.length} properties in this group
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-6 text-center">
+                      <p className="text-sm font-medium text-muted-foreground mb-2">
+                        Projected End-of-Year Revenue
+                      </p>
+                      <p className="text-4xl font-bold mb-2">
+                        ${aggregatedForecast.totalProjected.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </p>
+                      <div className="mt-4 pt-4 border-t">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="text-center">
+                            <p className="text-muted-foreground">Revenue On Books</p>
+                            <p className="font-semibold">
+                              ${aggregatedForecast.totalOnBooks.toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-muted-foreground">Additional Forecasted</p>
+                            <p className="font-semibold">
+                              ${(aggregatedForecast.totalProjected - aggregatedForecast.totalOnBooks).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium mb-4">Average Probability of Hitting Targets</h4>
+                      <div className="grid grid-cols-3 gap-4">
+                        {['budget', 'projection', 'goal'].map((type) => {
+                          const probability = goalProbabilities[type as keyof typeof goalProbabilities];
+                          const target = type === 'budget' ? totalBudgetRevenue : 
+                                        type === 'projection' ? totalProjectionRevenue : 
+                                        totalGoalRevenue;
+                          const getColor = (prob: number) => {
+                            if (prob >= 70) return "text-green-600";
+                            if (prob >= 40) return "text-yellow-600";
+                            return "text-red-600";
+                          };
+
+                          return (
+                            <div key={type} className="flex flex-col items-center space-y-2">
+                              <div className="relative w-24 h-24">
+                                <svg className="transform -rotate-90 w-24 h-24">
+                                  <circle
+                                    cx="48"
+                                    cy="48"
+                                    r="40"
+                                    stroke="currentColor"
+                                    strokeWidth="8"
+                                    fill="transparent"
+                                    className="text-muted"
+                                  />
+                                  <circle
+                                    cx="48"
+                                    cy="48"
+                                    r="40"
+                                    stroke="currentColor"
+                                    strokeWidth="8"
+                                    fill="transparent"
+                                    strokeDasharray={`${2 * Math.PI * 40}`}
+                                    strokeDashoffset={`${2 * Math.PI * 40 * (1 - probability / 100)}`}
+                                    className={getColor(probability)}
+                                    strokeLinecap="round"
+                                  />
+                                </svg>
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                  <span className={`text-2xl font-bold ${getColor(probability)}`}>
+                                    {probability.toFixed(0)}%
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-center">
+                                <p className="text-sm font-medium capitalize">{type}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  ${target.toLocaleString()}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="text-center text-sm text-muted-foreground pt-4 border-t">
+                      <p>Forecasts are aggregated from {forecasts?.length || 0} of {listingIds.length} properties</p>
+                      <p className="mt-1">Individual property forecasts can be viewed on their detail pages</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            ) : (
+              <Card>
+                <CardContent className="text-center py-12">
+                  <p className="text-muted-foreground mb-4">
+                    No forecasts available yet for properties in this group
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Visit individual property pages to generate forecasts
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          <TabsContent value="pacing">
+            {reservations && reservations.length > 0 ? (
+              <PacingReport reservations={reservations} />
+            ) : (
+              <Card>
+                <CardContent className="text-center py-12">
+                  <p className="text-muted-foreground">
+                    No reservation data available for pacing report
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
 
         {subGroups && subGroups.length > 0 && (
           <Card>
