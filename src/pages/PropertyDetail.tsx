@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent } from "lucide-react";
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
 import { TrendChart } from "@/components/TrendChart";
+import { PacingReport } from "@/components/PacingReport";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -528,6 +529,9 @@ export default function PropertyDetail() {
           occupancyData={yearOverYearOccupancy}
           revenueData={yearOverYearRevenue}
         />
+
+        {/* Pacing Report */}
+        <PacingReport reservations={reservations} />
 
         {/* Recent Reservations */}
         <Card>
