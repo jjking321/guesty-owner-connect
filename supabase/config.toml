@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.forecast-revenue]
 verify_jwt = true
+
+[functions.generate-all-forecasts]
+verify_jwt = false

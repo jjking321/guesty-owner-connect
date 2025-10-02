@@ -257,31 +257,56 @@ serve(async (req) => {
 
     console.log(`Forecast complete: P50 = $${forecastedRevenue.p50.toFixed(0)}`);
 
-    return new Response(
-      JSON.stringify({
-        listingId,
+    const forecastData = {
+      listingId,
+      year,
+      asOfDate: today.toISOString(),
+      revenueOnBooks,
+      forecastedRevenue,
+      totalForecast: {
+        p50: forecastedRevenue.p50,
+        confidence: {
+          lower: simResults[Math.floor(simulations * 0.1)],
+          upper: simResults[Math.floor(simulations * 0.9)]
+        }
+      },
+      goalProbabilities,
+      monthlyForecasts,
+      insights
+    };
+
+    // Save forecast to database (upsert)
+    const { error: saveError } = await supabase
+      .from('revenue_forecasts')
+      .upsert({
+        listing_id: listingId,
         year,
-        asOfDate: today.toISOString(),
-        revenueOnBooks,
-        forecastedRevenue,
-        totalForecast: {
-          p50: forecastedRevenue.p50,
-          confidence: {
-            lower: simResults[Math.floor(simulations * 0.1)],
-            upper: simResults[Math.floor(simulations * 0.9)]
-          }
-        },
-        goalProbabilities,
-        monthlyForecasts,
+        generated_at: today.toISOString(),
+        revenue_on_books: revenueOnBooks,
+        forecasted_revenue: forecastedRevenue,
+        total_forecast: forecastData.totalForecast,
+        goal_probabilities: goalProbabilities,
+        monthly_forecasts: monthlyForecasts,
         insights
-      }),
+      }, {
+        onConflict: 'listing_id,year'
+      });
+
+    if (saveError) {
+      console.error('Error saving forecast:', saveError);
+    } else {
+      console.log('Forecast saved to database');
+    }
+
+    return new Response(
+      JSON.stringify(forecastData),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
     console.error('Error in forecast-revenue:', error);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

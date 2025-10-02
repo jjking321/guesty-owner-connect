@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -50,9 +50,42 @@ interface RevenueForecastProps {
 
 export function RevenueForecast({ listingId }: RevenueForecastProps) {
   const [forecast, setForecast] = useState<ForecastData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
+  // Load existing forecast from database
+  const loadForecast = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('revenue_forecasts')
+        .select('*')
+        .eq('listing_id', listingId)
+        .eq('year', new Date().getFullYear())
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (data) {
+        setForecast({
+          listingId: data.listing_id,
+          year: data.year,
+          asOfDate: data.generated_at,
+          revenueOnBooks: Number(data.revenue_on_books),
+          forecastedRevenue: data.forecasted_revenue as ForecastData['forecastedRevenue'],
+          totalForecast: data.total_forecast as ForecastData['totalForecast'],
+          goalProbabilities: data.goal_probabilities as ForecastData['goalProbabilities'],
+          monthlyForecasts: data.monthly_forecasts as ForecastData['monthlyForecasts'],
+          insights: data.insights as ForecastData['insights']
+        });
+      }
+    } catch (error) {
+      console.error('Error loading forecast:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Generate new forecast
   const generateForecast = async () => {
     setLoading(true);
     try {
@@ -64,8 +97,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
       setForecast(data);
       toast({
-        title: "Forecast Generated",
-        description: "Revenue forecast has been calculated using Monte Carlo simulation",
+        title: "Forecast Updated",
+        description: "Revenue forecast has been recalculated using the latest data",
       });
     } catch (error) {
       console.error('Error generating forecast:', error);
@@ -78,6 +111,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
       setLoading(false);
     }
   };
+
+  // Load forecast on mount
+  useEffect(() => {
+    loadForecast();
+  }, [listingId]);
 
   const ProbabilityGauge = ({ label, probability, target }: { label: string; probability: number; target: number }) => {
     const getColor = (prob: number) => {
@@ -151,6 +189,9 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
       <CardContent className="space-y-6">
         {!forecast && !loading && (
           <div className="text-center py-8">
+            <p className="text-muted-foreground mb-4">
+              No forecast available yet. Click below to generate your first forecast.
+            </p>
             <Button onClick={generateForecast} size="lg">
               Generate Forecast
             </Button>
@@ -309,13 +350,18 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               )}
             </div>
 
-            <div className="pt-4 border-t">
-              <Button onClick={generateForecast} variant="outline" size="sm">
-                Refresh Forecast
+            <div className="pt-4 border-t flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">
+                  Last updated: {new Date(forecast.asOfDate).toLocaleString()}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Forecasts are automatically regenerated weekly
+                </p>
+              </div>
+              <Button onClick={generateForecast} variant="outline" size="sm" disabled={loading}>
+                Refresh Now
               </Button>
-              <p className="text-xs text-muted-foreground mt-2">
-                Last updated: {new Date(forecast.asOfDate).toLocaleString()}
-              </p>
             </div>
           </>
         )}

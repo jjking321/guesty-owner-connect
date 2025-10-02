@@ -258,6 +258,51 @@ export type Database = {
           },
         ]
       }
+      revenue_forecasts: {
+        Row: {
+          created_at: string
+          forecasted_revenue: Json
+          generated_at: string
+          goal_probabilities: Json
+          id: string
+          insights: Json
+          listing_id: string
+          monthly_forecasts: Json
+          revenue_on_books: number
+          total_forecast: Json
+          updated_at: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          forecasted_revenue: Json
+          generated_at?: string
+          goal_probabilities: Json
+          id?: string
+          insights: Json
+          listing_id: string
+          monthly_forecasts: Json
+          revenue_on_books: number
+          total_forecast: Json
+          updated_at?: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          forecasted_revenue?: Json
+          generated_at?: string
+          goal_probabilities?: Json
+          id?: string
+          insights?: Json
+          listing_id?: string
+          monthly_forecasts?: Json
+          revenue_on_books?: number
+          total_forecast?: Json
+          updated_at?: string
+          year?: number
+        }
+        Relationships: []
+      }
       sync_jobs: {
         Row: {
           completed_at: string | null
