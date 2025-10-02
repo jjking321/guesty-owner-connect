@@ -396,7 +396,62 @@ export default function PropertyDetail() {
         </div>
 
         {/* Charts */}
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="space-y-6">
+          {/* Revenue Trend Chart */}
+          {monthlyRevenue.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Revenue Trend</CardTitle>
+                <CardDescription>Monthly revenue over the last 12 months</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer
+                  config={{
+                    revenue: {
+                      label: "Revenue",
+                      color: "hsl(var(--chart-2))",
+                    },
+                  }}
+                  className="h-[300px]"
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyRevenue}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis 
+                        dataKey="month" 
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      />
+                      <YAxis 
+                        className="text-xs"
+                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                        label={{ value: 'Revenue ($)', angle: -90, position: 'insideLeft' }}
+                      />
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value, name) => (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{name}:</span>
+                                <span>${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+                              </div>
+                            )}
+                          />
+                        }
+                      />
+                      <Bar 
+                        dataKey="revenue" 
+                        fill="hsl(var(--chart-2))" 
+                        radius={[4, 4, 0, 0]}
+                        name="Revenue"
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Occupancy Trend Chart */}
           {monthlyOccupancy.length > 0 && (
             <Card>
@@ -451,61 +506,6 @@ export default function PropertyDetail() {
                         fill="hsl(var(--chart-1))" 
                         radius={[4, 4, 0, 0]}
                         name="Occupancy Rate"
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Revenue Trend Chart */}
-          {monthlyRevenue.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Revenue Trend</CardTitle>
-                <CardDescription>Monthly revenue over the last 12 months</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer
-                  config={{
-                    revenue: {
-                      label: "Revenue",
-                      color: "hsl(var(--chart-2))",
-                    },
-                  }}
-                  className="h-[300px]"
-                >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyRevenue}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="month" 
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                      />
-                      <YAxis 
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                        label={{ value: 'Revenue ($)', angle: -90, position: 'insideLeft' }}
-                      />
-                      <ChartTooltip
-                        content={
-                          <ChartTooltipContent
-                            formatter={(value, name) => (
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{name}:</span>
-                                <span>${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                              </div>
-                            )}
-                          />
-                        }
-                      />
-                      <Bar 
-                        dataKey="revenue" 
-                        fill="hsl(var(--chart-2))" 
-                        radius={[4, 4, 0, 0]}
-                        name="Revenue"
                       />
                     </BarChart>
                   </ResponsiveContainer>
