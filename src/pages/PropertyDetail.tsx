@@ -21,6 +21,7 @@ export default function PropertyDetail() {
   const [listing, setListing] = useState<any>(null);
   const [reservations, setReservations] = useState<any[]>([]);
   const [goalsData, setGoalsData] = useState<any[]>([]);
+  const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -65,6 +66,18 @@ export default function PropertyDetail() {
 
       if (goalsError) throw goalsError;
       setGoalsData(goalsDataResult || []);
+
+      // Load revenue forecast for current year
+      const { data: forecastData, error: forecastError } = await supabase
+        .from('revenue_forecasts')
+        .select('*')
+        .eq('listing_id', id)
+        .eq('year', currentYear)
+        .maybeSingle();
+
+      if (!forecastError && forecastData) {
+        setRevenueForecast(forecastData);
+      }
     } catch (error: any) {
       toast({
         title: "Error loading property data",
@@ -387,6 +400,37 @@ export default function PropertyDetail() {
       .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
   };
 
+  const calculateProjectionAchievement = () => {
+    // If no forecast or goals data, return null
+    if (!revenueForecast || goalsData.length === 0) {
+      return null;
+    }
+
+    // Calculate total annual projection goal
+    const totalProjectionGoal = goalsData.reduce((sum, goal) => 
+      sum + parseFloat(goal.projection_revenue || 0), 0
+    );
+
+    // If no projection goal set, return null
+    if (totalProjectionGoal === 0) {
+      return null;
+    }
+
+    // Get projected end-of-year revenue (from forecast)
+    const projectedYearEndRevenue = (revenueForecast.total_forecast as any)?.p50 || 0;
+
+    // Calculate percentage
+    const achievementPercentage = (projectedYearEndRevenue / totalProjectionGoal) * 100;
+
+    return {
+      percentage: achievementPercentage,
+      projectedRevenue: projectedYearEndRevenue,
+      projectionGoal: totalProjectionGoal,
+      onBooks: parseFloat(revenueForecast.revenue_on_books || 0),
+      forecasted: projectedYearEndRevenue - parseFloat(revenueForecast.revenue_on_books || 0)
+    };
+  };
+
   const calculateMetrics = () => {
     if (reservations.length === 0) {
       return {
@@ -562,6 +606,30 @@ export default function PropertyDetail() {
                 <div className="text-2xl font-bold">{metrics.totalNights}</div>
                 <div className="text-sm text-muted-foreground">Total Nights Booked</div>
               </div>
+              
+              {(() => {
+                const projectionAchievement = calculateProjectionAchievement();
+                if (!projectionAchievement) return null;
+                
+                const { percentage, projectedRevenue, projectionGoal } = projectionAchievement;
+                const colorClass = percentage >= 100 ? 'text-green-600 dark:text-green-500' : 
+                                   percentage >= 80 ? 'text-yellow-600 dark:text-yellow-500' : 
+                                   'text-red-600 dark:text-red-500';
+                
+                return (
+                  <div>
+                    <div className={`text-2xl font-bold ${colorClass}`}>
+                      {percentage.toFixed(0)}%
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Projection Goal Achievement
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      ${projectedRevenue.toLocaleString('en-US', { maximumFractionDigits: 0 })} / ${projectionGoal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                    </div>
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </div>
