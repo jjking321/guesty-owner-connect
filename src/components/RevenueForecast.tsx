@@ -6,6 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface ForecastData {
   listingId: string;
@@ -31,6 +32,8 @@ interface ForecastData {
   monthlyForecasts: Array<{
     month: number;
     monthName: string;
+    isPast?: boolean;
+    actualRevenue?: number;
     revenueOnBooks: number;
     forecastedAdditional: { p50: number; p10: number; p90: number };
     totalForecast: { p50: number; p10: number; p90: number };
@@ -52,19 +55,24 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
   const [forecast, setForecast] = useState<ForecastData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const { toast } = useToast();
+
+  const currentYear = new Date().getFullYear();
+  const nextYear = currentYear + 1;
 
   useEffect(() => {
     loadForecast();
-  }, [listingId]);
+  }, [listingId, selectedYear]);
 
   const loadForecast = async () => {
+    setLoading(true);
     try {
       const { data, error } = await supabase
         .from('revenue_forecasts')
         .select('*')
         .eq('listing_id', listingId)
-        .eq('year', new Date().getFullYear())
+        .eq('year', selectedYear)
         .maybeSingle();
 
       if (error) throw error;
@@ -81,6 +89,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           monthlyForecasts: data.monthly_forecasts as any,
           insights: data.insights as any
         });
+      } else {
+        setForecast(null);
       }
     } catch (error) {
       console.error('Error loading forecast:', error);
@@ -93,7 +103,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
     setRefreshing(true);
     try {
       const { data, error } = await supabase.functions.invoke('forecast-revenue', {
-        body: { listingId, year: new Date().getFullYear() }
+        body: { listingId, year: selectedYear }
       });
 
       if (error) throw error;
@@ -101,7 +111,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
       setForecast(data);
       toast({
         title: "Forecast Updated",
-        description: "Revenue forecast has been recalculated using the latest data",
+        description: `Revenue forecast for ${selectedYear} has been recalculated`,
       });
     } catch (error) {
       console.error('Error generating forecast:', error);
@@ -186,17 +196,25 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               AI-powered year-end revenue projection using Monte Carlo simulation
             </CardDescription>
           </div>
-          {forecast && (
-            <Button 
-              onClick={generateForecast} 
-              variant="outline" 
-              size="sm"
-              disabled={refreshing}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            <Tabs value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
+              <TabsList>
+                <TabsTrigger value={currentYear.toString()}>{currentYear}</TabsTrigger>
+                <TabsTrigger value={nextYear.toString()}>{nextYear}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {forecast && (
+              <Button 
+                onClick={generateForecast} 
+                variant="outline" 
+                size="sm"
+                disabled={refreshing}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -235,13 +253,21 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 80% Confidence: ${forecast.totalForecast.confidence.lower.toLocaleString()} - ${forecast.totalForecast.confidence.upper.toLocaleString()}
               </p>
               <div className="mt-4 pt-4 border-t">
-                <div className="flex justify-around text-sm">
-                  <div>
-                    <p className="text-muted-foreground">On Books</p>
-                    <p className="font-semibold">${forecast.revenueOnBooks.toLocaleString()}</p>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div className="text-center">
+                    <p className="text-muted-foreground">Past Revenue</p>
+                    <p className="font-semibold">
+                      ${((forecast.totalForecast as any).pastRevenue || 0).toLocaleString()}
+                    </p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground">Forecasted</p>
+                  <div className="text-center">
+                    <p className="text-muted-foreground">Future Confirmed</p>
+                    <p className="font-semibold">
+                      ${((forecast.totalForecast as any).futureConfirmed || 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-muted-foreground">Forecasted Add'l</p>
                     <p className="font-semibold">
                       ${(forecast.totalForecast.p50 - forecast.revenueOnBooks).toLocaleString()}
                     </p>
@@ -280,6 +306,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                   <thead className="border-b">
                     <tr className="text-left">
                       <th className="pb-2">Month</th>
+                      <th className="pb-2 text-right">Actual</th>
                       <th className="pb-2 text-right">On Books</th>
                       <th className="pb-2 text-right">Additional</th>
                       <th className="pb-2 text-right">Total</th>
@@ -292,21 +319,40 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                       <tr key={month.month} className="border-b">
                         <td className="py-2 font-medium">{month.monthName}</td>
                         <td className="py-2 text-right">
-                          ${month.revenueOnBooks.toLocaleString()}
+                          {month.isPast ? (
+                            <span className="font-semibold">${(month.actualRevenue || 0).toLocaleString()}</span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
+                        <td className="py-2 text-right">
+                          {!month.isPast ? (
+                            `$${month.revenueOnBooks.toLocaleString()}`
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
                         </td>
                         <td className="py-2 text-right text-muted-foreground">
-                          ${month.forecastedAdditional.p50.toLocaleString()}
+                          {!month.isPast ? (
+                            `$${month.forecastedAdditional.p50.toLocaleString()}`
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
                         </td>
                         <td className="py-2 text-right font-semibold">
                           ${month.totalForecast.p50.toLocaleString()}
                         </td>
                         <td className="py-2 text-center">
-                          <span className={month.bookingVelocity >= 1 ? "text-green-600" : "text-red-600"}>
-                            {(month.bookingVelocity * 100).toFixed(0)}%
-                          </span>
+                          {!month.isPast ? (
+                            <span className={month.bookingVelocity >= 1 ? "text-green-600" : "text-red-600"}>
+                              {(month.bookingVelocity * 100).toFixed(0)}%
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
                         </td>
                         <td className="py-2 text-center">
-                          {getWindowIcon(month.bookingWindowStatus)}
+                          {!month.isPast ? getWindowIcon(month.bookingWindowStatus) : <span className="text-muted-foreground">-</span>}
                         </td>
                       </tr>
                     ))}

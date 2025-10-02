@@ -43,16 +43,29 @@ serve(async (req) => {
     const today = new Date();
     const currentMonth = today.getMonth();
     const currentYear = year;
+    const isFutureYear = currentYear > today.getFullYear();
 
-    // Calculate revenue already on the books
+    // Calculate revenue already on the books (all confirmed reservations for this year)
     const revenueOnBooks = reservations
       ?.filter(r => {
         const checkIn = new Date(r.check_in);
         return checkIn.getFullYear() === currentYear && 
-               checkIn >= today &&
                r.fare_accommodation_adjusted;
       })
       .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
+
+    // Calculate revenue from past months (actual completed revenue)
+    const pastRevenue = isFutureYear ? 0 : reservations
+      ?.filter(r => {
+        const checkIn = new Date(r.check_in);
+        return checkIn.getFullYear() === currentYear && 
+               checkIn.getMonth() < currentMonth &&
+               r.fare_accommodation_adjusted;
+      })
+      .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
+
+    // Calculate confirmed future bookings
+    const futureConfirmed = revenueOnBooks - pastRevenue;
 
     // Analyze booking window (lead time distribution)
     const bookingWindowData: { [month: number]: number[] } = {};
@@ -139,10 +152,15 @@ serve(async (req) => {
 
     const simResults: number[] = [];
     
+    // Determine which months to forecast
+    const startMonth = isFutureYear ? 0 : currentMonth + 1;
+    
     for (let sim = 0; sim < simulations; sim++) {
-      let simTotal = revenueOnBooks;
+      // Start with past actual revenue + future confirmed bookings
+      let simTotal = pastRevenue + futureConfirmed;
       
-      for (let month = currentMonth + 1; month < 12; month++) {
+      // Add forecasted revenue for remaining months
+      for (let month = startMonth; month < 12; month++) {
         const stats = monthlyStats.find(s => s.month === month);
         if (!stats) continue;
 
@@ -189,13 +207,15 @@ serve(async (req) => {
     const monthlyForecasts = [];
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
-    for (let month = currentMonth + 1; month < 12; month++) {
-      const monthRevOnBooks = reservations
+    for (let month = 0; month < 12; month++) {
+      const isPastMonth = !isFutureYear && month < currentMonth;
+      const isCurrentMonth = !isFutureYear && month === currentMonth;
+      // Get actual revenue for this month
+      const actualRevenue = reservations
         ?.filter(r => {
           const checkIn = new Date(r.check_in);
           return checkIn.getFullYear() === currentYear && 
                  checkIn.getMonth() === month &&
-                 checkIn >= today &&
                  r.fare_accommodation_adjusted;
         })
         .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
@@ -205,9 +225,16 @@ serve(async (req) => {
       const windowStat = windowStats.find(w => w.month === month);
       const daysToMonth = Math.floor((new Date(currentYear, month, 15).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       
-      const additionalP50 = stats ? stats.mean * velocity * 0.7 : 0;
-      const additionalP10 = stats ? stats.mean * velocity * 0.4 : 0;
-      const additionalP90 = stats ? stats.mean * velocity * 1.0 : 0;
+      let additionalP50 = 0;
+      let additionalP10 = 0;
+      let additionalP90 = 0;
+      
+      // Only forecast additional revenue for current and future months
+      if (!isPastMonth) {
+        additionalP50 = stats ? stats.mean * velocity * 0.7 : 0;
+        additionalP10 = stats ? stats.mean * velocity * 0.4 : 0;
+        additionalP90 = stats ? stats.mean * velocity * 1.0 : 0;
+      }
 
       const windowStatus = windowStat ? 
         (daysToMonth > windowStat.p90 ? 'open' : 
@@ -216,16 +243,18 @@ serve(async (req) => {
       monthlyForecasts.push({
         month,
         monthName: monthNames[month],
-        revenueOnBooks: monthRevOnBooks,
+        isPast: isPastMonth,
+        actualRevenue: isPastMonth ? actualRevenue : 0,
+        revenueOnBooks: !isPastMonth ? actualRevenue : 0,
         forecastedAdditional: {
           p50: additionalP50,
           p10: additionalP10,
           p90: additionalP90
         },
         totalForecast: {
-          p50: monthRevOnBooks + additionalP50,
-          p10: monthRevOnBooks + additionalP10,
-          p90: monthRevOnBooks + additionalP90
+          p50: actualRevenue + additionalP50,
+          p10: actualRevenue + additionalP10,
+          p90: actualRevenue + additionalP90
         },
         bookingVelocity: velocity,
         bookingWindowStatus: windowStatus
@@ -261,6 +290,8 @@ serve(async (req) => {
       listingId,
       year,
       asOfDate: today.toISOString(),
+      pastRevenue,
+      futureConfirmed,
       revenueOnBooks,
       forecastedRevenue,
       totalForecast: {
@@ -284,7 +315,11 @@ serve(async (req) => {
         generated_at: today.toISOString(),
         revenue_on_books: revenueOnBooks,
         forecasted_revenue: forecastedRevenue,
-        total_forecast: forecastData.totalForecast,
+        total_forecast: {
+          ...forecastData.totalForecast,
+          pastRevenue,
+          futureConfirmed
+        },
         goal_probabilities: goalProbabilities,
         monthly_forecasts: monthlyForecasts,
         insights

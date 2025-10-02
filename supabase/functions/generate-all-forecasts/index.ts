@@ -30,13 +30,14 @@ serve(async (req) => {
 
     const results = [];
     const currentYear = new Date().getFullYear();
+    const nextYear = currentYear + 1;
 
-    // Generate forecast for each listing
+    // Generate forecast for each listing (both current and next year)
     for (const listing of listings || []) {
+      // Generate for current year
       try {
-        console.log(`Generating forecast for ${listing.nickname} (${listing.id})`);
+        console.log(`Generating ${currentYear} forecast for ${listing.nickname} (${listing.id})`);
         
-        // Call the forecast-revenue function
         const response = await fetch(`${supabaseUrl}/functions/v1/forecast-revenue`, {
           method: 'POST',
           headers: {
@@ -55,29 +56,82 @@ serve(async (req) => {
           results.push({
             listing_id: listing.id,
             nickname: listing.nickname,
+            year: currentYear,
             status: 'success',
             forecast: data.totalForecast.p50
           });
-          console.log(`✓ Forecast generated for ${listing.nickname}: $${data.totalForecast.p50.toFixed(0)}`);
+          console.log(`✓ ${currentYear} forecast for ${listing.nickname}: $${data.totalForecast.p50.toFixed(0)}`);
         } else {
           const error = await response.text();
           results.push({
             listing_id: listing.id,
             nickname: listing.nickname,
+            year: currentYear,
             status: 'error',
             error
           });
-          console.error(`✗ Failed for ${listing.nickname}:`, error);
+          console.error(`✗ Failed ${currentYear} for ${listing.nickname}:`, error);
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         results.push({
           listing_id: listing.id,
           nickname: listing.nickname,
+          year: currentYear,
           status: 'error',
           error: errorMessage
         });
-        console.error(`✗ Error for ${listing.nickname}:`, error);
+        console.error(`✗ Error ${currentYear} for ${listing.nickname}:`, error);
+      }
+
+      // Generate for next year
+      try {
+        console.log(`Generating ${nextYear} forecast for ${listing.nickname} (${listing.id})`);
+        
+        const response = await fetch(`${supabaseUrl}/functions/v1/forecast-revenue`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            listingId: listing.id,
+            year: nextYear,
+            simulations: 10000
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          results.push({
+            listing_id: listing.id,
+            nickname: listing.nickname,
+            year: nextYear,
+            status: 'success',
+            forecast: data.totalForecast.p50
+          });
+          console.log(`✓ ${nextYear} forecast for ${listing.nickname}: $${data.totalForecast.p50.toFixed(0)}`);
+        } else {
+          const error = await response.text();
+          results.push({
+            listing_id: listing.id,
+            nickname: listing.nickname,
+            year: nextYear,
+            status: 'error',
+            error
+          });
+          console.error(`✗ Failed ${nextYear} for ${listing.nickname}:`, error);
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        results.push({
+          listing_id: listing.id,
+          nickname: listing.nickname,
+          year: nextYear,
+          status: 'error',
+          error: errorMessage
+        });
+        console.error(`✗ Error ${nextYear} for ${listing.nickname}:`, error);
       }
     }
 
