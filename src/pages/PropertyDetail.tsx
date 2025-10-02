@@ -8,8 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent } from "lucide-react";
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { TrendChart } from "@/components/TrendChart";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -64,6 +63,133 @@ export default function PropertyDetail() {
     if (!address) return "N/A";
     const parts = [address.street, address.city, address.state, address.zipcode, address.country].filter(Boolean);
     return parts.join(", ") || "N/A";
+  };
+
+  const calculateYearOverYearOccupancy = () => {
+    if (reservations.length === 0) return [];
+
+    const currentYear = new Date().getFullYear();
+    const lastYear = currentYear - 1;
+
+    // Initialize data structures for both years
+    const currentYearData = new Map<string, { nightsBooked: number; totalDays: number }>();
+    const lastYearData = new Map<string, { nightsBooked: number; totalDays: number }>();
+
+    // Get all 12 months for both years
+    for (let month = 0; month < 12; month++) {
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      currentYearData.set(currentKey, { nightsBooked: 0, totalDays: getDaysInMonth(currentDate) });
+      lastYearData.set(lastKey, { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
+    }
+
+    // Process each reservation
+    reservations.forEach((reservation) => {
+      if (!reservation.check_in || !reservation.check_out) return;
+
+      const checkIn = parseISO(reservation.check_in);
+      const checkOut = parseISO(reservation.check_out);
+      
+      // Iterate through each night of the reservation
+      let currentNight = checkIn;
+      while (currentNight < checkOut) {
+        const monthKey = format(currentNight, 'yyyy-MM');
+        const year = currentNight.getFullYear();
+        
+        if (year === currentYear && currentYearData.has(monthKey)) {
+          const data = currentYearData.get(monthKey)!;
+          data.nightsBooked++;
+        } else if (year === lastYear && lastYearData.has(monthKey)) {
+          const data = lastYearData.get(monthKey)!;
+          data.nightsBooked++;
+        }
+        
+        currentNight = addDays(currentNight, 1);
+      }
+    });
+
+    // Combine data by month name
+    const result = [];
+    for (let month = 0; month < 12; month++) {
+      const monthName = format(new Date(2000, month, 1), 'MMM');
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      const currentData = currentYearData.get(currentKey) || { nightsBooked: 0, totalDays: getDaysInMonth(currentDate) };
+      const lastData = lastYearData.get(lastKey) || { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) };
+      
+      result.push({
+        month: monthName,
+        monthKey: currentKey,
+        currentYear: (currentData.nightsBooked / currentData.totalDays) * 100,
+        lastYear: (lastData.nightsBooked / lastData.totalDays) * 100,
+      });
+    }
+
+    return result;
+  };
+
+  const calculateYearOverYearRevenue = () => {
+    if (reservations.length === 0) return [];
+
+    const currentYear = new Date().getFullYear();
+    const lastYear = currentYear - 1;
+
+    // Initialize data structures for both years
+    const currentYearData = new Map<string, number>();
+    const lastYearData = new Map<string, number>();
+
+    // Get all 12 months for both years
+    for (let month = 0; month < 12; month++) {
+      const currentKey = format(new Date(currentYear, month, 1), 'yyyy-MM');
+      const lastKey = format(new Date(lastYear, month, 1), 'yyyy-MM');
+      
+      currentYearData.set(currentKey, 0);
+      lastYearData.set(lastKey, 0);
+    }
+
+    // Process each reservation - assign revenue to check-in month
+    reservations.forEach((reservation) => {
+      if (!reservation.check_in || !reservation.fare_accommodation_adjusted) return;
+
+      const checkIn = parseISO(reservation.check_in);
+      const monthKey = format(checkIn, 'yyyy-MM');
+      const year = checkIn.getFullYear();
+      const revenue = parseFloat(reservation.fare_accommodation_adjusted);
+      
+      if (year === currentYear && currentYearData.has(monthKey)) {
+        currentYearData.set(monthKey, currentYearData.get(monthKey)! + revenue);
+      } else if (year === lastYear && lastYearData.has(monthKey)) {
+        lastYearData.set(monthKey, lastYearData.get(monthKey)! + revenue);
+      }
+    });
+
+    // Combine data by month name
+    const result = [];
+    for (let month = 0; month < 12; month++) {
+      const monthName = format(new Date(2000, month, 1), 'MMM');
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      result.push({
+        month: monthName,
+        monthKey: currentKey,
+        currentYear: currentYearData.get(currentKey) || 0,
+        lastYear: lastYearData.get(lastKey) || 0,
+      });
+    }
+
+    return result;
   };
 
   const calculateMonthlyOccupancy = () => {
@@ -189,8 +315,8 @@ export default function PropertyDetail() {
   };
 
   const metrics = calculateMetrics();
-  const monthlyOccupancy = calculateMonthlyOccupancy();
-  const monthlyRevenue = calculateMonthlyRevenue();
+  const yearOverYearOccupancy = calculateYearOverYearOccupancy();
+  const yearOverYearRevenue = calculateYearOverYearRevenue();
 
   if (loading) {
     return (
@@ -396,124 +522,10 @@ export default function PropertyDetail() {
         </div>
 
         {/* Charts */}
-        <div className="space-y-6">
-          {/* Revenue Trend Chart */}
-          {monthlyRevenue.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Revenue Trend</CardTitle>
-                <CardDescription>Monthly revenue over the last 12 months</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer
-                  config={{
-                    revenue: {
-                      label: "Revenue",
-                      color: "hsl(var(--chart-2))",
-                    },
-                  }}
-                  className="h-[300px]"
-                >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyRevenue}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="month" 
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                      />
-                      <YAxis 
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                        label={{ value: 'Revenue ($)', angle: -90, position: 'insideLeft' }}
-                      />
-                      <ChartTooltip
-                        content={
-                          <ChartTooltipContent
-                            formatter={(value, name) => (
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{name}:</span>
-                                <span>${Number(value).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
-                              </div>
-                            )}
-                          />
-                        }
-                      />
-                      <Bar 
-                        dataKey="revenue" 
-                        fill="hsl(var(--chart-2))" 
-                        radius={[4, 4, 0, 0]}
-                        name="Revenue"
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Occupancy Trend Chart */}
-          {monthlyOccupancy.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Occupancy Trend</CardTitle>
-                <CardDescription>Monthly occupancy rate over the last 12 months</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer
-                  config={{
-                    occupancyRate: {
-                      label: "Occupancy Rate",
-                      color: "hsl(var(--chart-1))",
-                    },
-                  }}
-                  className="h-[300px]"
-                >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyOccupancy}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis 
-                        dataKey="month" 
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                      />
-                      <YAxis 
-                        className="text-xs"
-                        tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                        label={{ value: 'Occupancy %', angle: -90, position: 'insideLeft' }}
-                      />
-                      <ChartTooltip
-                        content={
-                          <ChartTooltipContent
-                            formatter={(value, name) => (
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{name}:</span>
-                                <span>{Number(value).toFixed(1)}%</span>
-                              </div>
-                            )}
-                            labelFormatter={(label, payload) => {
-                              if (payload && payload[0]) {
-                                const data = payload[0].payload;
-                                return `${label} - ${data.nightsBooked}/${data.totalDays} nights`;
-                              }
-                              return label;
-                            }}
-                          />
-                        }
-                      />
-                      <Bar 
-                        dataKey="occupancyRate" 
-                        fill="hsl(var(--chart-1))" 
-                        radius={[4, 4, 0, 0]}
-                        name="Occupancy Rate"
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        <TrendChart 
+          occupancyData={yearOverYearOccupancy}
+          revenueData={yearOverYearRevenue}
+        />
 
         {/* Recent Reservations */}
         <Card>
