@@ -24,6 +24,11 @@ interface ForecastData {
     p50: number;
     confidence: { lower: number; upper: number };
   };
+  goalTargets: {
+    budget: number;
+    projection: number;
+    goal: number;
+  };
   goalProbabilities: {
     budget: number;
     projection: number;
@@ -85,6 +90,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           revenueOnBooks: Number(data.revenue_on_books),
           forecastedRevenue: data.forecasted_revenue as any,
           totalForecast: data.total_forecast as any,
+          goalTargets: data.goal_targets as any,
           goalProbabilities: data.goal_probabilities as any,
           monthlyForecasts: data.monthly_forecasts as any,
           insights: data.insights as any
@@ -283,17 +289,17 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 <ProbabilityGauge 
                   label="Budget" 
                   probability={forecast.goalProbabilities.budget} 
-                  target={0}
+                  target={forecast.goalTargets?.budget || 0}
                 />
                 <ProbabilityGauge 
                   label="Projection" 
                   probability={forecast.goalProbabilities.projection} 
-                  target={0}
+                  target={forecast.goalTargets?.projection || 0}
                 />
                 <ProbabilityGauge 
                   label="Goal" 
                   probability={forecast.goalProbabilities.goal} 
-                  target={0}
+                  target={forecast.goalTargets?.goal || 0}
                 />
               </div>
             </div>

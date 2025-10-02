@@ -264,6 +264,7 @@ export type Database = {
           forecasted_revenue: Json
           generated_at: string
           goal_probabilities: Json
+          goal_targets: Json | null
           id: string
           insights: Json
           listing_id: string
@@ -278,6 +279,7 @@ export type Database = {
           forecasted_revenue: Json
           generated_at?: string
           goal_probabilities: Json
+          goal_targets?: Json | null
           id?: string
           insights: Json
           listing_id: string
@@ -292,6 +294,7 @@ export type Database = {
           forecasted_revenue?: Json
           generated_at?: string
           goal_probabilities?: Json
+          goal_targets?: Json | null
           id?: string
           insights?: Json
           listing_id?: string

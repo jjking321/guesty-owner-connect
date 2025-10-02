@@ -286,6 +286,12 @@ serve(async (req) => {
 
     console.log(`Forecast complete: P50 = $${forecastedRevenue.p50.toFixed(0)}`);
 
+    const goalTargets = {
+      budget: totalBudget,
+      projection: totalProjection,
+      goal: totalGoal
+    };
+
     const forecastData = {
       listingId,
       year,
@@ -301,6 +307,7 @@ serve(async (req) => {
           upper: simResults[Math.floor(simulations * 0.9)]
         }
       },
+      goalTargets,
       goalProbabilities,
       monthlyForecasts,
       insights
@@ -320,6 +327,7 @@ serve(async (req) => {
           pastRevenue,
           futureConfirmed
         },
+        goal_targets: goalTargets,
         goal_probabilities: goalProbabilities,
         monthly_forecasts: monthlyForecasts,
         insights
