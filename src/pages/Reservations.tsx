@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
@@ -21,6 +22,7 @@ export default function Reservations() {
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
   
   // Filter states
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
@@ -111,14 +113,39 @@ export default function Reservations() {
     try {
       setLoading(true);
       
-      // Load reservations
-      const { data: reservationsData, error: reservationsError } = await supabase
+      // First get the total count
+      const { count, error: countError } = await supabase
         .from("reservations")
-        .select("*")
-        .order("check_in", { ascending: false });
+        .select("*", { count: 'exact', head: true });
 
-      if (reservationsError) throw reservationsError;
-      setReservations(reservationsData || []);
+      if (countError) throw countError;
+      setTotalCount(count || 0);
+
+      // Load all reservations in batches
+      const allReservations: any[] = [];
+      const batchSize = 1000;
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const { data: batch, error: batchError } = await supabase
+          .from("reservations")
+          .select("*")
+          .order("check_in", { ascending: false })
+          .range(offset, offset + batchSize - 1);
+
+        if (batchError) throw batchError;
+        
+        if (batch && batch.length > 0) {
+          allReservations.push(...batch);
+          offset += batchSize;
+          hasMore = batch.length === batchSize;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      setReservations(allReservations);
 
       // Load listings for display
       const { data: listingsData, error: listingsError } = await supabase
@@ -553,7 +580,7 @@ export default function Reservations() {
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>
               Showing <span className="font-semibold text-foreground">{filteredReservations.length}</span> of{" "}
-              <span className="font-semibold text-foreground">{reservations.length}</span> reservations
+              <span className="font-semibold text-foreground">{totalCount}</span> reservations
             </span>
           </div>
         )}
@@ -579,204 +606,216 @@ export default function Reservations() {
             </CardHeader>
           </Card>
         ) : (
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  {visibleColumns.property && (
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("property")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Property
-                        {getSortIcon("property")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.checkIn && (
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("checkIn")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Check In
-                        {getSortIcon("checkIn")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.checkOut && (
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("checkOut")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Check Out
-                        {getSortIcon("checkOut")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.nights && (
-                    <TableHead className="text-center">
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("nights")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Nights
-                        {getSortIcon("nights")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.guests && (
-                    <TableHead className="text-center">
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("guests")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Guests
-                        {getSortIcon("guests")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.source && (
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("source")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Source
-                        {getSortIcon("source")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.status && (
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("status")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Status
-                        {getSortIcon("status")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.accommodation && (
-                    <TableHead className="text-right">
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("accommodation")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        Accommodation
-                        {getSortIcon("accommodation")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.adr && (
-                    <TableHead className="text-right">
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort("adr")}
-                        className="h-auto p-0 hover:bg-transparent"
-                      >
-                        ADR
-                        {getSortIcon("adr")}
-                      </Button>
-                    </TableHead>
-                  )}
-                  {visibleColumns.ownerRevenue && (
-                    <TableHead className="text-right">Owner Revenue</TableHead>
-                  )}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredReservations.map((reservation) => {
-                  const adr = reservation.nights_count > 0 
-                    ? parseFloat(reservation.fare_accommodation_adjusted || 0) / reservation.nights_count 
-                    : 0;
-                  
-                  return (
-                    <TableRow key={reservation.id}>
+          <div className="border rounded-lg overflow-hidden bg-card">
+            <ScrollArea className="h-[calc(100vh-320px)]">
+              <div className="min-w-full">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-muted/50 backdrop-blur z-10 border-b">
+                    <TableRow className="hover:bg-transparent">
                       {visibleColumns.property && (
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{getListingName(reservation.listing_id)}</div>
-                            {getListingAddress(reservation.listing_id) && (
-                              <div className="text-xs text-muted-foreground">
-                                {getListingAddress(reservation.listing_id)}
-                              </div>
-                            )}
-                            {reservation.confirmation_code && (
-                              <div className="text-xs text-muted-foreground mt-0.5">
-                                {reservation.confirmation_code}
-                              </div>
-                            )}
-                          </div>
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("property")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Property
+                            {getSortIcon("property")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.checkIn && (
-                        <TableCell>
-                          {new Date(reservation.check_in).toLocaleDateString()}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("checkIn")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Check In
+                            {getSortIcon("checkIn")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.checkOut && (
-                        <TableCell>
-                          {new Date(reservation.check_out).toLocaleDateString()}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("checkOut")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Check Out
+                            {getSortIcon("checkOut")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.nights && (
-                        <TableCell className="text-center">
-                          {reservation.nights_count}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-center text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("nights")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Nights
+                            {getSortIcon("nights")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.guests && (
-                        <TableCell className="text-center">
-                          {reservation.guests_count}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-center text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("guests")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Guests
+                            {getSortIcon("guests")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.source && (
-                        <TableCell>
-                          {reservation.source && (
-                            <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-muted">
-                              {reservation.source}
-                            </span>
-                          )}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("source")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Source
+                            {getSortIcon("source")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.status && (
-                        <TableCell>
-                          <Badge variant={getStatusColor(reservation.status)}>
-                            {reservation.status || "Unknown"}
-                          </Badge>
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("status")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Status
+                            {getSortIcon("status")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.accommodation && (
-                        <TableCell className="text-right font-semibold">
-                          ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-right text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("accommodation")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            Accommodation
+                            {getSortIcon("accommodation")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.adr && (
-                        <TableCell className="text-right text-muted-foreground">
-                          ${adr.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-right text-xs font-semibold whitespace-nowrap">
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleSort("adr")}
+                            className="h-7 px-2 hover:bg-muted/80 text-xs font-semibold"
+                          >
+                            ADR
+                            {getSortIcon("adr")}
+                          </Button>
+                        </TableHead>
                       )}
                       {visibleColumns.ownerRevenue && (
-                        <TableCell className="text-right text-muted-foreground">
-                          ${parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </TableCell>
+                        <TableHead className="h-9 px-2 text-right text-xs font-semibold whitespace-nowrap">
+                          Owner Revenue
+                        </TableHead>
                       )}
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredReservations.map((reservation, index) => {
+                      const adr = reservation.nights_count > 0 
+                        ? parseFloat(reservation.fare_accommodation_adjusted || 0) / reservation.nights_count 
+                        : 0;
+                      
+                      return (
+                        <TableRow 
+                          key={reservation.id}
+                          className={cn(
+                            "border-b transition-colors hover:bg-muted/30",
+                            index % 2 === 0 ? "bg-background" : "bg-muted/20"
+                          )}
+                        >
+                          {visibleColumns.property && (
+                            <TableCell className="p-2 text-sm">
+                              <div>
+                                <div className="font-medium whitespace-nowrap">{getListingName(reservation.listing_id)}</div>
+                                {getListingAddress(reservation.listing_id) && (
+                                  <div className="text-xs text-muted-foreground whitespace-nowrap">
+                                    {getListingAddress(reservation.listing_id)}
+                                  </div>
+                                )}
+                                {reservation.confirmation_code && (
+                                  <div className="text-xs text-muted-foreground mt-0.5 whitespace-nowrap">
+                                    {reservation.confirmation_code}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                          )}
+                          {visibleColumns.checkIn && (
+                            <TableCell className="p-2 text-sm whitespace-nowrap">
+                              {new Date(reservation.check_in).toLocaleDateString()}
+                            </TableCell>
+                          )}
+                          {visibleColumns.checkOut && (
+                            <TableCell className="p-2 text-sm whitespace-nowrap">
+                              {new Date(reservation.check_out).toLocaleDateString()}
+                            </TableCell>
+                          )}
+                          {visibleColumns.nights && (
+                            <TableCell className="p-2 text-sm text-center whitespace-nowrap">
+                              {reservation.nights_count}
+                            </TableCell>
+                          )}
+                          {visibleColumns.guests && (
+                            <TableCell className="p-2 text-sm text-center whitespace-nowrap">
+                              {reservation.guests_count}
+                            </TableCell>
+                          )}
+                          {visibleColumns.source && (
+                            <TableCell className="p-2 text-sm">
+                              {reservation.source && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-muted whitespace-nowrap">
+                                  {reservation.source}
+                                </span>
+                              )}
+                            </TableCell>
+                          )}
+                          {visibleColumns.status && (
+                            <TableCell className="p-2 text-sm">
+                              <Badge variant={getStatusColor(reservation.status)} className="whitespace-nowrap text-xs">
+                                {reservation.status || "Unknown"}
+                              </Badge>
+                            </TableCell>
+                          )}
+                          {visibleColumns.accommodation && (
+                            <TableCell className="p-2 text-sm text-right font-semibold whitespace-nowrap">
+                              ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </TableCell>
+                          )}
+                          {visibleColumns.adr && (
+                            <TableCell className="p-2 text-sm text-right text-muted-foreground whitespace-nowrap">
+                              ${adr.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </TableCell>
+                          )}
+                          {visibleColumns.ownerRevenue && (
+                            <TableCell className="p-2 text-sm text-right text-muted-foreground whitespace-nowrap">
+                              ${parseFloat(reservation.owner_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </ScrollArea>
           </div>
         )}
       </div>
