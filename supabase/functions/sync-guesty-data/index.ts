@@ -12,15 +12,17 @@ interface GuestyReservation {
   checkOut: string;
   nightsCount: number;
   guestsCount: number;
-  fareAccommodationAdjusted: number;
-  hostPayout: number;
-  totalPaid: number;
-  ownerRevenue: number;
   listingId: string;
   source: string;
   confirmationCode: string;
   createdAt: string;
   lastUpdatedAt: string;
+  money?: {
+    fareAccommodationAdjusted?: number;
+    hostPayout?: number;
+    totalPaid?: number;
+    ownerRevenue?: number;
+  };
 }
 
 interface GuestyListing {
@@ -333,7 +335,7 @@ async function fetchAndSaveReservationsBatch(
         limit,
         skip,
         filters,
-        fields: '_id status checkIn checkOut nightsCount guestsCount fareAccommodationAdjusted hostPayout totalPaid ownerRevenue listingId source confirmationCode createdAt lastUpdatedAt',
+        fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue',
       }, 5); // 5 retries
 
       const reservations = data.results || [];
@@ -356,10 +358,10 @@ async function fetchAndSaveReservationsBatch(
             check_out: reservation.checkOut,
             nights_count: reservation.nightsCount,
             guests_count: reservation.guestsCount,
-            fare_accommodation_adjusted: reservation.fareAccommodationAdjusted,
-            host_payout: reservation.hostPayout,
-            total_paid: reservation.totalPaid,
-            owner_revenue: reservation.ownerRevenue,
+            fare_accommodation_adjusted: reservation.money?.fareAccommodationAdjusted,
+            host_payout: reservation.money?.hostPayout,
+            total_paid: reservation.money?.totalPaid,
+            owner_revenue: reservation.money?.ownerRevenue,
             source: reservation.source,
             confirmation_code: reservation.confirmationCode,
             created_at_guesty: reservation.createdAt,
@@ -433,10 +435,10 @@ async function fetchAndSaveReservationsBatch(
             check_out: reservation.checkOut,
             nights_count: reservation.nightsCount,
             guests_count: reservation.guestsCount,
-            fare_accommodation_adjusted: reservation.fareAccommodationAdjusted,
-            host_payout: reservation.hostPayout,
-            total_paid: reservation.totalPaid,
-            owner_revenue: reservation.ownerRevenue,
+            fare_accommodation_adjusted: reservation.money?.fareAccommodationAdjusted,
+            host_payout: reservation.money?.hostPayout,
+            total_paid: reservation.money?.totalPaid,
+            owner_revenue: reservation.money?.ownerRevenue,
             source: reservation.source,
             confirmation_code: reservation.confirmationCode,
             created_at_guesty: reservation.createdAt,
