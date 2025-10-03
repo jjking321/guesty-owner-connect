@@ -33,10 +33,15 @@ export default function Dashboard() {
       if (accountsError) throw accountsError;
       setGuestyAccounts(accounts || []);
 
-      // Load reservations
+      // Load reservations from the last year
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      const oneYearAgoStr = oneYearAgo.toISOString().split('T')[0];
+
       const { data: reservationsData, error: reservationsError } = await supabase
         .from("reservations")
         .select("*")
+        .gte("check_in", oneYearAgoStr)
         .order("check_in", { ascending: false });
 
       if (reservationsError) throw reservationsError;
@@ -60,8 +65,8 @@ export default function Dashboard() {
     }
   };
 
-  // Calculate metrics
-  const totalRevenue = reservations.reduce((sum, r) => sum + (parseFloat(r.owner_revenue || 0)), 0);
+  // Calculate metrics based on accommodation fare
+  const totalRevenue = reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0)), 0);
   const totalBookings = reservations.length;
   const activeListings = listings.filter(l => l.active).length;
   const avgNightlyRate = reservations.length > 0
@@ -75,7 +80,7 @@ export default function Dashboard() {
     if (!acc[month]) {
       acc[month] = { month, revenue: 0, bookings: 0 };
     }
-    acc[month].revenue += parseFloat(r.owner_revenue || 0);
+    acc[month].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
     acc[month].bookings += 1;
     return acc;
   }, {});
@@ -89,7 +94,7 @@ export default function Dashboard() {
     if (!acc[propName]) {
       acc[propName] = { name: propName, revenue: 0, bookings: 0 };
     }
-    acc[propName].revenue += parseFloat(r.owner_revenue || 0);
+    acc[propName].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
     acc[propName].bookings += 1;
     return acc;
   }, {});
@@ -143,7 +148,7 @@ export default function Dashboard() {
             title="Total Revenue"
             value={`$${totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             icon={DollarSign}
-            description="Owner revenue from all bookings"
+            description="Accommodation fare (past year)"
           />
           <MetricCard
             title="Total Bookings"
@@ -171,7 +176,7 @@ export default function Dashboard() {
             <Card>
               <CardHeader>
                 <CardTitle>Revenue Over Time</CardTitle>
-                <CardDescription>Monthly owner revenue trends</CardDescription>
+                <CardDescription>Monthly accommodation revenue trends</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
@@ -198,7 +203,7 @@ export default function Dashboard() {
             <Card>
               <CardHeader>
                 <CardTitle>Top Performing Properties</CardTitle>
-                <CardDescription>By total owner revenue</CardDescription>
+                <CardDescription>By total accommodation revenue</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
@@ -242,9 +247,9 @@ export default function Dashboard() {
                       </div>
                       <div className="text-right">
                         <p className="font-bold text-lg">
-                          ${parseFloat(reservation.owner_revenue || 0).toLocaleString()}
+                          ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString()}
                         </p>
-                        <p className="text-xs text-muted-foreground">Owner Revenue</p>
+                        <p className="text-xs text-muted-foreground">Accommodation</p>
                       </div>
                     </div>
                   );
