@@ -394,11 +394,12 @@ async function fetchAndSaveReservationsBatch(
           }
           
           // Update job with last synced offset for resumability
+          // Save the NEXT offset to resume from, not the current one
           await updateSyncJob(supabase, jobId, {
             progress_message: `Saved ${totalSaved} reservations (fetched ${totalFetched}${data.count ? `/${data.count}` : ''})`,
             items_synced: totalSaved,
             total_items: data.count,
-            last_synced_offset: skip,
+            last_synced_offset: skip + limit,
           });
           
           // Clear batch
