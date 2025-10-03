@@ -59,7 +59,9 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
           .filter(r => {
             if (!r.check_in) return false;
             const checkIn = new Date(r.check_in);
-            return checkIn.getFullYear() === year && checkIn.getMonth() === month;
+            return checkIn.getFullYear() === year && 
+                   checkIn.getMonth() === month &&
+                   ["confirmed", "checked_in", "checked_out"].includes(r.status);
           })
           .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
 

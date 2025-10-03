@@ -25,7 +25,7 @@ serve(async (req) => {
       .from('reservations')
       .select('*')
       .eq('listing_id', listingId)
-      .eq('status', 'confirmed')
+      .in('status', ['confirmed', 'checked_in', 'checked_out'])
       .gte('check_in', `${year - 2}-01-01`)
       .order('check_in', { ascending: true });
 

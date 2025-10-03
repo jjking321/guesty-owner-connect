@@ -44,7 +44,9 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
         .filter(r => {
           if (!r.check_in) return false;
           const checkIn = new Date(r.check_in);
-          return checkIn.getFullYear() === currentYear && checkIn.getMonth() === index;
+          return checkIn.getFullYear() === currentYear && 
+                 checkIn.getMonth() === index &&
+                 ["confirmed", "checked_in", "checked_out"].includes(r.status);
         })
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
 

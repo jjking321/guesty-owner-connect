@@ -41,6 +41,7 @@ export default function Dashboard() {
       const { data: reservationsData, error: reservationsError } = await supabase
         .from("reservations")
         .select("*")
+        .in("status", ["confirmed", "checked_in", "checked_out"])
         .gte("check_in", oneYearAgoStr)
         .order("check_in", { ascending: false });
 

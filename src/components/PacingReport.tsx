@@ -37,6 +37,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
     // Filter reservations for current year YTD (check-in YTD, confirmed by today)
     const currentYearReservations = reservations.filter((r) => {
       if (!r.check_in || !r.created_at_guesty) return false;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
       const checkIn = parseISO(r.check_in);
       const createdAt = parseISO(r.created_at_guesty);
       const todayThisYear = new Date(currentYear, today.getMonth(), today.getDate());
@@ -50,6 +51,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
     // Filter reservations for last year same period (check-in YTD, confirmed by same date last year)
     const lastYearReservations = reservations.filter((r) => {
       if (!r.check_in || !r.created_at_guesty) return false;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
       const checkIn = parseISO(r.check_in);
       const createdAt = parseISO(r.created_at_guesty);
       const todayLastYear = new Date(lastYear, today.getMonth(), today.getDate());
@@ -109,6 +111,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const currentNights = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
+          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayThisYear = new Date(year, today.getMonth(), today.getDate());
@@ -122,6 +125,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const lastYearNights = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
+          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
@@ -162,6 +166,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const currentRevenue = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
+          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayThisYear = new Date(year, today.getMonth(), today.getDate());
@@ -175,6 +180,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const lastYearRevenue = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
+          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());

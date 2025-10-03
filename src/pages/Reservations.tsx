@@ -131,6 +131,7 @@ export default function Reservations() {
         const { data: batch, error: batchError } = await supabase
           .from("reservations")
           .select("*")
+          .in("status", ["confirmed", "checked_in", "checked_out"])
           .order("check_in", { ascending: false })
           .range(offset, offset + batchSize - 1);
 
