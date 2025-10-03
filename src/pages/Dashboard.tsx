@@ -33,20 +33,37 @@ export default function Dashboard() {
       if (accountsError) throw accountsError;
       setGuestyAccounts(accounts || []);
 
-      // Load reservations from the last year
+      // Load reservations from the last year in batches
       const oneYearAgo = new Date();
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
       const oneYearAgoStr = oneYearAgo.toISOString().split('T')[0];
 
-      const { data: reservationsData, error: reservationsError } = await supabase
-        .from("reservations")
-        .select("*")
-        .in("status", ["confirmed", "checked_in", "checked_out"])
-        .gte("check_in", oneYearAgoStr)
-        .order("check_in", { ascending: false });
+      const allReservations: any[] = [];
+      const batchSize = 1000;
+      let offset = 0;
+      let hasMore = true;
 
-      if (reservationsError) throw reservationsError;
-      setReservations(reservationsData || []);
+      while (hasMore) {
+        const { data: batch, error: batchError } = await supabase
+          .from("reservations")
+          .select("*")
+          .in("status", ["confirmed", "checked_in", "checked_out"])
+          .gte("check_in", oneYearAgoStr)
+          .order("check_in", { ascending: false })
+          .range(offset, offset + batchSize - 1);
+
+        if (batchError) throw batchError;
+        
+        if (batch && batch.length > 0) {
+          allReservations.push(...batch);
+          offset += batchSize;
+          hasMore = batch.length === batchSize;
+        } else {
+          hasMore = false;
+        }
+      }
+
+      setReservations(allReservations);
 
       // Load listings
       const { data: listingsData, error: listingsError } = await supabase
@@ -74,19 +91,24 @@ export default function Dashboard() {
     ? reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0) / (r.nights_count || 1)), 0) / reservations.length
     : 0;
 
-  // Prepare chart data - group by month
+  // Prepare chart data - group by month and sort chronologically
   const revenueByMonth = reservations.reduce((acc: any, r) => {
     if (!r.check_in) return acc;
-    const month = new Date(r.check_in).toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-    if (!acc[month]) {
-      acc[month] = { month, revenue: 0, bookings: 0 };
+    const checkInDate = new Date(r.check_in);
+    const yearMonth = `${checkInDate.getFullYear()}-${String(checkInDate.getMonth() + 1).padStart(2, '0')}`;
+    const monthLabel = checkInDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+    
+    if (!acc[yearMonth]) {
+      acc[yearMonth] = { month: monthLabel, revenue: 0, bookings: 0, sortKey: yearMonth };
     }
-    acc[month].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
-    acc[month].bookings += 1;
+    acc[yearMonth].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
+    acc[yearMonth].bookings += 1;
     return acc;
   }, {});
 
-  const chartData = Object.values(revenueByMonth).slice(-12);
+  const chartData = Object.values(revenueByMonth)
+    .sort((a: any, b: any) => a.sortKey.localeCompare(b.sortKey))
+    .slice(-12);
 
   // Top performing properties
   const propertyRevenue = reservations.reduce((acc: any, r) => {
