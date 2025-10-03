@@ -3,11 +3,15 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { MetricCard } from "@/components/MetricCard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { DollarSign, Home, Calendar, TrendingUp, Plus, RefreshCw } from "lucide-react";
+import { DollarSign, Home, Calendar, TrendingUp, Plus, RefreshCw, CalendarIcon, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
   const { toast } = useToast();
@@ -16,10 +20,16 @@ export default function Dashboard() {
   const [reservations, setReservations] = useState<any[]>([]);
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Date range filters - default to current year
+  const currentYear = new Date().getFullYear();
+  const [startDate, setStartDate] = useState<Date>(new Date(currentYear, 0, 1));
+  const [endDate, setEndDate] = useState<Date>(new Date(currentYear, 11, 31));
+  const [showCustomDates, setShowCustomDates] = useState(false);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [startDate, endDate]);
 
   const loadData = async () => {
     try {
@@ -33,10 +43,9 @@ export default function Dashboard() {
       if (accountsError) throw accountsError;
       setGuestyAccounts(accounts || []);
 
-      // Load reservations from the last year in batches
-      const oneYearAgo = new Date();
-      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-      const oneYearAgoStr = oneYearAgo.toISOString().split('T')[0];
+      // Load reservations based on selected date range
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
 
       const allReservations: any[] = [];
       const batchSize = 1000;
@@ -48,7 +57,8 @@ export default function Dashboard() {
           .from("reservations")
           .select("*")
           .in("status", ["confirmed", "checked_in", "checked_out"])
-          .gte("check_in", oneYearAgoStr)
+          .gte("check_in", startDateStr)
+          .lte("check_in", endDateStr)
           .order("check_in", { ascending: false })
           .range(offset, offset + batchSize - 1);
 
@@ -130,12 +140,70 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className="space-y-8">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
-            <p className="text-muted-foreground">Overview of your vacation rental performance</p>
+            <p className="text-muted-foreground">
+              {showCustomDates 
+                ? `${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}`
+                : `${format(startDate, "yyyy")} Performance Overview`}
+            </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            {!showCustomDates ? (
+              <Button onClick={() => setShowCustomDates(true)} variant="outline">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                Custom Date Range
+              </Button>
+            ) : (
+              <>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className={cn("justify-start text-left font-normal")}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(startDate, "MMM d, yyyy")}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={startDate}
+                      onSelect={(date) => date && setStartDate(date)}
+                      initialFocus
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className={cn("justify-start text-left font-normal")}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(endDate, "MMM d, yyyy")}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={endDate}
+                      onSelect={(date) => date && setEndDate(date)}
+                      initialFocus
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+                <Button 
+                  onClick={() => {
+                    setShowCustomDates(false);
+                    setStartDate(new Date(currentYear, 0, 1));
+                    setEndDate(new Date(currentYear, 11, 31));
+                  }} 
+                  variant="outline"
+                  size="icon"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </>
+            )}
             <Button onClick={loadData} variant="outline">
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
@@ -171,7 +239,7 @@ export default function Dashboard() {
             title="Total Revenue"
             value={`$${totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             icon={DollarSign}
-            description="Accommodation fare (past year)"
+            description={showCustomDates ? "Selected period" : `Year ${currentYear}`}
           />
           <MetricCard
             title="Total Bookings"
