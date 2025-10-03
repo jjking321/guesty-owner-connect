@@ -27,6 +27,7 @@ export default function Settings() {
   const [syncingListings, setSyncingListings] = useState<string | null>(null);
   const [syncingReservations, setSyncingReservations] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [incompleteSyncJobs, setIncompleteSyncJobs] = useState<Record<string, any>>({});
 
   useEffect(() => {
     loadAccounts();
@@ -42,6 +43,28 @@ export default function Settings() {
 
       if (error) throw error;
       setGuestyAccounts(data || []);
+      
+      // Check for incomplete sync jobs
+      if (data && data.length > 0) {
+        const accountIds = data.map(acc => acc.id);
+        const { data: jobs } = await supabase
+          .from('sync_jobs')
+          .select('*')
+          .in('guesty_account_id', accountIds)
+          .eq('status', 'running')
+          .order('started_at', { ascending: false });
+        
+        if (jobs) {
+          const jobsMap: Record<string, any> = {};
+          jobs.forEach(job => {
+            const key = `${job.guesty_account_id}-${job.sync_type}`;
+            if (!jobsMap[key]) {
+              jobsMap[key] = job;
+            }
+          });
+          setIncompleteSyncJobs(jobsMap);
+        }
+      }
     } catch (error: any) {
       toast({
         title: "Error loading accounts",
@@ -143,6 +166,9 @@ export default function Settings() {
   const handleSyncReservations = async (accountId: string) => {
     setSyncingReservations(accountId);
     try {
+      const incompleteKey = `${accountId}-reservations`;
+      const incompleteJob = incompleteSyncJobs[incompleteKey];
+      
       const { data, error } = await supabase.functions.invoke("sync-guesty-data", {
         body: { accountId, syncType: 'reservations' },
       });
@@ -150,8 +176,10 @@ export default function Settings() {
       if (error) throw error;
 
       toast({
-        title: "Reservations sync started",
-        description: "Watch the progress below in real-time.",
+        title: incompleteJob ? "Resuming reservations sync" : "Reservations sync started",
+        description: incompleteJob 
+          ? `Continuing from ${incompleteJob.items_synced || 0} reservations. Watch progress below.`
+          : "Watch the progress below in real-time.",
       });
 
       loadAccounts();
@@ -333,12 +361,21 @@ export default function Settings() {
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 Syncing...
                               </>
-                            ) : (
-                              <>
-                                <Calendar className="mr-2 h-4 w-4" />
-                                Sync Reservations
-                              </>
-                            )}
+                            ) : (() => {
+                              const incompleteKey = `${account.id}-reservations`;
+                              const incompleteJob = incompleteSyncJobs[incompleteKey];
+                              return incompleteJob ? (
+                                <>
+                                  <Calendar className="mr-2 h-4 w-4" />
+                                  Resume ({incompleteJob.items_synced || 0} synced)
+                                </>
+                              ) : (
+                                <>
+                                  <Calendar className="mr-2 h-4 w-4" />
+                                  Sync Reservations
+                                </>
+                              );
+                            })()}
                           </Button>
                         </div>
                       </CardContent>

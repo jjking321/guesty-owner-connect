@@ -387,6 +387,7 @@ export type Database = {
           guesty_account_id: string
           id: string
           items_synced: number | null
+          last_synced_offset: number | null
           progress_message: string | null
           started_at: string
           status: string
@@ -399,6 +400,7 @@ export type Database = {
           guesty_account_id: string
           id?: string
           items_synced?: number | null
+          last_synced_offset?: number | null
           progress_message?: string | null
           started_at?: string
           status: string
@@ -411,6 +413,7 @@ export type Database = {
           guesty_account_id?: string
           id?: string
           items_synced?: number | null
+          last_synced_offset?: number | null
           progress_message?: string | null
           started_at?: string
           status?: string

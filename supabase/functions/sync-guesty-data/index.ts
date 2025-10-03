@@ -307,9 +307,10 @@ async function fetchAndSaveReservationsBatch(
   supabase: any,
   accountId: string,
   jobId: string,
+  startOffset: number = 0,
   onProgress?: (fetched: number, saved: number, total?: number) => Promise<void>
 ) {
-  let skip = 0;
+  let skip = startOffset;
   const limit = 100;
   const batchSize = 1000; // Save every 1000 records
   let totalFetched = 0;
@@ -395,6 +396,7 @@ async function fetchAndSaveReservationsBatch(
             progress_message: `Saved ${totalSaved} reservations (fetched ${totalFetched}${data.count ? `/${data.count}` : ''})`,
             items_synced: totalSaved,
             total_items: data.count,
+            last_synced_offset: skip,
           });
           
           // Clear batch
@@ -610,13 +612,40 @@ Deno.serve(async (req) => {
 
     // Sync reservations with batch processing
     if (syncType === 'reservations' || syncType === 'both') {
-      const jobId = await createSyncJob(supabase, accountId, 'reservations');
+      // Check for existing incomplete sync job
+      const { data: existingJobs } = await supabase
+        .from('sync_jobs')
+        .select('*')
+        .eq('guesty_account_id', accountId)
+        .eq('sync_type', 'reservations')
+        .eq('status', 'running')
+        .order('started_at', { ascending: false })
+        .limit(1);
+      
+      let jobId: string;
+      let startOffsetValue = 0;
+      
+      if (existingJobs && existingJobs.length > 0) {
+        // Resume from existing job
+        const existingJob = existingJobs[0];
+        jobId = existingJob.id;
+        startOffsetValue = existingJob.last_synced_offset || 0;
+        console.log(`Resuming reservations sync from offset ${startOffsetValue}. Already synced: ${existingJob.items_synced}`);
+        
+        await updateSyncJob(supabase, jobId, {
+          progress_message: `Resuming sync from ${startOffsetValue} reservations...`,
+        });
+      } else {
+        // Create new sync job
+        jobId = await createSyncJob(supabase, accountId, 'reservations');
+        console.log('Starting new reservations sync from beginning');
+      }
       
       try {
         const defaultStartDate = startDate || new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         
         await updateSyncJob(supabase, jobId, { 
-          progress_message: `Starting reservations sync (checkIn >= ${defaultStartDate})...` 
+          progress_message: `${startOffsetValue > 0 ? 'Resuming' : 'Starting'} reservations sync (checkIn >= ${defaultStartDate})...` 
         });
 
         const { totalFetched, totalSaved } = await fetchAndSaveReservationsBatch(
@@ -625,6 +654,7 @@ Deno.serve(async (req) => {
           supabase,
           accountId,
           jobId,
+          startOffsetValue,
           async (fetched, saved, total) => {
             await updateSyncJob(supabase, jobId, {
               progress_message: `Processing: fetched ${fetched}, saved ${saved}${total ? `/${total}` : ''}`,
@@ -641,6 +671,7 @@ Deno.serve(async (req) => {
           progress_message: `Completed: ${totalSaved} reservations synced (fetched ${totalFetched})`,
           items_synced: totalSaved,
           completed_at: new Date().toISOString(),
+          last_synced_offset: 0,
         });
 
         await supabase
