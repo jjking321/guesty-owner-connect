@@ -122,47 +122,37 @@ export function TeamManagement() {
     try {
       setInviting(true);
 
-      // Check if user exists
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("email", email)
-        .single();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
 
-      if (!profile) {
-        toast({
-          title: "User not found",
-          description: "The user must sign up first before being added to the organization",
-          variant: "destructive",
-        });
-        return;
-      }
+      // Generate invitation token
+      const token = crypto.randomUUID();
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
 
-      // Add member to organization
-      const { error } = await supabase
-        .from("organization_members")
+      // Create invitation
+      const { error: inviteError } = await supabase
+        .from('organization_invitations')
         .insert({
           organization_id: organizationId,
-          user_id: profile.id,
+          email: email,
           role: role,
+          invited_by: user.id,
+          token: token,
+          expires_at: expiresAt.toISOString(),
         });
 
-      if (error) {
-        if (error.code === '23505') {
-          toast({
-            title: "User already a member",
-            description: "This user is already a member of your organization",
-            variant: "destructive",
-          });
-        } else {
-          throw error;
-        }
-        return;
-      }
+      if (inviteError) throw inviteError;
 
+      // Generate invitation link
+      const inviteUrl = `${window.location.origin}/accept-invitation?token=${token}`;
+      
+      // Copy to clipboard
+      await navigator.clipboard.writeText(inviteUrl);
+      
       toast({
-        title: "Member added",
-        description: `${email} has been added to your organization`,
+        title: "Invitation created",
+        description: "Invitation link copied to clipboard! Share it with the user.",
       });
 
       setShowInviteForm(false);
@@ -170,7 +160,7 @@ export function TeamManagement() {
       loadTeamMembers();
     } catch (error: any) {
       toast({
-        title: "Error adding member",
+        title: "Error creating invitation",
         description: error.message,
         variant: "destructive",
       });
@@ -297,7 +287,7 @@ export function TeamManagement() {
                 </SelectContent>
               </Select>
               <p className="text-sm text-muted-foreground">
-                Owners and Admins can manage team members and settings
+                An invitation link will be generated that you can share with the user
               </p>
             </div>
             <div className="flex gap-2">
