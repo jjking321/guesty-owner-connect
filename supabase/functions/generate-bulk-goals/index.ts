@@ -65,9 +65,10 @@ serve(async (req) => {
     
     const { data: listings, error: listingsError } = await supabase
       .from('listings')
-      .select('id, nickname, active')
+      .select('id, nickname, active, is_listed')
       .in('guesty_account_id', accountIds)
-      .eq('active', true);
+      .eq('active', true)
+      .eq('is_listed', true);
 
     if (listingsError) throw listingsError;
 
@@ -82,39 +83,45 @@ serve(async (req) => {
       );
     }
 
-    // Filter listings based on requirements
-    let eligibleListings = listings;
-    
-    if (onlyMissingGoals) {
-      // Only include properties without any goals for this year
-      const { data: existingGoals, error: goalsError } = await supabase
-        .from('property_goals')
-        .select('listing_id')
-        .eq('year', year);
+    // Get all existing goals for this year to determine missing months per property
+    const { data: allExistingGoals, error: goalsError } = await supabase
+      .from('property_goals')
+      .select('listing_id, month, locked')
+      .eq('year', year);
 
-      if (goalsError) {
-        console.error('Error fetching existing goals:', goalsError);
-      } else if (existingGoals && existingGoals.length > 0) {
-        const listingsWithGoals = new Set(existingGoals.map(g => g.listing_id));
-        eligibleListings = listings.filter(l => !listingsWithGoals.has(l.id));
-      }
-    } else if (excludeLocked) {
-      // Filter out listings with locked goals
-      const { data: lockedGoals, error: lockedError } = await supabase
-        .from('property_goals')
-        .select('listing_id')
-        .eq('year', year)
-        .eq('locked', true);
-
-      if (lockedError) {
-        console.error('Error fetching locked goals:', lockedError);
-      } else if (lockedGoals && lockedGoals.length > 0) {
-        const lockedListingIds = new Set(lockedGoals.map(g => g.listing_id));
-        eligibleListings = listings.filter(l => !lockedListingIds.has(l.id));
-      }
+    if (goalsError) {
+      console.error('Error fetching existing goals:', goalsError);
+      throw goalsError;
     }
 
-    const skipReason = onlyMissingGoals ? 'already have goals' : 'locked goals';
+    // Build a map of listing_id -> set of existing months
+    const goalsByListing = new Map<string, { months: Set<number>, hasLocked: boolean }>();
+    for (const goal of (allExistingGoals || [])) {
+      if (!goalsByListing.has(goal.listing_id)) {
+        goalsByListing.set(goal.listing_id, { months: new Set(), hasLocked: false });
+      }
+      const entry = goalsByListing.get(goal.listing_id)!;
+      entry.months.add(goal.month);
+      if (goal.locked) entry.hasLocked = true;
+    }
+
+    // Filter listings based on requirements
+    const eligibleListings = listings.filter(listing => {
+      const existing = goalsByListing.get(listing.id);
+      
+      if (onlyMissingGoals) {
+        // Only include if missing at least one month
+        if (!existing) return true; // no goals at all
+        return existing.months.size < 12; // missing some months
+      } else if (excludeLocked) {
+        // Only include if no locked goals
+        return !existing?.hasLocked;
+      }
+      
+      return true; // include all if no filters
+    });
+
+    const skipReason = onlyMissingGoals ? 'all 12 months exist' : 'locked goals';
     console.log(`Processing ${eligibleListings.length} properties (${listings.length - eligibleListings.length} skipped due to ${skipReason})`);
 
     // Process in background - batch of 3 properties at a time to avoid overwhelming the system
@@ -128,7 +135,17 @@ serve(async (req) => {
         let processed = 0;
         for (const listing of eligibleListings) {
           try {
-            console.log(`Generating goals for ${listing.nickname} (${listing.id})`);
+            // Check which months are missing for this listing
+            const existing = goalsByListing.get(listing.id);
+            const existingMonths = existing?.months || new Set<number>();
+            const missingMonths = [1,2,3,4,5,6,7,8,9,10,11,12].filter(m => !existingMonths.has(m));
+
+            if (missingMonths.length === 0) {
+              console.log(`Skipping ${listing.nickname} - all 12 months already exist`);
+              continue;
+            }
+
+            console.log(`Generating goals for ${listing.nickname} (${listing.id}) - missing ${missingMonths.length} months: ${missingMonths.join(',')}`);
 
             const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
               body: { listingId: listing.id, year }
@@ -140,38 +157,40 @@ serve(async (req) => {
             }
 
             if (data && data.goals) {
-              const rows = data.goals.map((g: any) => ({
-                listing_id: listing.id,
-                year,
-                month: g.month,
-                budget_revenue: g.budget,
-                projection_revenue: g.projection,
-                goal_revenue: g.goal,
-                locked: false,
-              }));
+              // Only include goals for missing months
+              const rowsToInsert = data.goals
+                .filter((g: any) => missingMonths.includes(g.month))
+                .map((g: any) => ({
+                  listing_id: listing.id,
+                  year,
+                  month: g.month,
+                  budget_revenue: g.budget,
+                  projection_revenue: g.projection,
+                  goal_revenue: g.goal,
+                  locked: false,
+                }));
 
-              // Insert immediately for missing-only; otherwise upsert
-              if (onlyMissingGoals) {
-                const { error: insertError } = await supabase
-                  .from('property_goals')
-                  .insert(rows);
-                if (insertError) {
-                  console.error(`Error inserting goals for ${listing.nickname}:`, insertError);
-                  throw insertError;
-                }
-              } else {
-                const { error: upsertError } = await supabase
-                  .from('property_goals')
-                  .upsert(rows, { onConflict: 'listing_id,year,month' });
-                if (upsertError) {
-                  console.error(`Error upserting goals for ${listing.nickname}:`, upsertError);
-                  throw upsertError;
-                }
+              if (rowsToInsert.length === 0) {
+                console.log(`No missing months to insert for ${listing.nickname}`);
+                continue;
+              }
+
+              // Use upsert with ignoreDuplicates to handle race conditions
+              const { error: upsertError } = await supabase
+                .from('property_goals')
+                .upsert(rowsToInsert, { 
+                  onConflict: 'listing_id,year,month',
+                  ignoreDuplicates: true 
+                });
+
+              if (upsertError) {
+                console.error(`Error upserting goals for ${listing.nickname}:`, upsertError);
+                throw upsertError;
               }
 
               processed++;
               succeeded++;
-              console.log(`Saved goals for ${listing.nickname} (${processed}/${eligibleListings.length})`);
+              console.log(`Saved ${rowsToInsert.length} goals for ${listing.nickname} (${processed}/${eligibleListings.length})`);
             } else {
               console.error(`No goals returned for ${listing.nickname}:`, data);
               throw new Error('No goals returned from AI');
