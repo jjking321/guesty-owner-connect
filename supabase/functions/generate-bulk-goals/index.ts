@@ -117,82 +117,92 @@ serve(async (req) => {
     const skipReason = onlyMissingGoals ? 'already have goals' : 'locked goals';
     console.log(`Processing ${eligibleListings.length} properties (${listings.length - eligibleListings.length} skipped due to ${skipReason})`);
 
-    // Process in background - batch of 5 properties at a time to avoid overwhelming the system
+    // Process in background - batch of 3 properties at a time to avoid overwhelming the system
     const processInBackground = async () => {
       const results: GenerationResult[] = [];
       let succeeded = 0;
       let failed = 0;
       const batchSize = 3;
 
-      for (let i = 0; i < eligibleListings.length; i += batchSize) {
-        const batch = eligibleListings.slice(i, i + batchSize);
-        
-        // Process batch in parallel
-        const batchPromises = batch.map(async (listing) => {
-          try {
-            console.log(`Generating goals for ${listing.nickname} (${listing.id})`);
-            
-            const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
-              body: { listingId: listing.id, year }
-            });
+      try {
+        for (let i = 0; i < eligibleListings.length; i += batchSize) {
+          const batch = eligibleListings.slice(i, i + batchSize);
+          
+          // Process batch in parallel
+          const batchPromises = batch.map(async (listing) => {
+            try {
+              console.log(`Generating goals for ${listing.nickname} (${listing.id})`);
+              
+              const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
+                body: { listingId: listing.id, year }
+              });
 
-            if (error) {
-              throw error;
-            }
+              if (error) {
+                console.error(`Error from suggest-property-goals for ${listing.nickname}:`, error);
+                throw error;
+              }
 
-            if (data && data.goals) {
-              // Save the goals
-              const upserts = data.goals.map((g: any) => ({
-                listing_id: listing.id,
-                year,
-                month: g.month,
-                budget_revenue: g.budget,
-                projection_revenue: g.projection,
-                goal_revenue: g.goal,
-                locked: false,
-              }));
+              if (data && data.goals) {
+                // Save the goals
+                const upserts = data.goals.map((g: any) => ({
+                  listing_id: listing.id,
+                  year,
+                  month: g.month,
+                  budget_revenue: g.budget,
+                  projection_revenue: g.projection,
+                  goal_revenue: g.goal,
+                  locked: false,
+                }));
 
-              const { error: saveError } = await supabase
-                .from('property_goals')
-                .upsert(upserts, { onConflict: 'listing_id,year,month' });
+                const { error: saveError } = await supabase
+                  .from('property_goals')
+                  .upsert(upserts, { onConflict: 'listing_id,year,month' });
 
-              if (saveError) throw saveError;
+                if (saveError) {
+                  console.error(`Error saving goals for ${listing.nickname}:`, saveError);
+                  throw saveError;
+                }
 
-              succeeded++;
+                console.log(`Successfully saved goals for ${listing.nickname}`);
+                succeeded++;
+                return {
+                  listingId: listing.id,
+                  nickname: listing.nickname || 'Unknown',
+                  success: true,
+                };
+              } else {
+                console.error(`No goals returned for ${listing.nickname}:`, data);
+                throw new Error('No goals returned from AI');
+              }
+            } catch (error: any) {
+              console.error(`Failed to generate goals for ${listing.nickname}:`, error.message || error);
+              failed++;
               return {
                 listingId: listing.id,
                 nickname: listing.nickname || 'Unknown',
-                success: true,
+                success: false,
+                error: error.message || String(error),
               };
-            } else {
-              throw new Error('No goals returned from AI');
             }
-          } catch (error: any) {
-            console.error(`Failed to generate goals for ${listing.nickname}:`, error);
-            failed++;
-            return {
-              listingId: listing.id,
-              nickname: listing.nickname || 'Unknown',
-              success: false,
-              error: error.message,
-            };
-          }
-        });
+          });
 
-        const batchResults = await Promise.all(batchPromises);
-        results.push(...batchResults);
+          const batchResults = await Promise.all(batchPromises);
+          results.push(...batchResults);
 
-        console.log(`Progress: ${i + batch.length}/${eligibleListings.length} properties processed`);
+          console.log(`Progress: ${i + batch.length}/${eligibleListings.length} properties processed (${succeeded} succeeded, ${failed} failed)`);
+        }
+
+        const summary = {
+          total: listings.length,
+          succeeded,
+          skipped: listings.length - eligibleListings.length,
+          failed,
+        };
+
+        console.log('Bulk generation complete:', summary);
+      } catch (error: any) {
+        console.error('Fatal error in background processing:', error.message || error);
       }
-
-      const summary = {
-        total: listings.length,
-        succeeded,
-        skipped: listings.length - eligibleListings.length,
-        failed,
-      };
-
-      console.log('Bulk generation complete:', summary);
     };
 
     // Start background processing without blocking response (keeps running after response)
