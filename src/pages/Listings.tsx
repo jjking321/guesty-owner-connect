@@ -66,7 +66,16 @@ export default function Listings() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Properties</h2>
-            <p className="text-muted-foreground">View and manage all your vacation rental properties</p>
+            <p className="text-muted-foreground">
+              {loading ? (
+                "Loading properties..."
+              ) : (
+                <>
+                  Showing {filteredListings.length} of {listings.length} {listings.length === 1 ? 'property' : 'properties'}
+                  {searchQuery && ` matching "${searchQuery}"`}
+                </>
+              )}
+            </p>
           </div>
           <Button onClick={loadListings} variant="outline">
             <RefreshCw className="mr-2 h-4 w-4" />
