@@ -253,7 +253,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 Projected End-of-Year Revenue
               </p>
               <p className="text-4xl font-bold mb-2">
-                ${forecast.totalForecast.p50.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                ${Number(forecast.totalForecast?.p50 ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
               <p className="text-sm text-muted-foreground">
                 {forecast.totalForecast.confidence?.lower && forecast.totalForecast.confidence?.upper ? (
@@ -279,7 +279,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                   <div className="text-center">
                     <p className="text-muted-foreground">Forecasted Add'l</p>
                     <p className="font-semibold">
-                      ${(forecast.totalForecast.p50 - forecast.revenueOnBooks).toLocaleString()}
+                      ${Number((forecast.totalForecast?.p50 ?? 0) - (forecast.revenueOnBooks ?? 0)).toLocaleString()}
                     </p>
                   </div>
                 </div>
@@ -337,20 +337,20 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                         </td>
                         <td className="py-2 text-right">
                           {!month.isPast ? (
-                            `$${month.revenueOnBooks.toLocaleString()}`
+                            `$${Number(month.revenueOnBooks ?? 0).toLocaleString()}`
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="py-2 text-right text-muted-foreground">
                           {!month.isPast ? (
-                            `$${month.forecastedAdditional.p50.toLocaleString()}`
+                            `$${Number(month.forecastedAdditional?.p50 ?? 0).toLocaleString()}`
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="py-2 text-right font-semibold">
-                          ${month.totalForecast.p50.toLocaleString()}
+                          ${Number(month.totalForecast?.p50 ?? 0).toLocaleString()}
                         </td>
                         <td className="py-2 text-center">
                           {!month.isPast ? (
