@@ -5,9 +5,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Home, MapPin, Users, Bed, RefreshCw, Search } from "lucide-react";
+import { Home, MapPin, Users, Bed, RefreshCw, Search, Filter } from "lucide-react";
 
 export default function Listings() {
   const { toast } = useToast();
@@ -15,6 +17,13 @@ export default function Listings() {
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilters, setStatusFilters] = useState({
+    active: true,
+    inactive: false,
+    listed: true,
+    unlisted: false,
+    archived: false,
+  });
 
   useEffect(() => {
     loadListings();
@@ -26,7 +35,6 @@ export default function Listings() {
       const { data, error } = await supabase
         .from("listings")
         .select("*")
-        .eq("archived", false)
         .order("nickname", { ascending: true });
 
       if (error) throw error;
@@ -49,17 +57,39 @@ export default function Listings() {
   };
 
   const filteredListings = listings.filter((listing) => {
+    // Status filters
+    const activeMatch = (statusFilters.active && listing.active) || 
+                       (statusFilters.inactive && !listing.active);
+    const listedMatch = (statusFilters.listed && listing.is_listed) || 
+                       (statusFilters.unlisted && !listing.is_listed);
+    const archivedMatch = (statusFilters.archived && listing.archived) || 
+                         (!statusFilters.archived && !listing.archived);
+    
+    // If no active/inactive filter is selected, show all
+    const hasActiveFilter = statusFilters.active || statusFilters.inactive;
+    const hasListedFilter = statusFilters.listed || statusFilters.unlisted;
+    
+    const statusMatch = 
+      (!hasActiveFilter || activeMatch) &&
+      (!hasListedFilter || listedMatch) &&
+      archivedMatch;
+
+    // Search filter
     const searchLower = searchQuery.toLowerCase();
     const nickname = listing.nickname?.toLowerCase() || "";
     const propertyType = listing.property_type?.toLowerCase() || "";
     const address = getAddress(listing.address).toLowerCase();
     
-    return (
+    const searchMatch = !searchQuery || (
       nickname.includes(searchLower) ||
       propertyType.includes(searchLower) ||
       address.includes(searchLower)
     );
+    
+    return statusMatch && searchMatch;
   });
+
+  const activeFilterCount = Object.values(statusFilters).filter(Boolean).length;
 
   return (
     <DashboardLayout>
@@ -84,14 +114,128 @@ export default function Listings() {
           </Button>
         </div>
 
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search properties by name, type, or location..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
-          />
+        <div className="flex gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search properties by name, type, or location..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="relative">
+                <Filter className="mr-2 h-4 w-4" />
+                Filters
+                {activeFilterCount > 0 && (
+                  <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
+                    {activeFilterCount}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 z-50 bg-popover" align="end">
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium mb-3">Status</h4>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="active"
+                        checked={statusFilters.active}
+                        onCheckedChange={(checked) =>
+                          setStatusFilters({ ...statusFilters, active: checked as boolean })
+                        }
+                      />
+                      <label htmlFor="active" className="text-sm cursor-pointer">
+                        Active
+                      </label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="inactive"
+                        checked={statusFilters.inactive}
+                        onCheckedChange={(checked) =>
+                          setStatusFilters({ ...statusFilters, inactive: checked as boolean })
+                        }
+                      />
+                      <label htmlFor="inactive" className="text-sm cursor-pointer">
+                        Inactive
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="font-medium mb-3">Listing</h4>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="listed"
+                        checked={statusFilters.listed}
+                        onCheckedChange={(checked) =>
+                          setStatusFilters({ ...statusFilters, listed: checked as boolean })
+                        }
+                      />
+                      <label htmlFor="listed" className="text-sm cursor-pointer">
+                        Listed
+                      </label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="unlisted"
+                        checked={statusFilters.unlisted}
+                        onCheckedChange={(checked) =>
+                          setStatusFilters({ ...statusFilters, unlisted: checked as boolean })
+                        }
+                      />
+                      <label htmlFor="unlisted" className="text-sm cursor-pointer">
+                        Unlisted
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="font-medium mb-3">Archive</h4>
+                  <div className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="archived"
+                        checked={statusFilters.archived}
+                        onCheckedChange={(checked) =>
+                          setStatusFilters({ ...statusFilters, archived: checked as boolean })
+                        }
+                      />
+                      <label htmlFor="archived" className="text-sm cursor-pointer">
+                        Show Archived
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() =>
+                    setStatusFilters({
+                      active: true,
+                      inactive: false,
+                      listed: true,
+                      unlisted: false,
+                      archived: false,
+                    })
+                  }
+                >
+                  Reset Filters
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {loading ? (
@@ -135,12 +279,18 @@ export default function Listings() {
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-lg line-clamp-1">{listing.nickname || "Unnamed Property"}</CardTitle>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
                       {listing.active && (
                         <Badge variant="secondary">Active</Badge>
                       )}
+                      {!listing.active && (
+                        <Badge variant="outline">Inactive</Badge>
+                      )}
                       {listing.is_listed && (
                         <Badge variant="outline">Listed</Badge>
+                      )}
+                      {listing.archived && (
+                        <Badge variant="destructive">Archived</Badge>
                       )}
                     </div>
                   </div>
