@@ -366,16 +366,19 @@ export default function PropertiesBulkEdit() {
   }, [propertyMetrics]);
 
   const handleRefreshForecasts = async () => {
-    toast.info("Generating forecasts for all properties...");
+    toast.info("Starting forecast generation for all properties...");
     try {
-      const { error } = await supabase.functions.invoke("generate-all-forecasts");
+      const { data, error } = await supabase.functions.invoke("generate-all-forecasts");
       if (error) throw error;
-      toast.success("Forecasts generated successfully!");
-      // Refetch forecasts
-      window.location.reload();
+      
+      const estimatedMinutes = data?.estimated_duration_minutes || 20;
+      toast.success(
+        `Forecast generation started in background for ${data?.total_properties || 0} properties (${data?.total_forecasts || 0} forecasts). ` +
+        `This may take ${estimatedMinutes}-${estimatedMinutes + 10} minutes. Please refresh the page after waiting.`
+      );
     } catch (error) {
       console.error("Error generating forecasts:", error);
-      toast.error("Failed to generate forecasts");
+      toast.error("Failed to start forecast generation");
     }
   };
 

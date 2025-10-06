@@ -16,7 +16,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log('Starting weekly forecast generation for all properties...');
+    console.log('Starting background forecast generation for all properties...');
 
     // Get all active listings (exclude archived)
     const { data: listings, error: listingsError } = await supabase
@@ -27,127 +27,90 @@ serve(async (req) => {
 
     if (listingsError) throw listingsError;
 
-    console.log(`Found ${listings?.length || 0} active properties`);
+    const totalProperties = listings?.length || 0;
+    console.log(`Found ${totalProperties} active properties - processing in background`);
 
-    const results = [];
-    const currentYear = new Date().getFullYear();
-    const nextYear = currentYear + 1;
+    // Start background task
+    const backgroundTask = async () => {
+      const currentYear = new Date().getFullYear();
+      const nextYear = currentYear + 1;
+      const BATCH_SIZE = 10;
+      let successCount = 0;
+      let failureCount = 0;
 
-    // Generate forecast for each listing (both current and next year)
-    for (const listing of listings || []) {
-      // Generate for current year
-      try {
-        console.log(`Generating ${currentYear} forecast for ${listing.nickname} (${listing.id})`);
-        
-        const response = await fetch(`${supabaseUrl}/functions/v1/forecast-revenue`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            listingId: listing.id,
-            year: currentYear,
-            simulations: 10000
+      // Process in batches
+      for (let i = 0; i < (listings || []).length; i += BATCH_SIZE) {
+        const batch = (listings || []).slice(i, i + BATCH_SIZE);
+        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(totalProperties / BATCH_SIZE)}`);
+
+        const batchPromises = batch.flatMap(listing => [
+          // Current year forecast
+          supabase.functions.invoke('forecast-revenue', {
+            body: {
+              listingId: listing.id,
+              year: currentYear,
+              simulations: 10000
+            }
+          }).then(({ data, error }) => {
+            if (error) {
+              console.error(`✗ ${currentYear} for ${listing.nickname}:`, error);
+              return { success: false, listing, year: currentYear };
+            }
+            console.log(`✓ ${currentYear} forecast for ${listing.nickname}: $${data?.totalForecast?.p50?.toFixed(0) || 0}`);
+            return { success: true, listing, year: currentYear };
+          }).catch(err => {
+            console.error(`✗ Error ${currentYear} for ${listing.nickname}:`, err);
+            return { success: false, listing, year: currentYear };
+          }),
+          
+          // Next year forecast
+          supabase.functions.invoke('forecast-revenue', {
+            body: {
+              listingId: listing.id,
+              year: nextYear,
+              simulations: 10000
+            }
+          }).then(({ data, error }) => {
+            if (error) {
+              console.error(`✗ ${nextYear} for ${listing.nickname}:`, error);
+              return { success: false, listing, year: nextYear };
+            }
+            console.log(`✓ ${nextYear} forecast for ${listing.nickname}: $${data?.totalForecast?.p50?.toFixed(0) || 0}`);
+            return { success: true, listing, year: nextYear };
+          }).catch(err => {
+            console.error(`✗ Error ${nextYear} for ${listing.nickname}:`, err);
+            return { success: false, listing, year: nextYear };
           })
+        ]);
+
+        const batchResults = await Promise.allSettled(batchPromises);
+        
+        batchResults.forEach(result => {
+          if (result.status === 'fulfilled' && result.value.success) {
+            successCount++;
+          } else {
+            failureCount++;
+          }
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          results.push({
-            listing_id: listing.id,
-            nickname: listing.nickname,
-            year: currentYear,
-            status: 'success',
-            forecast: data.totalForecast.p50
-          });
-          console.log(`✓ ${currentYear} forecast for ${listing.nickname}: $${data.totalForecast.p50.toFixed(0)}`);
-        } else {
-          const error = await response.text();
-          results.push({
-            listing_id: listing.id,
-            nickname: listing.nickname,
-            year: currentYear,
-            status: 'error',
-            error
-          });
-          console.error(`✗ Failed ${currentYear} for ${listing.nickname}:`, error);
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        results.push({
-          listing_id: listing.id,
-          nickname: listing.nickname,
-          year: currentYear,
-          status: 'error',
-          error: errorMessage
-        });
-        console.error(`✗ Error ${currentYear} for ${listing.nickname}:`, error);
+        console.log(`Batch complete. Progress: ${successCount} success, ${failureCount} failures`);
       }
 
-      // Generate for next year
-      try {
-        console.log(`Generating ${nextYear} forecast for ${listing.nickname} (${listing.id})`);
-        
-        const response = await fetch(`${supabaseUrl}/functions/v1/forecast-revenue`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            listingId: listing.id,
-            year: nextYear,
-            simulations: 10000
-          })
-        });
+      console.log(`Background forecast generation complete: ${successCount} success, ${failureCount} failures out of ${totalProperties * 2} total forecasts`);
+    };
 
-        if (response.ok) {
-          const data = await response.json();
-          results.push({
-            listing_id: listing.id,
-            nickname: listing.nickname,
-            year: nextYear,
-            status: 'success',
-            forecast: data.totalForecast.p50
-          });
-          console.log(`✓ ${nextYear} forecast for ${listing.nickname}: $${data.totalForecast.p50.toFixed(0)}`);
-        } else {
-          const error = await response.text();
-          results.push({
-            listing_id: listing.id,
-            nickname: listing.nickname,
-            year: nextYear,
-            status: 'error',
-            error
-          });
-          console.error(`✗ Failed ${nextYear} for ${listing.nickname}:`, error);
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        results.push({
-          listing_id: listing.id,
-          nickname: listing.nickname,
-          year: nextYear,
-          status: 'error',
-          error: errorMessage
-        });
-        console.error(`✗ Error ${nextYear} for ${listing.nickname}:`, error);
-      }
-    }
+    // Run in background using EdgeRuntime.waitUntil
+    // @ts-ignore - EdgeRuntime is available in Deno edge runtime
+    EdgeRuntime.waitUntil(backgroundTask());
 
-    const successCount = results.filter(r => r.status === 'success').length;
-    const failureCount = results.filter(r => r.status === 'error').length;
-
-    console.log(`Forecast generation complete: ${successCount} success, ${failureCount} failures`);
-
+    // Return immediate response
     return new Response(
       JSON.stringify({
         success: true,
-        total: listings?.length || 0,
-        successful: successCount,
-        failed: failureCount,
-        results
+        message: 'Forecast generation started in background',
+        total_properties: totalProperties,
+        total_forecasts: totalProperties * 2,
+        estimated_duration_minutes: Math.ceil(totalProperties / 10 * 2)
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
