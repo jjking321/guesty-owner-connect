@@ -136,8 +136,8 @@ export default function Dashboard() {
     .sort((a: any, b: any) => b.revenue - a.revenue)
     .slice(0, 5);
 
-  // Properties by bedroom count
-  const propertiesByBedrooms = listings.reduce((acc: any, listing) => {
+  // Properties by bedroom count (active only)
+  const propertiesByBedrooms = listings.filter(l => l.active).reduce((acc: any, listing) => {
     const bedrooms = listing.bedrooms || 0;
     const label = bedrooms === 0 ? 'Studio' : `${bedrooms} BR`;
     if (!acc[label]) {
@@ -150,8 +150,8 @@ export default function Dashboard() {
   const bedroomData = Object.values(propertiesByBedrooms)
     .sort((a: any, b: any) => a.sortKey - b.sortKey);
 
-  // Properties by city
-  const propertiesByCity = listings.reduce((acc: any, listing) => {
+  // Properties by city (active only)
+  const propertiesByCity = listings.filter(l => l.active).reduce((acc: any, listing) => {
     const city = listing.address?.city || 'Unknown';
     if (!acc[city]) {
       acc[city] = { city, count: 0 };
