@@ -125,71 +125,61 @@ serve(async (req) => {
       const batchSize = 3;
 
       try {
-        for (let i = 0; i < eligibleListings.length; i += batchSize) {
-          const batch = eligibleListings.slice(i, i + batchSize);
-          
-          // Process batch in parallel
-          const batchPromises = batch.map(async (listing) => {
-            try {
-              console.log(`Generating goals for ${listing.nickname} (${listing.id})`);
-              
-              const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
-                body: { listingId: listing.id, year }
-              });
+        let processed = 0;
+        for (const listing of eligibleListings) {
+          try {
+            console.log(`Generating goals for ${listing.nickname} (${listing.id})`);
 
-              if (error) {
-                console.error(`Error from suggest-property-goals for ${listing.nickname}:`, error);
-                throw error;
-              }
+            const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
+              body: { listingId: listing.id, year }
+            });
 
-              if (data && data.goals) {
-                // Save the goals
-                const upserts = data.goals.map((g: any) => ({
-                  listing_id: listing.id,
-                  year,
-                  month: g.month,
-                  budget_revenue: g.budget,
-                  projection_revenue: g.projection,
-                  goal_revenue: g.goal,
-                  locked: false,
-                }));
-
-                const { error: saveError } = await supabase
-                  .from('property_goals')
-                  .upsert(upserts, { onConflict: 'listing_id,year,month' });
-
-                if (saveError) {
-                  console.error(`Error saving goals for ${listing.nickname}:`, saveError);
-                  throw saveError;
-                }
-
-                console.log(`Successfully saved goals for ${listing.nickname}`);
-                succeeded++;
-                return {
-                  listingId: listing.id,
-                  nickname: listing.nickname || 'Unknown',
-                  success: true,
-                };
-              } else {
-                console.error(`No goals returned for ${listing.nickname}:`, data);
-                throw new Error('No goals returned from AI');
-              }
-            } catch (error: any) {
-              console.error(`Failed to generate goals for ${listing.nickname}:`, error.message || error);
-              failed++;
-              return {
-                listingId: listing.id,
-                nickname: listing.nickname || 'Unknown',
-                success: false,
-                error: error.message || String(error),
-              };
+            if (error) {
+              console.error(`Error from suggest-property-goals for ${listing.nickname}:`, error);
+              throw error;
             }
-          });
 
-          const batchResults = await Promise.all(batchPromises);
-          results.push(...batchResults);
+            if (data && data.goals) {
+              const rows = data.goals.map((g: any) => ({
+                listing_id: listing.id,
+                year,
+                month: g.month,
+                budget_revenue: g.budget,
+                projection_revenue: g.projection,
+                goal_revenue: g.goal,
+                locked: false,
+              }));
 
-          console.log(`Progress: ${i + batch.length}/${eligibleListings.length} properties processed (${succeeded} succeeded, ${failed} failed)`);
+              // Insert immediately for missing-only; otherwise upsert
+              if (onlyMissingGoals) {
+                const { error: insertError } = await supabase
+                  .from('property_goals')
+                  .insert(rows);
+                if (insertError) {
+                  console.error(`Error inserting goals for ${listing.nickname}:`, insertError);
+                  throw insertError;
+                }
+              } else {
+                const { error: upsertError } = await supabase
+                  .from('property_goals')
+                  .upsert(rows, { onConflict: 'listing_id,year,month' });
+                if (upsertError) {
+                  console.error(`Error upserting goals for ${listing.nickname}:`, upsertError);
+                  throw upsertError;
+                }
+              }
+
+              processed++;
+              succeeded++;
+              console.log(`Saved goals for ${listing.nickname} (${processed}/${eligibleListings.length})`);
+            } else {
+              console.error(`No goals returned for ${listing.nickname}:`, data);
+              throw new Error('No goals returned from AI');
+            }
+          } catch (error: any) {
+            console.error(`Failed to generate goals for ${listing.nickname}:`, error?.message || error);
+            failed++;
+          }
         }
 
         const summary = {

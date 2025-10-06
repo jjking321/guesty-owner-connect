@@ -71,7 +71,7 @@ export default function PropertiesBulkEdit() {
     },
   });
 
-  const { data: goals = [], isLoading: goalsLoading } = useQuery({
+  const { data: goals = [], isLoading: goalsLoading, refetch: refetchGoals } = useQuery({
     queryKey: ["property_goals", selectedYear],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -95,6 +95,26 @@ export default function PropertiesBulkEdit() {
     },
   });
 
+  // Realtime: refetch goals when new rows for the selected year are inserted/updated
+  useEffect(() => {
+    const channel = supabase
+      .channel('property_goals_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'property_goals' },
+        (payload) => {
+          const yr = (payload.new as any)?.year ?? (payload.old as any)?.year;
+          if (yr === selectedYear) {
+            refetchGoals();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [selectedYear, refetchGoals]);
   // Calculate metrics for each property
   const propertyMetrics = useMemo(() => {
     if (!listings.length) return [];
