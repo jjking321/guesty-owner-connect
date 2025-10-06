@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy, Sparkles } from "lucide-react";
+import { Save, Copy, Sparkles, Lock, Unlock, LockOpen } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface GoalsInputProps {
   listingId: string;
@@ -16,6 +17,10 @@ interface MonthlyGoal {
   budget: number;
   projection: number;
   goal: number;
+  locked: boolean;
+  locked_at?: string;
+  locked_by?: string;
+  id?: string;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -23,8 +28,9 @@ const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep
 export function GoalsInput({ listingId }: GoalsInputProps) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [goals, setGoals] = useState<MonthlyGoal[]>(
-    monthNames.map((_, index) => ({ month: index + 1, budget: 0, projection: 0, goal: 0 }))
+    monthNames.map((_, index) => ({ month: index + 1, budget: 0, projection: 0, goal: 0, locked: false }))
   );
+  const [lockerProfiles, setLockerProfiles] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -46,13 +52,36 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
       if (error) throw error;
 
       if (data && data.length > 0) {
+        // Get unique locked_by user IDs
+        const lockedByIds = [...new Set(data.filter(g => g.locked_by).map(g => g.locked_by))];
+        
+        // Fetch profile names for locked_by users
+        if (lockedByIds.length > 0) {
+          const { data: profiles, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', lockedByIds);
+
+          if (!profileError && profiles) {
+            const profileMap: Record<string, string> = {};
+            profiles.forEach(p => {
+              profileMap[p.id] = p.full_name || p.email;
+            });
+            setLockerProfiles(profileMap);
+          }
+        }
+
         const loadedGoals = monthNames.map((_, index) => {
           const monthData = data.find(g => g.month === index + 1);
           return {
+            id: monthData?.id,
             month: index + 1,
             budget: monthData?.budget_revenue || 0,
             projection: monthData?.projection_revenue || 0,
             goal: monthData?.goal_revenue || 0,
+            locked: monthData?.locked || false,
+            locked_at: monthData?.locked_at,
+            locked_by: monthData?.locked_by,
           };
         });
         setGoals(loadedGoals);
@@ -72,12 +101,14 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     setIsSaving(true);
     try {
       const upserts = goals.map(g => ({
+        id: g.id,
         listing_id: listingId,
         year,
         month: g.month,
         budget_revenue: g.budget,
         projection_revenue: g.projection,
         goal_revenue: g.goal,
+        locked: g.locked,
       }));
 
       const { error } = await supabase
@@ -90,6 +121,9 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
         title: "Goals saved",
         description: `Successfully saved goals for ${year}`,
       });
+      
+      // Reload to get updated lock info
+      await loadGoals();
     } catch (error: any) {
       toast({
         title: "Error saving goals",
@@ -120,6 +154,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             budget: monthData?.budget_revenue || 0,
             projection: monthData?.projection_revenue || 0,
             goal: monthData?.goal_revenue || 0,
+            locked: false, // Copied goals are unlocked by default
           };
         });
         setGoals(copiedGoals);
@@ -171,11 +206,16 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
       if (data && data.goals) {
         const aiGoals = monthNames.map((_, index) => {
           const monthData = data.goals.find((g: any) => g.month === index + 1);
+          const existingGoal = goals[index];
           return {
             month: index + 1,
             budget: monthData?.budget || 0,
             projection: monthData?.projection || 0,
             goal: monthData?.goal || 0,
+            locked: existingGoal?.locked || false, // Preserve lock state
+            locked_at: existingGoal?.locked_at,
+            locked_by: existingGoal?.locked_by,
+            id: existingGoal?.id,
           };
         });
         setGoals(aiGoals);
@@ -201,6 +241,20 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     setGoals(prev => prev.map((g, i) => 
       i === monthIndex ? { ...g, [field]: numValue } : g
     ));
+  };
+
+  const toggleLock = (monthIndex: number) => {
+    setGoals(prev => prev.map((g, i) => 
+      i === monthIndex ? { ...g, locked: !g.locked } : g
+    ));
+  };
+
+  const lockAllGoals = () => {
+    setGoals(prev => prev.map(g => ({ ...g, locked: true })));
+  };
+
+  const unlockAllGoals = () => {
+    setGoals(prev => prev.map(g => ({ ...g, locked: false })));
   };
 
   if (isLoading) {
@@ -237,39 +291,95 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div className="grid grid-cols-4 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
+          <div className="flex justify-end gap-2 mb-4">
+            <Button onClick={lockAllGoals} variant="outline" size="sm">
+              <Lock className="h-4 w-4 mr-2" />
+              Lock All
+            </Button>
+            <Button onClick={unlockAllGoals} variant="outline" size="sm">
+              <LockOpen className="h-4 w-4 mr-2" />
+              Unlock All
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-5 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
             <div>Month</div>
             <div>Budget (Low)</div>
             <div>Projection (Expected)</div>
             <div>Goal (High)</div>
+            <div className="text-center">Lock</div>
           </div>
 
-          {goals.map((goal, index) => (
-            <div key={goal.month} className="grid grid-cols-4 gap-4 items-center">
-              <div className="font-medium">{monthNames[index]}</div>
-              <Input
-                type="number"
-                value={goal.budget}
-                onChange={(e) => updateGoal(index, 'budget', e.target.value)}
-                placeholder="0"
-                className="text-right"
-              />
-              <Input
-                type="number"
-                value={goal.projection}
-                onChange={(e) => updateGoal(index, 'projection', e.target.value)}
-                placeholder="0"
-                className="text-right"
-              />
-              <Input
-                type="number"
-                value={goal.goal}
-                onChange={(e) => updateGoal(index, 'goal', e.target.value)}
-                placeholder="0"
-                className="text-right"
-              />
-            </div>
-          ))}
+          <TooltipProvider>
+            {goals.map((goal, index) => (
+              <div 
+                key={goal.month} 
+                className={`grid grid-cols-5 gap-4 items-center p-2 rounded ${
+                  goal.locked ? 'bg-muted/50' : ''
+                }`}
+              >
+                <div className="font-medium">{monthNames[index]}</div>
+                <Input
+                  type="number"
+                  value={goal.budget}
+                  onChange={(e) => updateGoal(index, 'budget', e.target.value)}
+                  placeholder="0"
+                  className="text-right"
+                  disabled={goal.locked}
+                />
+                <Input
+                  type="number"
+                  value={goal.projection}
+                  onChange={(e) => updateGoal(index, 'projection', e.target.value)}
+                  placeholder="0"
+                  className="text-right"
+                  disabled={goal.locked}
+                />
+                <Input
+                  type="number"
+                  value={goal.goal}
+                  onChange={(e) => updateGoal(index, 'goal', e.target.value)}
+                  placeholder="0"
+                  className="text-right"
+                  disabled={goal.locked}
+                />
+                <div className="flex justify-center">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleLock(index)}
+                        className={goal.locked ? 'text-green-600' : 'text-muted-foreground'}
+                      >
+                        {goal.locked ? (
+                          <Lock className="h-4 w-4" />
+                        ) : (
+                          <Unlock className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {goal.locked ? (
+                        <div className="text-sm">
+                          <p className="font-medium">Locked</p>
+                          {goal.locked_by && lockerProfiles[goal.locked_by] && (
+                            <p>by {lockerProfiles[goal.locked_by]}</p>
+                          )}
+                          {goal.locked_at && (
+                            <p>{new Date(goal.locked_at).toLocaleDateString()}</p>
+                          )}
+                        </div>
+                      ) : (
+                        'Click to lock this goal'
+                      )}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
+            ))}
+          </TooltipProvider>
 
           <div className="pt-4 flex justify-end">
             <Button onClick={saveGoals} disabled={isSaving}>

@@ -6,7 +6,7 @@ import { PropertiesTable } from "@/components/PropertiesTable";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Download, Search } from "lucide-react";
+import { RefreshCw, Download, Search, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 interface PropertyMetrics {
@@ -28,12 +28,17 @@ interface PropertyMetrics {
   forecastProjectionAchievement: number;
   forecastGoalAchievement: number;
   status: "on-track" | "at-risk" | "behind";
+  hasGoals: boolean;
+  hasLockedGoals: boolean;
+  goalsLockedCount: number;
 }
 
 export default function PropertiesBulkEdit() {
   const currentYear = new Date().getFullYear();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [goalsFilter, setGoalsFilter] = useState<string>("all");
+  const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
 
   // Fetch all data in parallel
   const { data: listings = [], isLoading: listingsLoading } = useQuery({
@@ -142,6 +147,11 @@ export default function PropertiesBulkEdit() {
         else status = "behind";
       }
 
+      // Calculate goal lock status
+      const hasGoals = goalTotal > 0;
+      const hasLockedGoals = listingGoals.some(g => g.locked);
+      const goalsLockedCount = listingGoals.filter(g => g.locked).length;
+
       return {
         id: listing.id,
         nickname: listing.nickname || "Unnamed Property",
@@ -161,6 +171,9 @@ export default function PropertiesBulkEdit() {
         forecastProjectionAchievement,
         forecastGoalAchievement,
         status,
+        hasGoals,
+        hasLockedGoals,
+        goalsLockedCount,
       };
     });
   }, [listings, reservations, goals, forecasts]);
@@ -172,9 +185,16 @@ export default function PropertiesBulkEdit() {
         .toLowerCase()
         .includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === "all" || property.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      
+      const matchesGoals = 
+        goalsFilter === 'all' ? true :
+        goalsFilter === 'no-goals' ? !property.hasGoals :
+        goalsFilter === 'unlocked' ? property.hasGoals && !property.hasLockedGoals :
+        goalsFilter === 'locked' ? property.hasLockedGoals : true;
+      
+      return matchesSearch && matchesStatus && matchesGoals;
     });
-  }, [propertyMetrics, searchQuery, statusFilter]);
+  }, [propertyMetrics, searchQuery, statusFilter, goalsFilter]);
 
   // Calculate portfolio totals
   const portfolioTotals = useMemo(() => {
@@ -207,6 +227,30 @@ export default function PropertiesBulkEdit() {
     } catch (error) {
       console.error("Error generating forecasts:", error);
       toast.error("Failed to generate forecasts");
+    }
+  };
+
+  const handleGenerateBulkGoals = async () => {
+    setIsGeneratingBulk(true);
+    toast.info("Generating goals for all properties... This may take a few minutes");
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-bulk-goals', {
+        body: { year: currentYear, excludeLocked: true }
+      });
+
+      if (error) throw error;
+
+      const summary = data.summary;
+      
+      toast.success(`✓ ${summary.succeeded} succeeded, ⊗ ${summary.skipped} skipped (locked), ✗ ${summary.failed} failed`);
+
+      // Reload the page to show updated data
+      window.location.reload();
+    } catch (error: any) {
+      console.error("Error generating goals:", error);
+      toast.error(error.message || "Failed to generate goals");
+    } finally {
+      setIsGeneratingBulk(false);
     }
   };
 
@@ -267,6 +311,15 @@ export default function PropertiesBulkEdit() {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button 
+              onClick={handleGenerateBulkGoals} 
+              variant="default"
+              size="sm"
+              disabled={isGeneratingBulk}
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              {isGeneratingBulk ? "Generating..." : "Generate Goals for All"}
+            </Button>
             <Button onClick={handleRefreshForecasts} variant="outline" size="sm">
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh Forecasts
@@ -306,7 +359,7 @@ export default function PropertiesBulkEdit() {
               size="sm"
               onClick={() => setStatusFilter("all")}
             >
-              All
+              All Status
             </Button>
             <Button
               variant={statusFilter === "on-track" ? "default" : "outline"}
@@ -328,6 +381,36 @@ export default function PropertiesBulkEdit() {
               onClick={() => setStatusFilter("behind")}
             >
               Behind
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant={goalsFilter === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setGoalsFilter("all")}
+            >
+              All Properties
+            </Button>
+            <Button
+              variant={goalsFilter === "no-goals" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setGoalsFilter("no-goals")}
+            >
+              No Goals
+            </Button>
+            <Button
+              variant={goalsFilter === "unlocked" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setGoalsFilter("unlocked")}
+            >
+              Unlocked
+            </Button>
+            <Button
+              variant={goalsFilter === "locked" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setGoalsFilter("locked")}
+            >
+              Locked
             </Button>
           </div>
         </div>

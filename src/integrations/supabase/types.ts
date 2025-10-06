@@ -265,6 +265,9 @@ export type Database = {
           goal_revenue: number | null
           id: string
           listing_id: string
+          locked: boolean
+          locked_at: string | null
+          locked_by: string | null
           month: number
           projection_revenue: number | null
           updated_at: string
@@ -276,6 +279,9 @@ export type Database = {
           goal_revenue?: number | null
           id?: string
           listing_id: string
+          locked?: boolean
+          locked_at?: string | null
+          locked_by?: string | null
           month: number
           projection_revenue?: number | null
           updated_at?: string
@@ -287,12 +293,23 @@ export type Database = {
           goal_revenue?: number | null
           id?: string
           listing_id?: string
+          locked?: boolean
+          locked_at?: string | null
+          locked_by?: string | null
           month?: number
           projection_revenue?: number | null
           updated_at?: string
           year?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "property_goals_locked_by_fkey"
+            columns: ["locked_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       property_group_members: {
         Row: {

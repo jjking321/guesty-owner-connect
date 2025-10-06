@@ -10,7 +10,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Lock } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface PropertyMetrics {
   id: string;
@@ -31,6 +32,9 @@ interface PropertyMetrics {
   forecastProjectionAchievement: number;
   forecastGoalAchievement: number;
   status: "on-track" | "at-risk" | "behind";
+  hasGoals: boolean;
+  hasLockedGoals: boolean;
+  goalsLockedCount: number;
 }
 
 interface PropertiesTableProps {
@@ -95,45 +99,61 @@ export function PropertiesTable({ properties, isLoading }: PropertiesTableProps)
   }
 
   return (
-    <Card>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[250px]">Property</TableHead>
-              <TableHead className="text-right">Actual YTD</TableHead>
-              <TableHead className="text-right">Budget</TableHead>
-              <TableHead className="text-right">Projection</TableHead>
-              <TableHead className="text-right">Goal</TableHead>
-              <TableHead className="text-right">Forecast</TableHead>
-              <TableHead className="text-center">Goal Progress</TableHead>
-              <TableHead className="text-center">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {properties.map((property) => (
-              <TableRow
-                key={property.id}
-                className="cursor-pointer hover:bg-muted/50"
-                onClick={() => navigate(`/listings/${property.id}`)}
-              >
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    {property.thumbnail && (
-                      <img
-                        src={property.thumbnail}
-                        alt={property.nickname}
-                        className="w-12 h-12 rounded object-cover"
-                      />
-                    )}
-                    <div>
-                      <p className="font-medium">{property.nickname}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {property.address?.city || "No location"}
-                      </p>
+    <TooltipProvider>
+      <Card>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[250px]">Property</TableHead>
+                <TableHead className="text-right">Actual YTD</TableHead>
+                <TableHead className="text-right">Budget</TableHead>
+                <TableHead className="text-right">Projection</TableHead>
+                <TableHead className="text-right">Goal</TableHead>
+                <TableHead className="text-right">Forecast</TableHead>
+                <TableHead className="text-center">Goal Progress</TableHead>
+                <TableHead className="text-center">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {properties.map((property) => (
+                <TableRow
+                  key={property.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/listings/${property.id}`)}
+                >
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      {property.thumbnail && (
+                        <img
+                          src={property.thumbnail}
+                          alt={property.nickname}
+                          className="w-12 h-12 rounded object-cover"
+                        />
+                      )}
+                      <div className="flex items-center gap-2">
+                        <div>
+                          <p className="font-medium">{property.nickname}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {property.address?.city || "No location"}
+                          </p>
+                        </div>
+                        {property.hasLockedGoals && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Lock className="h-4 w-4 text-green-600 flex-shrink-0" />
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>{property.goalsLockedCount} of 12 goals locked</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                        {!property.hasGoals && (
+                          <Badge variant="outline" className="text-xs">No Goals</Badge>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </TableCell>
+                  </TableCell>
                 <TableCell className="text-right font-medium">
                   {formatCurrency(property.actualRevenue)}
                 </TableCell>
@@ -184,5 +204,6 @@ export function PropertiesTable({ properties, isLoading }: PropertiesTableProps)
         </Table>
       </div>
     </Card>
+    </TooltipProvider>
   );
 }
