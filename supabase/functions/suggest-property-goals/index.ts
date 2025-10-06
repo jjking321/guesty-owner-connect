@@ -197,9 +197,12 @@ Target Year: ${year}`;
     }
 
     const aiData = await aiResponse.json();
-    const aiContent = aiData.choices[0].message.content;
+    let aiContent = aiData.choices[0].message.content;
     
     console.log('AI Response:', aiContent);
+
+    // Strip markdown code blocks if present
+    aiContent = aiContent.replace(/^```json\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
 
     // Parse the JSON response
     const suggestions = JSON.parse(aiContent);
