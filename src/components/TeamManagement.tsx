@@ -125,6 +125,22 @@ export function TeamManagement() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      // Check if invitation already exists
+      const { data: existingInvitation } = await supabase
+        .from('organization_invitations')
+        .select('*')
+        .eq('organization_id', organizationId)
+        .eq('email', email)
+        .maybeSingle();
+
+      // Delete existing invitation if found
+      if (existingInvitation) {
+        await supabase
+          .from('organization_invitations')
+          .delete()
+          .eq('id', existingInvitation.id);
+      }
+
       // Generate invitation token
       const token = crypto.randomUUID();
       const expiresAt = new Date();
@@ -152,7 +168,9 @@ export function TeamManagement() {
       
       toast({
         title: "Invitation created",
-        description: "Invitation link copied to clipboard! Share it with the user.",
+        description: existingInvitation 
+          ? "Previous invitation replaced. New link copied to clipboard!"
+          : "Invitation link copied to clipboard! Share it with the user.",
       });
 
       setShowInviteForm(false);
