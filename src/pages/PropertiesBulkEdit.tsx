@@ -6,8 +6,11 @@ import { PropertiesTable } from "@/components/PropertiesTable";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw, Download, Search, Sparkles } from "lucide-react";
+import { RefreshCw, Download, Search, Sparkles, Filter } from "lucide-react";
 import { toast } from "sonner";
 
 interface PropertyMetrics {
@@ -38,8 +41,24 @@ export default function PropertiesBulkEdit() {
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [goalsFilter, setGoalsFilter] = useState<string>("all");
+  const [propertyFilters, setPropertyFilters] = useState({
+    active: true,
+    inactive: false,
+    listed: true,
+    unlisted: false,
+    archived: false,
+  });
+  const [statusFilters, setStatusFilters] = useState({
+    onTrack: true,
+    atRisk: true,
+    behind: true,
+  });
+  const [goalsFilters, setGoalsFilters] = useState({
+    hasGoals: true,
+    noGoals: true,
+    locked: true,
+    unlocked: true,
+  });
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
 
   // Fetch all data in parallel
@@ -48,10 +67,7 @@ export default function PropertiesBulkEdit() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("listings")
-        .select("*")
-        .eq("active", true)
-        .eq("is_listed", true)
-        .eq("archived", false);
+        .select("*");
       if (error) throw error;
       return data;
     },
@@ -202,20 +218,48 @@ export default function PropertiesBulkEdit() {
   // Filter properties
   const filteredProperties = useMemo(() => {
     return propertyMetrics.filter((property) => {
+      // Get the listing to check property filters
+      const listing = listings.find(l => l.id === property.id);
+      if (!listing) return false;
+
+      // Property status filters
+      const activeMatch = (propertyFilters.active && listing.active) || 
+                         (propertyFilters.inactive && !listing.active);
+      const listedMatch = (propertyFilters.listed && listing.is_listed) || 
+                         (propertyFilters.unlisted && !listing.is_listed);
+      const archivedMatch = (propertyFilters.archived && listing.archived) || 
+                           (!propertyFilters.archived && !listing.archived);
+      
+      const hasPropertyFilter = propertyFilters.active || propertyFilters.inactive;
+      const hasListedFilter = propertyFilters.listed || propertyFilters.unlisted;
+      
+      const propertyStatusMatch = 
+        (!hasPropertyFilter || activeMatch) &&
+        (!hasListedFilter || listedMatch) &&
+        archivedMatch;
+
+      // Performance status filters
+      const hasStatusFilter = statusFilters.onTrack || statusFilters.atRisk || statusFilters.behind;
+      const statusMatch = !hasStatusFilter || 
+        (statusFilters.onTrack && property.status === "on-track") ||
+        (statusFilters.atRisk && property.status === "at-risk") ||
+        (statusFilters.behind && property.status === "behind");
+
+      // Goals filters
+      const hasGoalsFilter = goalsFilters.hasGoals || goalsFilters.noGoals || goalsFilters.locked || goalsFilters.unlocked;
+      const goalsMatch = !hasGoalsFilter ||
+        (goalsFilters.noGoals && !property.hasGoals) ||
+        (goalsFilters.hasGoals && property.hasGoals && !property.hasLockedGoals && goalsFilters.unlocked) ||
+        (goalsFilters.locked && property.hasLockedGoals);
+
+      // Search filter
       const matchesSearch = property.nickname
         .toLowerCase()
         .includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === "all" || property.status === statusFilter;
       
-      const matchesGoals = 
-        goalsFilter === 'all' ? true :
-        goalsFilter === 'no-goals' ? !property.hasGoals :
-        goalsFilter === 'unlocked' ? property.hasGoals && !property.hasLockedGoals :
-        goalsFilter === 'locked' ? property.hasLockedGoals : true;
-      
-      return matchesSearch && matchesStatus && matchesGoals;
+      return propertyStatusMatch && statusMatch && goalsMatch && matchesSearch;
     });
-  }, [propertyMetrics, searchQuery, statusFilter, goalsFilter]);
+  }, [propertyMetrics, listings, searchQuery, propertyFilters, statusFilters, goalsFilters]);
 
   // Calculate portfolio totals
   const portfolioTotals = useMemo(() => {
@@ -399,7 +443,7 @@ export default function PropertiesBulkEdit() {
         />
 
         <div className="space-y-3">
-          <div className="flex gap-4 items-center">
+          <div className="flex gap-3 items-center">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -409,67 +453,290 @@ export default function PropertiesBulkEdit() {
                 className="pl-10"
               />
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant={statusFilter === "all" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setStatusFilter("all")}
-              >
-                All Status
-              </Button>
-              <Button
-                variant={statusFilter === "on-track" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setStatusFilter("on-track")}
-              >
-                On Track
-              </Button>
-              <Button
-                variant={statusFilter === "at-risk" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setStatusFilter("at-risk")}
-              >
-                At Risk
-              </Button>
-              <Button
-                variant={statusFilter === "behind" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setStatusFilter("behind")}
-              >
-                Behind
-              </Button>
-            </div>
+            
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="relative">
+                  <Filter className="mr-2 h-4 w-4" />
+                  Property Filters
+                  {(() => {
+                    const count = Object.values(propertyFilters).filter(Boolean).length;
+                    return count > 0 ? (
+                      <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
+                        {count}
+                      </Badge>
+                    ) : null;
+                  })()}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium mb-3">Status</h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="prop-active"
+                          checked={propertyFilters.active}
+                          onCheckedChange={(checked) =>
+                            setPropertyFilters({ ...propertyFilters, active: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="prop-active" className="text-sm cursor-pointer">
+                          Active
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="prop-inactive"
+                          checked={propertyFilters.inactive}
+                          onCheckedChange={(checked) =>
+                            setPropertyFilters({ ...propertyFilters, inactive: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="prop-inactive" className="text-sm cursor-pointer">
+                          Inactive
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <h4 className="font-medium mb-3">Listing</h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="prop-listed"
+                          checked={propertyFilters.listed}
+                          onCheckedChange={(checked) =>
+                            setPropertyFilters({ ...propertyFilters, listed: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="prop-listed" className="text-sm cursor-pointer">
+                          Listed
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="prop-unlisted"
+                          checked={propertyFilters.unlisted}
+                          onCheckedChange={(checked) =>
+                            setPropertyFilters({ ...propertyFilters, unlisted: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="prop-unlisted" className="text-sm cursor-pointer">
+                          Unlisted
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <h4 className="font-medium mb-3">Archive</h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="prop-archived"
+                          checked={propertyFilters.archived}
+                          onCheckedChange={(checked) =>
+                            setPropertyFilters({ ...propertyFilters, archived: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="prop-archived" className="text-sm cursor-pointer">
+                          Show Archived
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() =>
+                      setPropertyFilters({
+                        active: true,
+                        inactive: false,
+                        listed: true,
+                        unlisted: false,
+                        archived: false,
+                      })
+                    }
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="relative">
+                  <Filter className="mr-2 h-4 w-4" />
+                  Performance
+                  {(() => {
+                    const count = Object.values(statusFilters).filter(Boolean).length;
+                    return count > 0 && count < 3 ? (
+                      <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
+                        {count}
+                      </Badge>
+                    ) : null;
+                  })()}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium mb-3">Status</h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="status-ontrack"
+                          checked={statusFilters.onTrack}
+                          onCheckedChange={(checked) =>
+                            setStatusFilters({ ...statusFilters, onTrack: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="status-ontrack" className="text-sm cursor-pointer">
+                          On Track
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="status-atrisk"
+                          checked={statusFilters.atRisk}
+                          onCheckedChange={(checked) =>
+                            setStatusFilters({ ...statusFilters, atRisk: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="status-atrisk" className="text-sm cursor-pointer">
+                          At Risk
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="status-behind"
+                          checked={statusFilters.behind}
+                          onCheckedChange={(checked) =>
+                            setStatusFilters({ ...statusFilters, behind: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="status-behind" className="text-sm cursor-pointer">
+                          Behind
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() =>
+                      setStatusFilters({
+                        onTrack: true,
+                        atRisk: true,
+                        behind: true,
+                      })
+                    }
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="relative">
+                  <Filter className="mr-2 h-4 w-4" />
+                  Goals
+                  {(() => {
+                    const count = Object.values(goalsFilters).filter(Boolean).length;
+                    return count > 0 && count < 4 ? (
+                      <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
+                        {count}
+                      </Badge>
+                    ) : null;
+                  })()}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium mb-3">Goal Status</h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="goals-has"
+                          checked={goalsFilters.hasGoals}
+                          onCheckedChange={(checked) =>
+                            setGoalsFilters({ ...goalsFilters, hasGoals: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="goals-has" className="text-sm cursor-pointer">
+                          Has Goals
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="goals-none"
+                          checked={goalsFilters.noGoals}
+                          onCheckedChange={(checked) =>
+                            setGoalsFilters({ ...goalsFilters, noGoals: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="goals-none" className="text-sm cursor-pointer">
+                          No Goals
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="goals-locked"
+                          checked={goalsFilters.locked}
+                          onCheckedChange={(checked) =>
+                            setGoalsFilters({ ...goalsFilters, locked: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="goals-locked" className="text-sm cursor-pointer">
+                          Locked
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="goals-unlocked"
+                          checked={goalsFilters.unlocked}
+                          onCheckedChange={(checked) =>
+                            setGoalsFilters({ ...goalsFilters, unlocked: checked as boolean })
+                          }
+                        />
+                        <label htmlFor="goals-unlocked" className="text-sm cursor-pointer">
+                          Unlocked
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={() =>
+                      setGoalsFilters({
+                        hasGoals: true,
+                        noGoals: true,
+                        locked: true,
+                        unlocked: true,
+                      })
+                    }
+                  >
+                    Reset
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant={goalsFilter === "all" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setGoalsFilter("all")}
-            >
-              All Properties
-            </Button>
-            <Button
-              variant={goalsFilter === "no-goals" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setGoalsFilter("no-goals")}
-            >
-              No Goals
-            </Button>
-            <Button
-              variant={goalsFilter === "unlocked" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setGoalsFilter("unlocked")}
-            >
-              Unlocked
-            </Button>
-            <Button
-              variant={goalsFilter === "locked" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setGoalsFilter("locked")}
-            >
-              Locked
-            </Button>
-          </div>
+          
           <p className="text-sm text-muted-foreground">
             Showing {filteredProperties.length} of {propertyMetrics.length} {propertyMetrics.length === 1 ? 'property' : 'properties'}
           </p>
