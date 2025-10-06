@@ -249,10 +249,15 @@ export default function PropertiesBulkEdit() {
 
       // Goals filters
       const hasGoalsFilter = goalsFilters.hasGoals || goalsFilters.noGoals || goalsFilters.locked || goalsFilters.unlocked;
-      const goalsMatch = !hasGoalsFilter ||
-        (goalsFilters.noGoals && !property.hasGoals) ||
-        (goalsFilters.hasGoals && property.hasGoals && !property.hasLockedGoals && goalsFilters.unlocked) ||
-        (goalsFilters.locked && property.hasLockedGoals);
+      
+      let goalsMatch = true;
+      if (hasGoalsFilter) {
+        goalsMatch = 
+          (goalsFilters.noGoals && !property.hasGoals) ||
+          (goalsFilters.hasGoals && property.hasGoals && !property.hasLockedGoals) ||
+          (goalsFilters.locked && property.hasLockedGoals) ||
+          (goalsFilters.unlocked && property.hasGoals && !property.hasLockedGoals);
+      }
 
       // Search filter
       const matchesSearch = property.nickname
