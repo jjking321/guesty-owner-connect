@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw, Download, Search, Sparkles, Filter } from "lucide-react";
+import { RefreshCw, Download, Search, Sparkles, Filter, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 
 interface PropertyMetrics {
@@ -60,6 +60,8 @@ export default function PropertiesBulkEdit() {
     unlocked: true,
   });
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
+  const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
 
   // Fetch all data in parallel
   const { data: listings = [], isLoading: listingsLoading } = useQuery({
@@ -215,9 +217,9 @@ export default function PropertiesBulkEdit() {
     });
   }, [listings, ytdRevenueData, goals, forecasts]);
 
-  // Filter properties
+  // Filter and sort properties
   const filteredProperties = useMemo(() => {
-    return propertyMetrics.filter((property) => {
+    const filtered = propertyMetrics.filter((property) => {
       // Get the listing to check property filters
       const listing = listings.find(l => l.id === property.id);
       if (!listing) return false;
@@ -259,7 +261,33 @@ export default function PropertiesBulkEdit() {
       
       return propertyStatusMatch && statusMatch && goalsMatch && matchesSearch;
     });
-  }, [propertyMetrics, listings, searchQuery, propertyFilters, statusFilters, goalsFilters]);
+
+    // Apply sorting
+    return [...filtered].sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortBy) {
+        case "name":
+          comparison = a.nickname.localeCompare(b.nickname);
+          break;
+        case "actual":
+          comparison = a.actualRevenue - b.actualRevenue;
+          break;
+        case "forecast":
+          comparison = a.forecastedRevenue - b.forecastedRevenue;
+          break;
+        case "goalProgress":
+          comparison = a.goalAchievement - b.goalAchievement;
+          break;
+        case "status":
+          const statusOrder = { "behind": 0, "at-risk": 1, "on-track": 2 };
+          comparison = statusOrder[a.status] - statusOrder[b.status];
+          break;
+      }
+      
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [propertyMetrics, listings, searchQuery, propertyFilters, statusFilters, goalsFilters, sortBy, sortDirection]);
 
   // Calculate portfolio totals
   const portfolioTotals = useMemo(() => {
@@ -379,6 +407,31 @@ export default function PropertiesBulkEdit() {
 
   const isLoading = listingsLoading || ytdRevenueLoading || goalsLoading || forecastsLoading;
 
+  const handleSort = (field: typeof sortBy) => {
+    if (sortBy === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortDirection("asc");
+    }
+  };
+
+  const SortButton = ({ field, label }: { field: typeof sortBy; label: string }) => {
+    const isActive = sortBy === field;
+    const Icon = isActive ? (sortDirection === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+    
+    return (
+      <Button
+        variant={isActive ? "default" : "outline"}
+        size="sm"
+        onClick={() => handleSort(field)}
+      >
+        {label}
+        <Icon className="ml-2 h-4 w-4" />
+      </Button>
+    );
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -443,8 +496,8 @@ export default function PropertiesBulkEdit() {
         />
 
         <div className="space-y-3">
-          <div className="flex gap-3 items-center">
-            <div className="relative flex-1">
+          <div className="flex gap-3 items-center flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search properties..."
@@ -452,6 +505,15 @@ export default function PropertiesBulkEdit() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
               />
+            </div>
+            
+            <div className="flex gap-2 items-center">
+              <span className="text-sm text-muted-foreground">Sort by:</span>
+              <SortButton field="name" label="Name" />
+              <SortButton field="actual" label="Actual YTD" />
+              <SortButton field="forecast" label="Forecast" />
+              <SortButton field="goalProgress" label="Goal %" />
+              <SortButton field="status" label="Status" />
             </div>
             
             <Popover>
