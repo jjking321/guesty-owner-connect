@@ -56,20 +56,18 @@ export default function PropertiesBulkEdit() {
     },
   });
 
-  const { data: reservations = [], isLoading: reservationsLoading } = useQuery({
-    queryKey: ["reservations", selectedYear],
+  const { data: ytdRevenueData = [], isLoading: ytdRevenueLoading } = useQuery({
+    queryKey: ["ytd-revenue", selectedYear],
     queryFn: async () => {
-      const startDate = `${selectedYear}-01-01`;
       const today = new Date().toISOString().split('T')[0];
       const endDate = selectedYear === new Date().getFullYear() ? today : `${selectedYear}-12-31`;
       const { data, error } = await supabase
-        .from("reservations")
-        .select("*")
-        .gte("check_out", startDate)
-        .lte("check_out", endDate)
-        .in("status", ["confirmed", "checked_out"]) ;
+        .rpc("get_ytd_revenue_by_listing", {
+          target_year: selectedYear,
+          end_date: endDate
+        });
       if (error) throw error;
-      return data;
+      return data || [];
     },
   });
 
@@ -101,15 +99,14 @@ export default function PropertiesBulkEdit() {
   const propertyMetrics = useMemo(() => {
     if (!listings.length) return [];
 
+    // Create a map of listing_id to YTD revenue
+    const revenueMap = new Map(
+      ytdRevenueData.map((item: any) => [item.listing_id, Number(item.total_revenue) || 0])
+    );
+
     return listings.map((listing): PropertyMetrics => {
-      // Calculate actual revenue
-      const listingReservations = reservations.filter(
-        (r) => r.listing_id === listing.id
-      );
-      const actualRevenue = listingReservations.reduce(
-        (sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0),
-        0
-      );
+      // Get actual revenue from the aggregated data
+      const actualRevenue = revenueMap.get(listing.id) || 0;
 
       // Calculate annual goals
       const listingGoals = goals.filter((g) => g.listing_id === listing.id);
@@ -179,7 +176,7 @@ export default function PropertiesBulkEdit() {
         goalsLockedCount,
       };
     });
-  }, [listings, reservations, goals, forecasts]);
+  }, [listings, ytdRevenueData, goals, forecasts]);
 
   // Filter properties
   const filteredProperties = useMemo(() => {
@@ -301,7 +298,7 @@ export default function PropertiesBulkEdit() {
     window.URL.revokeObjectURL(url);
   };
 
-  const isLoading = listingsLoading || reservationsLoading || goalsLoading || forecastsLoading;
+  const isLoading = listingsLoading || ytdRevenueLoading || goalsLoading || forecastsLoading;
 
   return (
     <DashboardLayout>

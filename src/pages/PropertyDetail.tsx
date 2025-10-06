@@ -44,12 +44,12 @@ export default function PropertyDetail() {
       if (listingError) throw listingError;
       setListing(listingData);
 
-      // Load confirmed reservations for this property
+      // Load confirmed and checked_out reservations for this property
       const { data: reservationsData, error: reservationsError } = await supabase
         .from("reservations")
         .select("*")
         .eq("listing_id", id)
-        .eq("status", "confirmed")
+        .in("status", ["confirmed", "checked_out"])
         .order("check_in", { ascending: false });
 
       if (reservationsError) throw reservationsError;
