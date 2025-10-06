@@ -6,6 +6,7 @@ import { PropertiesTable } from "@/components/PropertiesTable";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, Download, Search, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,6 +36,7 @@ interface PropertyMetrics {
 
 export default function PropertiesBulkEdit() {
   const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [goalsFilter, setGoalsFilter] = useState<string>("all");
@@ -55,15 +57,17 @@ export default function PropertiesBulkEdit() {
   });
 
   const { data: reservations = [], isLoading: reservationsLoading } = useQuery({
-    queryKey: ["reservations", currentYear],
+    queryKey: ["reservations", selectedYear],
     queryFn: async () => {
-      const startDate = `${currentYear}-01-01`;
-      const endDate = `${currentYear}-12-31`;
+      const startDate = `${selectedYear}-01-01`;
+      const endDate = `${selectedYear}-12-31`;
+      const today = new Date().toISOString().split('T')[0];
       const { data, error } = await supabase
         .from("reservations")
         .select("*")
         .gte("check_in", startDate)
         .lte("check_in", endDate)
+        .lte("check_out", today)
         .eq("status", "confirmed");
       if (error) throw error;
       return data;
@@ -71,24 +75,24 @@ export default function PropertiesBulkEdit() {
   });
 
   const { data: goals = [], isLoading: goalsLoading } = useQuery({
-    queryKey: ["property_goals", currentYear],
+    queryKey: ["property_goals", selectedYear],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("property_goals")
         .select("*")
-        .eq("year", currentYear);
+        .eq("year", selectedYear);
       if (error) throw error;
       return data;
     },
   });
 
   const { data: forecasts = [], isLoading: forecastsLoading } = useQuery({
-    queryKey: ["revenue_forecasts", currentYear],
+    queryKey: ["revenue_forecasts", selectedYear],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("revenue_forecasts")
         .select("*")
-        .eq("year", currentYear);
+        .eq("year", selectedYear);
       if (error) throw error;
       return data;
     },
@@ -235,7 +239,7 @@ export default function PropertiesBulkEdit() {
     toast.info("Generating goals for all properties... This may take a few minutes");
     try {
       const { data, error } = await supabase.functions.invoke('generate-bulk-goals', {
-        body: { year: currentYear, excludeLocked: true }
+        body: { year: selectedYear, excludeLocked: true }
       });
 
       if (error) throw error;
@@ -293,7 +297,7 @@ export default function PropertiesBulkEdit() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `properties-bulk-${currentYear}.csv`;
+    a.download = `properties-bulk-${selectedYear}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
   };
@@ -305,7 +309,18 @@ export default function PropertiesBulkEdit() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Portfolio Overview</h1>
+            <div className="flex items-center gap-4">
+              <h1 className="text-3xl font-bold">Portfolio Overview</h1>
+              <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={currentYear.toString()}>{currentYear}</SelectItem>
+                  <SelectItem value={(currentYear + 1).toString()}>{currentYear + 1}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <p className="text-muted-foreground">
               View and compare revenue metrics across all properties
             </p>
