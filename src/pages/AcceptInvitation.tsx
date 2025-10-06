@@ -25,16 +25,7 @@ export default function AcceptInvitation() {
     }
 
     try {
-      // Check if user is authenticated
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        // Redirect to auth with return URL
-        navigate(`/auth?redirect=/accept-invitation?token=${token}`);
-        return;
-      }
-
-      // Get invitation details
+      // Get invitation details first (no auth required for lookup)
       const { data: inviteData, error: inviteError } = await supabase
         .from('organization_invitations')
         .select('*, organizations(name)')
@@ -50,6 +41,23 @@ export default function AcceptInvitation() {
       }
 
       setInvitation(inviteData);
+
+      // Check if user is authenticated
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        // Don't redirect yet, let user see invitation details
+        setLoading(false);
+        return;
+      }
+
+      // Check if logged-in user's email matches invitation
+      if (user.email !== inviteData.email) {
+        toast.error(`Please log in with ${inviteData.email} to accept this invitation`);
+        setLoading(false);
+        return;
+      }
+
     } catch (error: any) {
       console.error('Error checking invitation:', error);
       toast.error('Failed to check invitation');
@@ -99,6 +107,15 @@ export default function AcceptInvitation() {
     );
   }
 
+  const handleGoToAuth = () => {
+    navigate(`/auth?redirect=/accept-invitation?token=${token}&email=${invitation?.email}`);
+  };
+
+  const checkIfLoggedInWithCorrectEmail = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    return user?.email === invitation?.email;
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
       <Card className="w-full max-w-md">
@@ -109,23 +126,43 @@ export default function AcceptInvitation() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Role: <span className="font-semibold capitalize">{invitation?.role}</span>
-          </p>
-          <Button 
-            onClick={handleAcceptInvitation} 
-            disabled={loading}
-            className="w-full"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Accepting...
-              </>
-            ) : (
-              'Accept Invitation'
-            )}
-          </Button>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              <span className="font-semibold">Email:</span> {invitation?.email}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              <span className="font-semibold">Role:</span> <span className="capitalize">{invitation?.role}</span>
+            </p>
+          </div>
+          
+          {checkIfLoggedInWithCorrectEmail() ? (
+            <Button 
+              onClick={handleAcceptInvitation} 
+              disabled={loading}
+              className="w-full"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Accepting...
+                </>
+              ) : (
+                'Accept Invitation'
+              )}
+            </Button>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Please sign up or log in with <span className="font-semibold">{invitation?.email}</span> to accept this invitation.
+              </p>
+              <Button 
+                onClick={handleGoToAuth}
+                className="w-full"
+              >
+                Continue to Sign In
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

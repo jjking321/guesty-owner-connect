@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +10,10 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, Building2 } from "lucide-react";
 
 export function AuthForm() {
+  const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const prefillEmail = searchParams.get("email") || "";
 
   const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -109,6 +112,7 @@ export function AuthForm() {
                       name="signin-email"
                       type="email"
                       placeholder="you@example.com"
+                      defaultValue={prefillEmail}
                       required
                     />
                   </div>
@@ -144,6 +148,7 @@ export function AuthForm() {
                       name="signup-email"
                       type="email"
                       placeholder="you@example.com"
+                      defaultValue={prefillEmail}
                       required
                     />
                   </div>
