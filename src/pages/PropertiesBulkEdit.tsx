@@ -382,6 +382,30 @@ export default function PropertiesBulkEdit() {
     }
   };
 
+  const handleGenerateMissingForecasts = async () => {
+    toast.info("Checking for properties missing forecasts...");
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-missing-forecasts');
+      
+      if (error) throw error;
+      
+      const propertiesCount = data?.properties_processed || 0;
+      const estimatedMinutes = data?.estimated_duration_minutes || 0;
+      
+      if (propertiesCount === 0) {
+        toast.success("All properties already have forecasts for the current and next year.");
+      } else {
+        toast.success(
+          `Forecast generation started for ${propertiesCount} properties missing forecasts. ` +
+          `Estimated time: ~${estimatedMinutes} minutes. Please refresh after waiting.`
+        );
+      }
+    } catch (error: any) {
+      console.error('Error generating missing forecasts:', error);
+      toast.error(error.message || "Failed to start forecast generation");
+    }
+  };
+
   const handleGenerateBulkGoals = async () => {
     setIsGeneratingBulk(true);
     toast.info("Starting goal generation for all properties... This will run in the background and may take several minutes.");
@@ -531,9 +555,13 @@ export default function PropertiesBulkEdit() {
               <Sparkles className="h-4 w-4 mr-2" />
               {isGeneratingBulk ? "Generating..." : "Regenerate All"}
             </Button>
+            <Button onClick={handleGenerateMissingForecasts} variant="outline" size="sm">
+              <Sparkles className="h-4 w-4 mr-2" />
+              Generate Missing Forecasts
+            </Button>
             <Button onClick={handleRefreshForecasts} variant="outline" size="sm">
               <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh Forecasts
+              Refresh All Forecasts
             </Button>
             <Button onClick={handleExportCSV} variant="outline" size="sm">
               <Download className="h-4 w-4 mr-2" />
