@@ -388,16 +388,26 @@ export default function GroupDetail() {
     setIsSubmitting(true);
 
     try {
+      // Get user's organization
+      const { data: membership } = await supabase
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", session?.user?.id)
+        .single();
+
+      if (!membership) {
+        throw new Error("No organization found");
+      }
       
       // Create sub-group
       const { data: subGroup, error: subGroupError } = await supabase
         .from("property_groups")
         .insert({
-          user_id: session?.user?.id,
+          organization_id: membership.organization_id,
           name: subGroupName,
           description: subGroupDescription,
           parent_group_id: id,
-        })
+        } as any)
         .select()
         .single();
 

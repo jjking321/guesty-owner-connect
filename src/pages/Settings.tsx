@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, Loader2, Key, Home, Calendar } from "lucide-react";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
+import { TeamManagement } from "@/components/TeamManagement";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -87,12 +88,23 @@ export default function Settings() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
+      // Get user's organization
+      const { data: membership } = await supabase
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", user.id)
+        .single();
+
+      if (!membership) {
+        throw new Error("No organization found. Please contact support.");
+      }
+
       const { error } = await supabase.from("guesty_accounts").insert({
-        user_id: user.id,
+        organization_id: membership.organization_id,
         account_name: accountName,
         client_id: clientId,
         client_secret: clientSecret,
-      });
+      } as any);
 
       if (error) throw error;
 
@@ -406,6 +418,8 @@ export default function Settings() {
             </p>
           </CardContent>
         </Card>
+
+        <TeamManagement />
       </div>
     </DashboardLayout>
   );
