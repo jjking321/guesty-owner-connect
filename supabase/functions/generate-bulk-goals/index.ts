@@ -107,7 +107,7 @@ serve(async (req) => {
       const results: GenerationResult[] = [];
       let succeeded = 0;
       let failed = 0;
-      const batchSize = 5;
+      const batchSize = 3;
 
       for (let i = 0; i < eligibleListings.length; i += batchSize) {
         const batch = eligibleListings.slice(i, i + batchSize);
@@ -180,10 +180,16 @@ serve(async (req) => {
       console.log('Bulk generation complete:', summary);
     };
 
-    // Start background processing without blocking response
-    processInBackground().catch(err => {
-      console.error('Background processing failed:', err);
-    });
+    // Start background processing without blocking response (keeps running after response)
+    // Use EdgeRuntime.waitUntil to ensure the runtime keeps the task alive
+    try {
+      EdgeRuntime.waitUntil(processInBackground());
+    } catch {
+      // Fallback: fire-and-forget
+      processInBackground().catch(err => {
+        console.error('Background processing failed:', err);
+      });
+    }
 
     // Return immediate response
     return new Response(
