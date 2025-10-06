@@ -496,8 +496,8 @@ export default function PropertiesBulkEdit() {
         />
 
         <div className="space-y-3">
-          <div className="flex gap-3 items-center flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
+          <div className="flex gap-3 items-center">
+            <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search properties..."
@@ -505,15 +505,6 @@ export default function PropertiesBulkEdit() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
               />
-            </div>
-            
-            <div className="flex gap-2 items-center">
-              <span className="text-sm text-muted-foreground">Sort by:</span>
-              <SortButton field="name" label="Name" />
-              <SortButton field="actual" label="Actual YTD" />
-              <SortButton field="forecast" label="Forecast" />
-              <SortButton field="goalProgress" label="Goal %" />
-              <SortButton field="status" label="Status" />
             </div>
             
             <Popover>
@@ -804,7 +795,13 @@ export default function PropertiesBulkEdit() {
           </p>
         </div>
 
-        <PropertiesTable properties={filteredProperties} isLoading={isLoading} />
+        <PropertiesTable 
+          properties={filteredProperties} 
+          isLoading={isLoading}
+          sortBy={sortBy}
+          sortDirection={sortDirection}
+          onSort={handleSort}
+        />
       </div>
     </DashboardLayout>
   );

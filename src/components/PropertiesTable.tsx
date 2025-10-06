@@ -10,7 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { TrendingUp, TrendingDown, Minus, Lock } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Lock, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface PropertyMetrics {
@@ -40,10 +40,36 @@ interface PropertyMetrics {
 interface PropertiesTableProps {
   properties: PropertyMetrics[];
   isLoading: boolean;
+  sortBy?: "name" | "actual" | "forecast" | "goalProgress" | "status";
+  sortDirection?: "asc" | "desc";
+  onSort?: (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => void;
 }
 
-export function PropertiesTable({ properties, isLoading }: PropertiesTableProps) {
+export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, onSort }: PropertiesTableProps) {
   const navigate = useNavigate();
+
+  const SortableHeader = ({ field, children, align = "left" }: { 
+    field: "name" | "actual" | "forecast" | "goalProgress" | "status"; 
+    children: React.ReactNode;
+    align?: "left" | "right" | "center";
+  }) => {
+    if (!onSort) return <TableHead className={align === "right" ? "text-right" : align === "center" ? "text-center" : ""}>{children}</TableHead>;
+    
+    const isActive = sortBy === field;
+    const Icon = isActive ? (sortDirection === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+    
+    return (
+      <TableHead 
+        className={`cursor-pointer hover:bg-muted/50 select-none ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""}`}
+        onClick={() => onSort(field)}
+      >
+        <div className={`flex items-center gap-2 ${align === "right" ? "justify-end" : align === "center" ? "justify-center" : ""}`}>
+          {children}
+          <Icon className="h-4 w-4" />
+        </div>
+      </TableHead>
+    );
+  };
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -105,14 +131,14 @@ export function PropertiesTable({ properties, isLoading }: PropertiesTableProps)
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[250px]">Property</TableHead>
-                <TableHead className="text-right">Actual YTD</TableHead>
+                <SortableHeader field="name">Property</SortableHeader>
+                <SortableHeader field="actual" align="right">Actual YTD</SortableHeader>
                 <TableHead className="text-right">Budget</TableHead>
                 <TableHead className="text-right">Projection</TableHead>
                 <TableHead className="text-right">Goal</TableHead>
-                <TableHead className="text-right">Forecast</TableHead>
-                <TableHead className="text-center">Goal Progress</TableHead>
-                <TableHead className="text-center">Status</TableHead>
+                <SortableHeader field="forecast" align="right">Forecast</SortableHeader>
+                <SortableHeader field="goalProgress" align="center">Goal Progress</SortableHeader>
+                <SortableHeader field="status" align="center">Status</SortableHeader>
               </TableRow>
             </TableHeader>
             <TableBody>
