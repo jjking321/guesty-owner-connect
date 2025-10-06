@@ -232,7 +232,7 @@ export default function PropertiesBulkEdit() {
 
   const handleGenerateBulkGoals = async () => {
     setIsGeneratingBulk(true);
-    toast.info("Generating goals for all properties... This may take a few minutes");
+    toast.info("Starting goal generation for all properties... This will run in the background and may take several minutes.");
     try {
       const { data, error } = await supabase.functions.invoke('generate-bulk-goals', {
         body: { year: selectedYear, excludeLocked: true }
@@ -240,15 +240,10 @@ export default function PropertiesBulkEdit() {
 
       if (error) throw error;
 
-      const summary = data.summary;
-      
-      toast.success(`✓ ${summary.succeeded} succeeded, ⊗ ${summary.skipped} skipped (locked), ✗ ${summary.failed} failed`);
-
-      // Reload the page to show updated data
-      window.location.reload();
+      toast.success(`Goal generation started for ${data.totalProperties} properties. Please refresh in a few minutes to see results.`);
     } catch (error: any) {
-      console.error("Error generating goals:", error);
-      toast.error(error.message || "Failed to generate goals");
+      console.error("Error starting goal generation:", error);
+      toast.error(error.message || "Failed to start goal generation");
     } finally {
       setIsGeneratingBulk(false);
     }
