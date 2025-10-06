@@ -146,11 +146,17 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
   const generateAIGoals = async () => {
     setIsGenerating(true);
     try {
+      console.log('Calling suggest-property-goals with:', { listingId, year });
       const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
         body: { listingId, year }
       });
 
-      if (error) throw error;
+      console.log('Function response:', { data, error });
+
+      if (error) {
+        console.error('Function error:', error);
+        throw error;
+      }
 
       // Check for credit limit error
       if (data && data.code === 402) {
