@@ -136,6 +136,34 @@ export default function Dashboard() {
     .sort((a: any, b: any) => b.revenue - a.revenue)
     .slice(0, 5);
 
+  // Properties by bedroom count
+  const propertiesByBedrooms = listings.reduce((acc: any, listing) => {
+    const bedrooms = listing.bedrooms || 0;
+    const label = bedrooms === 0 ? 'Studio' : `${bedrooms} BR`;
+    if (!acc[label]) {
+      acc[label] = { bedrooms: label, count: 0, sortKey: bedrooms };
+    }
+    acc[label].count += 1;
+    return acc;
+  }, {});
+
+  const bedroomData = Object.values(propertiesByBedrooms)
+    .sort((a: any, b: any) => a.sortKey - b.sortKey);
+
+  // Properties by city
+  const propertiesByCity = listings.reduce((acc: any, listing) => {
+    const city = listing.address?.city || 'Unknown';
+    if (!acc[city]) {
+      acc[city] = { city, count: 0 };
+    }
+    acc[city].count += 1;
+    return acc;
+  }, {});
+
+  const cityData = Object.values(propertiesByCity)
+    .sort((a: any, b: any) => b.count - a.count)
+    .slice(0, 10);
+
   return (
     <DashboardLayout>
       <div className="space-y-8">
@@ -307,6 +335,53 @@ export default function Dashboard() {
                       formatter={(value: any) => [`$${parseFloat(value).toLocaleString()}`, "Revenue"]}
                     />
                     <Bar dataKey="revenue" fill="hsl(var(--accent))" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Property Distribution Charts */}
+        {listings.length > 0 && (
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Properties by Bedroom Count</CardTitle>
+                <CardDescription>Distribution of properties by size</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={bedroomData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="bedrooms" className="text-xs" />
+                    <YAxis className="text-xs" />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+                      formatter={(value: any) => [value, "Properties"]}
+                    />
+                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Properties by City</CardTitle>
+                <CardDescription>Top locations (up to 10)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={cityData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="city" className="text-xs" angle={-45} textAnchor="end" height={80} />
+                    <YAxis className="text-xs" />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+                      formatter={(value: any) => [value, "Properties"]}
+                    />
+                    <Bar dataKey="count" fill="hsl(var(--accent))" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
