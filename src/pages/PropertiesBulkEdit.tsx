@@ -60,15 +60,14 @@ export default function PropertiesBulkEdit() {
     queryKey: ["reservations", selectedYear],
     queryFn: async () => {
       const startDate = `${selectedYear}-01-01`;
-      const endDate = `${selectedYear}-12-31`;
       const today = new Date().toISOString().split('T')[0];
+      const endDate = selectedYear === new Date().getFullYear() ? today : `${selectedYear}-12-31`;
       const { data, error } = await supabase
         .from("reservations")
         .select("*")
-        .gte("check_in", startDate)
-        .lte("check_in", endDate)
-        .lte("check_out", today)
-        .eq("status", "confirmed");
+        .gte("check_out", startDate)
+        .lte("check_out", endDate)
+        .in("status", ["confirmed", "checked_out"]) ;
       if (error) throw error;
       return data;
     },
