@@ -18,11 +18,12 @@ serve(async (req) => {
 
     console.log('Starting weekly forecast generation for all properties...');
 
-    // Get all active listings
+    // Get all active listings (exclude archived)
     const { data: listings, error: listingsError } = await supabase
       .from('listings')
       .select('id, nickname')
-      .eq('active', true);
+      .eq('active', true)
+      .eq('archived', false);
 
     if (listingsError) throw listingsError;
 

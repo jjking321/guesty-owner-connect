@@ -75,10 +75,11 @@ export default function Dashboard() {
 
       setReservations(allReservations);
 
-      // Load listings
+      // Load listings (exclude archived)
       const { data: listingsData, error: listingsError } = await supabase
         .from("listings")
-        .select("*");
+        .select("*")
+        .eq("archived", false);
 
       if (listingsError) throw listingsError;
       setListings(listingsData || []);

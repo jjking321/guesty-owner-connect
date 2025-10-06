@@ -73,6 +73,7 @@ export type Database = {
           accommodates: number | null
           active: boolean | null
           address: Json | null
+          archived: boolean
           bedrooms: number | null
           created_at_guesty: string | null
           guesty_account_id: string
@@ -89,6 +90,7 @@ export type Database = {
           accommodates?: number | null
           active?: boolean | null
           address?: Json | null
+          archived?: boolean
           bedrooms?: number | null
           created_at_guesty?: string | null
           guesty_account_id: string
@@ -105,6 +107,7 @@ export type Database = {
           accommodates?: number | null
           active?: boolean | null
           address?: Json | null
+          archived?: boolean
           bedrooms?: number | null
           created_at_guesty?: string | null
           guesty_account_id?: string

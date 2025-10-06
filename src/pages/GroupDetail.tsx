@@ -113,6 +113,7 @@ export default function GroupDetail() {
         .from("listings")
         .select("*")
         .in("id", directListingIds)
+        .eq("archived", false)
         .order("nickname");
 
       if (error) throw error;
@@ -146,6 +147,7 @@ export default function GroupDetail() {
         .from("listings")
         .select("*")
         .in("guesty_account_id", accountIds)
+        .eq("archived", false)
         .order("nickname");
 
       if (error) throw error;

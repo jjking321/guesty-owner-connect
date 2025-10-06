@@ -68,7 +68,8 @@ serve(async (req) => {
       .select('id, nickname, active, is_listed')
       .in('guesty_account_id', accountIds)
       .eq('active', true)
-      .eq('is_listed', true);
+      .eq('is_listed', true)
+      .eq('archived', false);
 
     if (listingsError) throw listingsError;
 

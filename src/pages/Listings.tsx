@@ -26,6 +26,7 @@ export default function Listings() {
       const { data, error } = await supabase
         .from("listings")
         .select("*")
+        .eq("archived", false)
         .order("nickname", { ascending: true });
 
       if (error) throw error;

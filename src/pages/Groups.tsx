@@ -62,6 +62,7 @@ export default function Groups() {
       const { data, error } = await supabase
         .from("listings")
         .select("*")
+        .eq("archived", false)
         .order("nickname");
 
       if (error) throw error;

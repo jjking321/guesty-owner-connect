@@ -50,7 +50,8 @@ export default function PropertiesBulkEdit() {
         .from("listings")
         .select("*")
         .eq("active", true)
-        .eq("is_listed", true);
+        .eq("is_listed", true)
+        .eq("archived", false);
       if (error) throw error;
       return data;
     },
