@@ -97,20 +97,51 @@ export default function PropertiesBulkEdit() {
     queryKey: ["property_goals", selectedYear, listingIds],
     enabled: listingIds.length > 0,
     queryFn: async () => {
-      const expected = listingIds.length * 12;
-      const query = supabase
-        .from("property_goals")
-        .select("*")
-        .eq("year", selectedYear)
-        .in("listing_id", listingIds)
-        .order("listing_id", { ascending: true })
-        .order("month", { ascending: true });
+      // Fetch in batches to avoid the 1000 row cap per request
+      const BATCH_SIZE = 60; // 60 listings * 12 months = 720 rows < 1000
+      const chunks: string[][] = [];
+      for (let i = 0; i < listingIds.length; i += BATCH_SIZE) {
+        chunks.push(listingIds.slice(i, i + BATCH_SIZE));
+      }
 
-      const { data, error } = await query.range(0, Math.max(expected - 1, 0));
-      if (error) throw error;
-      return data || [];
+      const promises = chunks.map((batchIds) =>
+        supabase
+          .from("property_goals")
+          .select("*")
+          .eq("year", selectedYear)
+          .in("listing_id", batchIds)
+          .order("listing_id", { ascending: true })
+          .order("month", { ascending: true })
+      );
+
+      const results = await Promise.all(promises);
+      const all: any[] = [];
+      for (const res of results) {
+        if (res.error) throw res.error;
+        if (res.data) all.push(...res.data);
+      }
+
+      console.log("Goals batched fetch", {
+        batches: chunks.length,
+        listingCount: listingIds.length,
+        goalsCount: all.length,
+        expectedMax: listingIds.length * 12,
+      });
+
+      return all;
     },
   });
+
+  // Fast lookup: goals grouped by listing_id
+  const goalsByListing = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const g of goals) {
+      const key = String((g as any).listing_id);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(g);
+    }
+    return map;
+  }, [goals]);
 
   const { data: forecasts = [], isLoading: forecastsLoading } = useQuery({
     queryKey: ["revenue_forecasts", selectedYear],
@@ -157,18 +188,16 @@ export default function PropertiesBulkEdit() {
       // Get actual revenue from the aggregated data
       const actualRevenue = revenueMap.get(listing.id) || 0;
 
-      // Calculate annual goals - ensure type consistency
-      const listingGoals = goals.filter((g) => String(g.listing_id) === String(listing.id));
+      // Calculate annual goals using precomputed map
+      const listingGoals = goalsByListing.get(String(listing.id)) || [];
       
       // Debug logging for specific property
       if (listing.nickname === "104 W Leon - Full") {
-        console.log("🔍 Debug for '104 W Leon - Full':", {
+        console.log("🔍 Debug '104 W Leon - Full' listingGoals", {
           listing_id: listing.id,
-          listing_id_type: typeof listing.id,
           total_goals_fetched: goals.length,
-          matching_goals: listingGoals.length,
-          matching_goal_ids: listingGoals.map(g => ({ id: g.id, listing_id: g.listing_id, goal_revenue: g.goal_revenue })),
-          sample_goal_listing_ids: goals.slice(0, 3).map(g => ({ listing_id: g.listing_id, type: typeof g.listing_id }))
+          listingGoalsCount: listingGoals.length,
+          sample: (listingGoals as any[]).slice(0, 3).map((g: any) => ({ month: g.month, budget: g.budget_revenue, projection: g.projection_revenue, goal: g.goal_revenue })),
         });
       }
       const budgetTotal = listingGoals.reduce(
