@@ -34,31 +34,27 @@ export function PacingReport({ reservations }: PacingReportProps) {
     const currentYearStart = startOfYear(new Date(currentYear, 0, 1));
     const lastYearStart = startOfYear(new Date(lastYear, 0, 1));
     
-    // Filter reservations for current year YTD (check-in YTD, confirmed by today)
+    // Filter reservations for current year YTD (check-out YTD up to today)
     const currentYearReservations = reservations.filter((r) => {
-      if (!r.check_in || !r.created_at_guesty) return false;
-      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-      const checkIn = parseISO(r.check_in);
-      const createdAt = parseISO(r.created_at_guesty);
+      if (!r.check_out) return false;
+      if (!["confirmed", "checked_out"].includes(r.status)) return false;
+      const checkOut = parseISO(r.check_out);
       const todayThisYear = new Date(currentYear, today.getMonth(), today.getDate());
       return (
-        checkIn.getFullYear() === currentYear &&
-        checkIn.getMonth() <= currentMonth &&
-        createdAt <= todayThisYear
+        checkOut.getFullYear() === currentYear &&
+        checkOut <= todayThisYear
       );
     });
 
-    // Filter reservations for last year same period (check-in YTD, confirmed by same date last year)
+    // Filter reservations for last year same period (check-out YTD up to same date last year)
     const lastYearReservations = reservations.filter((r) => {
-      if (!r.check_in || !r.created_at_guesty) return false;
-      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-      const checkIn = parseISO(r.check_in);
-      const createdAt = parseISO(r.created_at_guesty);
+      if (!r.check_out) return false;
+      if (!["confirmed", "checked_out"].includes(r.status)) return false;
+      const checkOut = parseISO(r.check_out);
       const todayLastYear = new Date(lastYear, today.getMonth(), today.getDate());
       return (
-        checkIn.getFullYear() === lastYear &&
-        checkIn.getMonth() <= currentMonth &&
-        createdAt <= todayLastYear
+        checkOut.getFullYear() === lastYear &&
+        checkOut <= todayLastYear
       );
     });
 
