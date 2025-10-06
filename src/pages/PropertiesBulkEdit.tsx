@@ -249,6 +249,25 @@ export default function PropertiesBulkEdit() {
     }
   };
 
+  const handleGenerateMissingGoals = async () => {
+    setIsGeneratingBulk(true);
+    toast.info("Starting goal generation for properties without goals... This will run in the background.");
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-bulk-goals', {
+        body: { year: selectedYear, onlyMissingGoals: true }
+      });
+
+      if (error) throw error;
+
+      toast.success(`Goal generation started for ${data.totalProperties} properties without goals. Please refresh in a few minutes to see results.`);
+    } catch (error: any) {
+      console.error("Error starting goal generation:", error);
+      toast.error(error.message || "Failed to start goal generation");
+    } finally {
+      setIsGeneratingBulk(false);
+    }
+  };
+
   const handleExportCSV = () => {
     const headers = [
       "Property",
@@ -318,13 +337,22 @@ export default function PropertiesBulkEdit() {
           </div>
           <div className="flex gap-2">
             <Button 
-              onClick={handleGenerateBulkGoals} 
+              onClick={handleGenerateMissingGoals} 
               variant="default"
               size="sm"
               disabled={isGeneratingBulk}
             >
               <Sparkles className="h-4 w-4 mr-2" />
-              {isGeneratingBulk ? "Generating..." : "Generate Goals for All"}
+              {isGeneratingBulk ? "Generating..." : "Generate Missing Goals"}
+            </Button>
+            <Button 
+              onClick={handleGenerateBulkGoals} 
+              variant="outline"
+              size="sm"
+              disabled={isGeneratingBulk}
+            >
+              <Sparkles className="h-4 w-4 mr-2" />
+              {isGeneratingBulk ? "Generating..." : "Regenerate All"}
             </Button>
             <Button onClick={handleRefreshForecasts} variant="outline" size="sm">
               <RefreshCw className="h-4 w-4 mr-2" />

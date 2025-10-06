@@ -20,8 +20,8 @@ serve(async (req) => {
   }
 
   try {
-    const { year, excludeLocked = true } = await req.json();
-    console.log('Generating bulk goals for year:', year, 'excludeLocked:', excludeLocked);
+    const { year, excludeLocked = true, onlyMissingGoals = false } = await req.json();
+    console.log('Generating bulk goals for year:', year, 'excludeLocked:', excludeLocked, 'onlyMissingGoals:', onlyMissingGoals);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -82,10 +82,24 @@ serve(async (req) => {
       );
     }
 
-    // If excludeLocked is true, filter out listings with locked goals
+    // Filter listings based on requirements
     let eligibleListings = listings;
     
-    if (excludeLocked) {
+    if (onlyMissingGoals) {
+      // Only include properties without any goals for this year
+      const { data: existingGoals, error: goalsError } = await supabase
+        .from('property_goals')
+        .select('listing_id')
+        .eq('year', year);
+
+      if (goalsError) {
+        console.error('Error fetching existing goals:', goalsError);
+      } else if (existingGoals && existingGoals.length > 0) {
+        const listingsWithGoals = new Set(existingGoals.map(g => g.listing_id));
+        eligibleListings = listings.filter(l => !listingsWithGoals.has(l.id));
+      }
+    } else if (excludeLocked) {
+      // Filter out listings with locked goals
       const { data: lockedGoals, error: lockedError } = await supabase
         .from('property_goals')
         .select('listing_id')
@@ -100,7 +114,8 @@ serve(async (req) => {
       }
     }
 
-    console.log(`Processing ${eligibleListings.length} properties (${listings.length - eligibleListings.length} skipped due to locked goals)`);
+    const skipReason = onlyMissingGoals ? 'already have goals' : 'locked goals';
+    console.log(`Processing ${eligibleListings.length} properties (${listings.length - eligibleListings.length} skipped due to ${skipReason})`);
 
     // Process in background - batch of 5 properties at a time to avoid overwhelming the system
     const processInBackground = async () => {
