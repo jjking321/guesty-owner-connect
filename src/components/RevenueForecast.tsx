@@ -256,7 +256,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 ${forecast.totalForecast.p50.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
               <p className="text-sm text-muted-foreground">
-                80% Confidence: ${forecast.totalForecast.confidence.lower.toLocaleString()} - ${forecast.totalForecast.confidence.upper.toLocaleString()}
+                {forecast.totalForecast.confidence?.lower && forecast.totalForecast.confidence?.upper ? (
+                  `80% Confidence: $${forecast.totalForecast.confidence.lower.toLocaleString()} - $${forecast.totalForecast.confidence.upper.toLocaleString()}`
+                ) : (
+                  'Confidence interval not available'
+                )}
               </p>
               <div className="mt-4 pt-4 border-t">
                 <div className="grid grid-cols-3 gap-4 text-sm">
@@ -416,7 +420,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
             <div className="pt-4 border-t flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                Last updated: {formatDistanceToNow(new Date(forecast.asOfDate), { addSuffix: true })}
+                Last updated: {forecast.asOfDate ? formatDistanceToNow(new Date(forecast.asOfDate), { addSuffix: true }) : 'Unknown'}
               </p>
               <p className="text-xs text-muted-foreground">
                 Forecasts regenerate weekly
