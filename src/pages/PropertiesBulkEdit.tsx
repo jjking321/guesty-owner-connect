@@ -75,6 +75,9 @@ export default function PropertiesBulkEdit() {
     },
   });
 
+  // Derived: listing IDs for scoping goals query and avoiding pagination truncation
+  const listingIds: string[] = useMemo(() => listings.map((l: any) => String(l.id)), [listings]);
+
   const { data: ytdRevenueData = [], isLoading: ytdRevenueLoading } = useQuery({
     queryKey: ["ytd-revenue", selectedYear],
     queryFn: async () => {
@@ -91,14 +94,21 @@ export default function PropertiesBulkEdit() {
   });
 
   const { data: goals = [], isLoading: goalsLoading, refetch: refetchGoals } = useQuery({
-    queryKey: ["property_goals", selectedYear],
+    queryKey: ["property_goals", selectedYear, listingIds],
+    enabled: listingIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
+      const expected = listingIds.length * 12;
+      const query = supabase
         .from("property_goals")
         .select("*")
-        .eq("year", selectedYear);
+        .eq("year", selectedYear)
+        .in("listing_id", listingIds)
+        .order("listing_id", { ascending: true })
+        .order("month", { ascending: true });
+
+      const { data, error } = await query.range(0, Math.max(expected - 1, 0));
       if (error) throw error;
-      return data;
+      return data || [];
     },
   });
 
