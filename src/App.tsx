@@ -14,6 +14,7 @@ import NotFound from "./pages/NotFound";
 import Groups from "./pages/Groups";
 import GroupDetail from "./pages/GroupDetail";
 import AcceptInvitation from "./pages/AcceptInvitation";
+import PropertiesBulkEdit from "./pages/PropertiesBulkEdit";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,7 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/listings" element={<Listings />} />
           <Route path="/listings/:id" element={<PropertyDetail />} />
+          <Route path="/properties/bulk-edit" element={<PropertiesBulkEdit />} />
           <Route path="/reservations" element={<Reservations />} />
           <Route path="/groups" element={<Groups />} />
           <Route path="/groups/:id" element={<GroupDetail />} />
