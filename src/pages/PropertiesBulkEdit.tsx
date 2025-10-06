@@ -227,11 +227,11 @@ export default function PropertiesBulkEdit() {
       // Calculate forecast achievement percentages
       const forecastBudgetAchievement = budgetTotal > 0 ? (forecastedRevenue / budgetTotal) * 100 : 0;
       const forecastProjectionAchievement = projectionTotal > 0 ? (forecastedRevenue / projectionTotal) * 100 : 0;
-      const forecastGoalAchievement = goalTotal > 0 ? (forecastedRevenue / goalTotal) * 100 : 0;
+      const forecastGoalAchievement = projectionTotal > 0 ? (forecastedRevenue / projectionTotal) * 100 : 0;
 
-      // Determine status based on forecast vs goal
+      // Determine status based on forecast vs projection
       let status: "on-track" | "at-risk" | "behind" = "on-track";
-      if (goalTotal > 0) {
+      if (projectionTotal > 0) {
         if (forecastGoalAchievement >= 95) status = "on-track";
         else if (forecastGoalAchievement >= 80) status = "at-risk";
         else status = "behind";
@@ -333,7 +333,7 @@ export default function PropertiesBulkEdit() {
           comparison = a.forecastedRevenue - b.forecastedRevenue;
           break;
         case "goalProgress":
-          comparison = a.goalAchievement - b.goalAchievement;
+          comparison = a.projectionAchievement - b.projectionAchievement;
           break;
         case "status":
           const statusOrder = { "behind": 0, "at-risk": 1, "on-track": 2 };

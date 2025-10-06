@@ -33,7 +33,7 @@ export function PropertyMetricsSummary({
     }).format(value);
   };
 
-  const goalAchievement = totalGoal > 0 ? (totalForecast / totalGoal) * 100 : 0;
+  const goalAchievement = totalProjection > 0 ? (totalForecast / totalProjection) * 100 : 0;
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -58,7 +58,7 @@ export function PropertyMetricsSummary({
         <CardContent>
           <div className="text-2xl font-bold">{formatCurrency(totalForecast)}</div>
           <p className="text-xs text-muted-foreground">
-            {goalAchievement.toFixed(1)}% of goal
+            {goalAchievement.toFixed(1)}% of projection
           </p>
         </CardContent>
       </Card>
