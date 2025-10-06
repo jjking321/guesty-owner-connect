@@ -377,45 +377,47 @@ export default function PropertiesBulkEdit() {
           behindCount={propertyMetrics.filter((p) => p.status === "behind").length}
         />
 
-        <div className="flex gap-4 items-center">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search properties..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant={statusFilter === "all" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("all")}
-            >
-              All Status
-            </Button>
-            <Button
-              variant={statusFilter === "on-track" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("on-track")}
-            >
-              On Track
-            </Button>
-            <Button
-              variant={statusFilter === "at-risk" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("at-risk")}
-            >
-              At Risk
-            </Button>
-            <Button
-              variant={statusFilter === "behind" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter("behind")}
-            >
-              Behind
-            </Button>
+        <div className="space-y-3">
+          <div className="flex gap-4 items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search properties..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant={statusFilter === "all" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter("all")}
+              >
+                All Status
+              </Button>
+              <Button
+                variant={statusFilter === "on-track" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter("on-track")}
+              >
+                On Track
+              </Button>
+              <Button
+                variant={statusFilter === "at-risk" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter("at-risk")}
+              >
+                At Risk
+              </Button>
+              <Button
+                variant={statusFilter === "behind" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setStatusFilter("behind")}
+              >
+                Behind
+              </Button>
+            </div>
           </div>
           <div className="flex gap-2">
             <Button
@@ -447,6 +449,9 @@ export default function PropertiesBulkEdit() {
               Locked
             </Button>
           </div>
+          <p className="text-sm text-muted-foreground">
+            Showing {filteredProperties.length} of {propertyMetrics.length} {propertyMetrics.length === 1 ? 'property' : 'properties'}
+          </p>
         </div>
 
         <PropertiesTable properties={filteredProperties} isLoading={isLoading} />
