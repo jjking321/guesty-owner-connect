@@ -147,8 +147,20 @@ export default function PropertiesBulkEdit() {
       // Get actual revenue from the aggregated data
       const actualRevenue = revenueMap.get(listing.id) || 0;
 
-      // Calculate annual goals
-      const listingGoals = goals.filter((g) => g.listing_id === listing.id);
+      // Calculate annual goals - ensure type consistency
+      const listingGoals = goals.filter((g) => String(g.listing_id) === String(listing.id));
+      
+      // Debug logging for specific property
+      if (listing.nickname === "104 W Leon - Full") {
+        console.log("🔍 Debug for '104 W Leon - Full':", {
+          listing_id: listing.id,
+          listing_id_type: typeof listing.id,
+          total_goals_fetched: goals.length,
+          matching_goals: listingGoals.length,
+          matching_goal_ids: listingGoals.map(g => ({ id: g.id, listing_id: g.listing_id, goal_revenue: g.goal_revenue })),
+          sample_goal_listing_ids: goals.slice(0, 3).map(g => ({ listing_id: g.listing_id, type: typeof g.listing_id }))
+        });
+      }
       const budgetTotal = listingGoals.reduce(
         (sum, g) => sum + (Number(g.budget_revenue) || 0),
         0
