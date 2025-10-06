@@ -29,7 +29,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, Trash2, Users } from "lucide-react";
+import { Loader2, Plus, Trash2, Users, Mail, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface Member {
@@ -43,11 +43,20 @@ interface Member {
   };
 }
 
+interface PendingInvitation {
+  id: string;
+  email: string;
+  role: 'owner' | 'admin' | 'member';
+  expires_at: string;
+  token: string;
+}
+
 export function TeamManagement() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [inviting, setInviting] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([]);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string>('member');
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -100,6 +109,19 @@ export function TeamManagement() {
       if (error) throw error;
 
       setMembers(membersData as any || []);
+
+      // Get pending invitations
+      const { data: invitationsData, error: invitationsError } = await supabase
+        .from("organization_invitations")
+        .select("*")
+        .eq("organization_id", membership.organization_id)
+        .is("accepted_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false });
+
+      if (invitationsError) throw invitationsError;
+
+      setPendingInvitations(invitationsData || []);
     } catch (error: any) {
       toast({
         title: "Error loading team members",
@@ -235,6 +257,40 @@ export function TeamManagement() {
     }
   };
 
+  const handleRevokeInvitation = async (invitationId: string, email: string) => {
+    try {
+      const { error } = await supabase
+        .from("organization_invitations")
+        .delete()
+        .eq("id", invitationId);
+
+      if (error) throw error;
+
+      toast({
+        title: "Invitation revoked",
+        description: `Invitation for ${email} has been revoked`,
+      });
+
+      loadTeamMembers();
+    } catch (error: any) {
+      toast({
+        title: "Error revoking invitation",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCopyInviteLink = async (token: string) => {
+    const inviteUrl = `${window.location.origin}/accept-invitation?token=${token}`;
+    await navigator.clipboard.writeText(inviteUrl);
+    
+    toast({
+      title: "Link copied",
+      description: "Invitation link copied to clipboard",
+    });
+  };
+
   const canManageMembers = currentUserRole === 'owner' || currentUserRole === 'admin';
 
   if (loading) {
@@ -324,68 +380,141 @@ export function TeamManagement() {
           </form>
         )}
 
-        <div className="space-y-2">
-          {members.map((member) => (
-            <div
-              key={member.id}
-              className="flex items-center justify-between p-4 border rounded-lg"
-            >
-              <div className="flex-1">
-                <div className="font-medium">
-                  {member.profiles?.full_name || member.profiles?.email}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {member.profiles?.email}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {canManageMembers && member.role !== 'owner' ? (
-                  <Select
-                    value={member.role}
-                    onValueChange={(value) => handleUpdateRole(member.id, value as any)}
-                  >
-                    <SelectTrigger className="w-32">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="member">Member</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="owner">Owner</SelectItem>
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Badge variant={member.role === 'owner' ? 'default' : 'secondary'}>
-                    {member.role}
-                  </Badge>
-                )}
-                {canManageMembers && member.role !== 'owner' && (
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Remove member?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to remove {member.profiles?.email} from the organization?
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={() => handleRemoveMember(member.id, member.profiles?.email)}
+        <div className="space-y-4">
+          {pendingInvitations.length > 0 && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Pending Invitations
+              </h3>
+              {pendingInvitations.map((invitation) => (
+                <div
+                  key={invitation.id}
+                  className="flex items-center justify-between p-4 border rounded-lg bg-muted/50"
+                >
+                  <div className="flex-1">
+                    <div className="font-medium flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      {invitation.email}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      Expires {new Date(invitation.expires_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
+                      Pending
+                    </Badge>
+                    <Badge variant="secondary">
+                      {invitation.role}
+                    </Badge>
+                    {canManageMembers && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyInviteLink(invitation.token)}
                         >
-                          Remove
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                )}
-              </div>
+                          Copy Link
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Revoke invitation?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Are you sure you want to revoke the invitation for {invitation.email}?
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleRevokeInvitation(invitation.id, invitation.email)}
+                              >
+                                Revoke
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Active Members
+            </h3>
+            {members.map((member) => (
+              <div
+                key={member.id}
+                className="flex items-center justify-between p-4 border rounded-lg"
+              >
+                <div className="flex-1">
+                  <div className="font-medium">
+                    {member.profiles?.full_name || member.profiles?.email}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {member.profiles?.email}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {canManageMembers && member.role !== 'owner' ? (
+                    <Select
+                      value={member.role}
+                      onValueChange={(value) => handleUpdateRole(member.id, value as any)}
+                    >
+                      <SelectTrigger className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="member">Member</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="owner">Owner</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Badge variant={member.role === 'owner' ? 'default' : 'secondary'}>
+                      {member.role}
+                    </Badge>
+                  )}
+                  {canManageMembers && member.role !== 'owner' && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Remove member?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to remove {member.profiles?.email} from the organization?
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleRemoveMember(member.id, member.profiles?.email)}
+                          >
+                            Remove
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </CardContent>
     </Card>
