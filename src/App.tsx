@@ -18,7 +18,16 @@ import PropertiesBulkEdit from "./pages/PropertiesBulkEdit";
 import Owners from "./pages/Owners";
 import OwnerDetail from "./pages/OwnerDetail";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes default
+      gcTime: 30 * 60 * 1000, // 30 minutes default (formerly cacheTime)
+      refetchOnWindowFocus: false,
+      retry: 2,
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

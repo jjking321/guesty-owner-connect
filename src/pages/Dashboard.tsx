@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { MetricCard } from "@/components/MetricCard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,10 +17,6 @@ import { cn } from "@/lib/utils";
 export default function Dashboard() {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const [guestyAccounts, setGuestyAccounts] = useState<any[]>([]);
-  const [reservations, setReservations] = useState<any[]>([]);
-  const [listings, setListings] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   
   // Date range filters - default to current year
   const currentYear = new Date().getFullYear();
@@ -27,23 +24,24 @@ export default function Dashboard() {
   const [endDate, setEndDate] = useState<Date>(new Date(currentYear, 11, 31));
   const [showCustomDates, setShowCustomDates] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, [startDate, endDate]);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-
-      // Load Guesty accounts
-      const { data: accounts, error: accountsError } = await supabase
+  // React Query for Guesty Accounts with caching
+  const { data: guestyAccounts = [] } = useQuery({
+    queryKey: ['guesty-accounts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from("guesty_accounts")
-        .select("*");
+        .select("id, account_name, organization_id");
+      if (error) throw error;
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes (formerly cacheTime)
+  });
 
-      if (accountsError) throw accountsError;
-      setGuestyAccounts(accounts || []);
-
-      // Load reservations based on selected date range
+  // React Query for Reservations with optimized columns
+  const { data: reservations = [], isLoading: reservationsLoading, refetch: refetchReservations } = useQuery({
+    queryKey: ['dashboard-reservations', startDate.toISOString(), endDate.toISOString()],
+    queryFn: async () => {
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = endDate.toISOString().split('T')[0];
 
@@ -53,16 +51,16 @@ export default function Dashboard() {
       let hasMore = true;
 
       while (hasMore) {
-        const { data: batch, error: batchError } = await supabase
+        const { data: batch, error } = await supabase
           .from("reservations")
-          .select("*")
+          .select("id, listing_id, check_in, check_out, fare_accommodation_adjusted, nights_count, guests_count, status, source, confirmation_code")
           .in("status", ["confirmed", "checked_in", "checked_out"])
           .gte("check_in", startDateStr)
           .lte("check_in", endDateStr)
           .order("check_in", { ascending: false })
           .range(offset, offset + batchSize - 1);
 
-        if (batchError) throw batchError;
+        if (error) throw error;
         
         if (batch && batch.length > 0) {
           allReservations.push(...batch);
@@ -73,97 +71,123 @@ export default function Dashboard() {
         }
       }
 
-      setReservations(allReservations);
+      return allReservations;
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
+  });
 
-      // Load listings (exclude archived)
-      const { data: listingsData, error: listingsError } = await supabase
+  // React Query for Listings with optimized columns
+  const { data: listings = [], isLoading: listingsLoading, refetch: refetchListings } = useQuery({
+    queryKey: ['dashboard-listings'],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from("listings")
-        .select("*")
+        .select("id, nickname, active, archived, bedrooms, address")
         .eq("archived", false);
+      if (error) throw error;
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
+  });
 
-      if (listingsError) throw listingsError;
-      setListings(listingsData || []);
-    } catch (error: any) {
-      toast({
-        title: "Error loading data",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+  const loading = reservationsLoading || listingsLoading;
+
+  const handleRefresh = async () => {
+    await Promise.all([
+      refetchReservations(),
+      refetchListings()
+    ]);
+    toast({
+      title: "Data refreshed",
+      description: "Dashboard data has been updated",
+    });
   };
 
-  // Calculate metrics based on accommodation fare
-  const totalRevenue = reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0)), 0);
-  const totalBookings = reservations.length;
-  const activeListings = listings.filter(l => l.active).length;
-  const avgNightlyRate = reservations.length > 0
-    ? reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0) / (r.nights_count || 1)), 0) / reservations.length
-    : 0;
+  // Memoized metrics calculations
+  const metrics = useMemo(() => {
+    const totalRevenue = reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0)), 0);
+    const totalBookings = reservations.length;
+    const activeListings = listings.filter(l => l.active).length;
+    const avgNightlyRate = reservations.length > 0
+      ? reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0) / (r.nights_count || 1)), 0) / reservations.length
+      : 0;
 
-  // Prepare chart data - group by month and sort chronologically
-  const revenueByMonth = reservations.reduce((acc: any, r) => {
-    if (!r.check_in) return acc;
-    const checkInDate = new Date(r.check_in);
-    const yearMonth = `${checkInDate.getFullYear()}-${String(checkInDate.getMonth() + 1).padStart(2, '0')}`;
-    const monthLabel = checkInDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-    
-    if (!acc[yearMonth]) {
-      acc[yearMonth] = { month: monthLabel, revenue: 0, bookings: 0, sortKey: yearMonth };
-    }
-    acc[yearMonth].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
-    acc[yearMonth].bookings += 1;
-    return acc;
-  }, {});
+    return { totalRevenue, totalBookings, activeListings, avgNightlyRate };
+  }, [reservations, listings]);
 
-  const chartData = Object.values(revenueByMonth)
-    .sort((a: any, b: any) => a.sortKey.localeCompare(b.sortKey))
-    .slice(-12);
+  // Memoized chart data
+  const chartData = useMemo(() => {
+    const revenueByMonth = reservations.reduce((acc: any, r) => {
+      if (!r.check_in) return acc;
+      const checkInDate = new Date(r.check_in);
+      const yearMonth = `${checkInDate.getFullYear()}-${String(checkInDate.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = checkInDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      
+      if (!acc[yearMonth]) {
+        acc[yearMonth] = { month: monthLabel, revenue: 0, bookings: 0, sortKey: yearMonth };
+      }
+      acc[yearMonth].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
+      acc[yearMonth].bookings += 1;
+      return acc;
+    }, {});
 
-  // Top performing properties
-  const propertyRevenue = reservations.reduce((acc: any, r) => {
-    const listing = listings.find(l => l.id === r.listing_id);
-    const propName = listing?.nickname || r.listing_id;
-    if (!acc[propName]) {
-      acc[propName] = { name: propName, revenue: 0, bookings: 0 };
-    }
-    acc[propName].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
-    acc[propName].bookings += 1;
-    return acc;
-  }, {});
+    return Object.values(revenueByMonth)
+      .sort((a: any, b: any) => a.sortKey.localeCompare(b.sortKey))
+      .slice(-12);
+  }, [reservations]);
 
-  const topProperties = Object.values(propertyRevenue)
-    .sort((a: any, b: any) => b.revenue - a.revenue)
-    .slice(0, 5);
+  // Memoized top properties
+  const topProperties = useMemo(() => {
+    const propertyRevenue = reservations.reduce((acc: any, r) => {
+      const listing = listings.find(l => l.id === r.listing_id);
+      const propName = listing?.nickname || r.listing_id;
+      if (!acc[propName]) {
+        acc[propName] = { name: propName, revenue: 0, bookings: 0 };
+      }
+      acc[propName].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
+      acc[propName].bookings += 1;
+      return acc;
+    }, {});
 
-  // Properties by bedroom count (active only)
-  const propertiesByBedrooms = listings.filter(l => l.active).reduce((acc: any, listing) => {
-    const bedrooms = listing.bedrooms || 0;
-    const label = bedrooms === 0 ? 'Studio' : `${bedrooms} BR`;
-    if (!acc[label]) {
-      acc[label] = { bedrooms: label, count: 0, sortKey: bedrooms };
-    }
-    acc[label].count += 1;
-    return acc;
-  }, {});
+    return Object.values(propertyRevenue)
+      .sort((a: any, b: any) => b.revenue - a.revenue)
+      .slice(0, 5);
+  }, [reservations, listings]);
 
-  const bedroomData = Object.values(propertiesByBedrooms)
-    .sort((a: any, b: any) => a.sortKey - b.sortKey);
+  // Memoized bedroom data
+  const bedroomData = useMemo(() => {
+    const propertiesByBedrooms = listings.filter(l => l.active).reduce((acc: any, listing) => {
+      const bedrooms = listing.bedrooms || 0;
+      const label = bedrooms === 0 ? 'Studio' : `${bedrooms} BR`;
+      if (!acc[label]) {
+        acc[label] = { bedrooms: label, count: 0, sortKey: bedrooms };
+      }
+      acc[label].count += 1;
+      return acc;
+    }, {});
 
-  // Properties by city (active only)
-  const propertiesByCity = listings.filter(l => l.active).reduce((acc: any, listing) => {
-    const city = listing.address?.city || 'Unknown';
-    if (!acc[city]) {
-      acc[city] = { city, count: 0 };
-    }
-    acc[city].count += 1;
-    return acc;
-  }, {});
+    return Object.values(propertiesByBedrooms)
+      .sort((a: any, b: any) => a.sortKey - b.sortKey);
+  }, [listings]);
 
-  const cityData = Object.values(propertiesByCity)
-    .sort((a: any, b: any) => b.count - a.count)
-    .slice(0, 10);
+  // Memoized city data
+  const cityData = useMemo(() => {
+    const propertiesByCity = listings.filter(l => l.active).reduce((acc: any, listing) => {
+      const address = listing.address as any;
+      const city = address?.city || 'Unknown';
+      if (!acc[city]) {
+        acc[city] = { city, count: 0 };
+      }
+      acc[city].count += 1;
+      return acc;
+    }, {});
+
+    return Object.values(propertiesByCity)
+      .sort((a: any, b: any) => b.count - a.count)
+      .slice(0, 10);
+  }, [listings]);
 
   return (
     <DashboardLayout>
@@ -233,8 +257,8 @@ export default function Dashboard() {
                 </Button>
               </>
             )}
-            <Button onClick={loadData} variant="outline">
-              <RefreshCw className="mr-2 h-4 w-4" />
+            <Button onClick={handleRefresh} variant="outline" disabled={loading}>
+              <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
               Refresh
             </Button>
             <Button onClick={() => navigate("/settings")}>
@@ -266,25 +290,25 @@ export default function Dashboard() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             title="Total Revenue"
-            value={`$${totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            value={`$${metrics.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             icon={DollarSign}
             description={showCustomDates ? "Selected period" : `Year ${currentYear}`}
           />
           <MetricCard
             title="Total Bookings"
-            value={totalBookings}
+            value={metrics.totalBookings}
             icon={Calendar}
             description="All confirmed reservations"
           />
           <MetricCard
             title="Active Listings"
-            value={activeListings}
+            value={metrics.activeListings}
             icon={Home}
             description="Currently active properties"
           />
           <MetricCard
             title="Avg Nightly Rate"
-            value={`$${avgNightlyRate.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            value={`$${metrics.avgNightlyRate.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
             icon={TrendingUp}
             description="Across all properties"
           />
