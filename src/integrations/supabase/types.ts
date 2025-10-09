@@ -14,6 +14,183 @@ export type Database = {
   }
   public: {
     Tables: {
+      booking_curves: {
+        Row: {
+          created_at: string
+          dba_bucket: string
+          id: string
+          listing_id: string
+          pickup_amount_mean: number
+          pickup_amount_stddev: number
+          pickup_share: number
+          sample_size: number
+          updated_at: string
+          year_month: string
+        }
+        Insert: {
+          created_at?: string
+          dba_bucket: string
+          id?: string
+          listing_id: string
+          pickup_amount_mean?: number
+          pickup_amount_stddev?: number
+          pickup_share?: number
+          sample_size?: number
+          updated_at?: string
+          year_month: string
+        }
+        Update: {
+          created_at?: string
+          dba_bucket?: string
+          id?: string
+          listing_id?: string
+          pickup_amount_mean?: number
+          pickup_amount_stddev?: number
+          pickup_share?: number
+          sample_size?: number
+          updated_at?: string
+          year_month?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_curves_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      capacity_calendar: {
+        Row: {
+          block_reason: string | null
+          created_at: string
+          date: string
+          id: string
+          is_available: boolean
+          listing_id: string
+          updated_at: string
+        }
+        Insert: {
+          block_reason?: string | null
+          created_at?: string
+          date: string
+          id?: string
+          is_available?: boolean
+          listing_id: string
+          updated_at?: string
+        }
+        Update: {
+          block_reason?: string | null
+          created_at?: string
+          date?: string
+          id?: string
+          is_available?: boolean
+          listing_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capacity_calendar_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      forecast_accuracy: {
+        Row: {
+          absolute_error: number | null
+          actual_revenue: number | null
+          created_at: string
+          forecast_date: string
+          forecast_p50: number
+          id: string
+          listing_id: string
+          percentage_error: number | null
+          target_month: string
+        }
+        Insert: {
+          absolute_error?: number | null
+          actual_revenue?: number | null
+          created_at?: string
+          forecast_date: string
+          forecast_p50: number
+          id?: string
+          listing_id: string
+          percentage_error?: number | null
+          target_month: string
+        }
+        Update: {
+          absolute_error?: number | null
+          actual_revenue?: number | null
+          created_at?: string
+          forecast_date?: string
+          forecast_p50?: number
+          id?: string
+          listing_id?: string
+          percentage_error?: number | null
+          target_month?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "forecast_accuracy_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      forecast_settings: {
+        Row: {
+          created_at: string
+          dba_buckets: Json
+          fallback_hierarchy: Json
+          forecast_method: string
+          id: string
+          min_history_months: number
+          organization_id: string | null
+          owner_holds_treatment: string
+          pace_clip_max: number
+          pace_clip_min: number
+          simulation_runs: number
+          smoothing_window_months: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          dba_buckets?: Json
+          fallback_hierarchy?: Json
+          forecast_method?: string
+          id?: string
+          min_history_months?: number
+          organization_id?: string | null
+          owner_holds_treatment?: string
+          pace_clip_max?: number
+          pace_clip_min?: number
+          simulation_runs?: number
+          smoothing_window_months?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          dba_buckets?: Json
+          fallback_hierarchy?: Json
+          forecast_method?: string
+          id?: string
+          min_history_months?: number
+          organization_id?: string | null
+          owner_holds_treatment?: string
+          pace_clip_max?: number
+          pace_clip_min?: number
+          simulation_runs?: number
+          smoothing_window_months?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       guesty_accounts: {
         Row: {
           account_name: string
@@ -458,6 +635,48 @@ export type Database = {
           },
         ]
       }
+      reservation_nights: {
+        Row: {
+          created_at: string
+          id: string
+          listing_id: string
+          night_date: string
+          reservation_id: string
+          revenue_allocation: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          listing_id: string
+          night_date: string
+          reservation_id: string
+          revenue_allocation?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          listing_id?: string
+          night_date?: string
+          reservation_id?: string
+          revenue_allocation?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_nights_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservation_nights_reservation_id_fkey"
+            columns: ["reservation_id"]
+            isOneToOne: false
+            referencedRelation: "reservations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       reservations: {
         Row: {
           check_in: string | null
@@ -538,7 +757,11 @@ export type Database = {
       }
       revenue_forecasts: {
         Row: {
+          backtest_metrics: Json | null
+          capacity_utilization: number | null
           created_at: string
+          dba_breakdown: Json | null
+          forecast_method: string | null
           forecasted_revenue: Json
           generated_at: string
           goal_probabilities: Json
@@ -547,13 +770,18 @@ export type Database = {
           insights: Json
           listing_id: string
           monthly_forecasts: Json
+          pace_factor: number | null
           revenue_on_books: number
           total_forecast: Json
           updated_at: string
           year: number
         }
         Insert: {
+          backtest_metrics?: Json | null
+          capacity_utilization?: number | null
           created_at?: string
+          dba_breakdown?: Json | null
+          forecast_method?: string | null
           forecasted_revenue: Json
           generated_at?: string
           goal_probabilities: Json
@@ -562,13 +790,18 @@ export type Database = {
           insights: Json
           listing_id: string
           monthly_forecasts: Json
+          pace_factor?: number | null
           revenue_on_books: number
           total_forecast: Json
           updated_at?: string
           year: number
         }
         Update: {
+          backtest_metrics?: Json | null
+          capacity_utilization?: number | null
           created_at?: string
+          dba_breakdown?: Json | null
+          forecast_method?: string | null
           forecasted_revenue?: Json
           generated_at?: string
           goal_probabilities?: Json
@@ -577,6 +810,7 @@ export type Database = {
           insights?: Json
           listing_id?: string
           monthly_forecasts?: Json
+          pace_factor?: number | null
           revenue_on_books?: number
           total_forecast?: Json
           updated_at?: string

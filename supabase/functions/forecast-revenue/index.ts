@@ -6,32 +6,82 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface ForecastSettings {
+  forecast_method: 'additive' | 'multiplicative';
+  dba_buckets: number[][];
+  min_history_months: number;
+  smoothing_window_months: number;
+  pace_clip_min: number;
+  pace_clip_max: number;
+  simulation_runs: number;
+  fallback_hierarchy: string[];
+  owner_holds_treatment: string;
+}
+
+interface BookingCurve {
+  listing_id: string;
+  year_month: string;
+  dba_bucket: string;
+  pickup_share: number;
+  pickup_amount_mean: number;
+  pickup_amount_stddev: number;
+  sample_size: number;
+}
+
+interface PaceFactor {
+  factor: number;
+  currentBookings: number;
+  lastYearBookings: number;
+  dbaToMonth: number;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { listingId, year = new Date().getFullYear(), simulations = 10000 } = await req.json();
+    const { listingId, year = new Date().getFullYear(), simulations } = await req.json();
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log(`Forecasting revenue for listing ${listingId}, year ${year}`);
+    console.log(`Pace-aware forecasting for listing ${listingId}, year ${year}`);
 
-    // Fetch all reservations for this property (2+ years of history)
+    // Load forecast settings
+    const { data: settings, error: settingsError } = await supabase
+      .from('forecast_settings')
+      .select('*')
+      .limit(1)
+      .single();
+
+    const config: ForecastSettings = settings || {
+      forecast_method: 'additive',
+      dba_buckets: [[0,3],[4,7],[8,14],[15,30],[31,60],[61,90],[91,180],[181,365]],
+      min_history_months: 24,
+      smoothing_window_months: 3,
+      pace_clip_min: 0.6,
+      pace_clip_max: 1.4,
+      simulation_runs: 10000,
+      fallback_hierarchy: ['property', 'bedroom_cohort', 'portfolio'],
+      owner_holds_treatment: 'exclude'
+    };
+
+    const simulationCount = simulations || config.simulation_runs;
+
+    // Fetch reservations (2+ years of history)
     const { data: reservations, error: reservationsError } = await supabase
       .from('reservations')
       .select('*')
       .eq('listing_id', listingId)
       .in('status', ['confirmed', 'checked_in', 'checked_out'])
-      .gte('check_in', `${year - 2}-01-01`)
+      .gte('check_in', `${year - 3}-01-01`)
       .order('check_in', { ascending: true });
 
     if (reservationsError) throw reservationsError;
 
-    // Fetch goals for this year
+    // Fetch property goals
     const { data: goals, error: goalsError } = await supabase
       .from('property_goals')
       .select('*')
@@ -40,21 +90,41 @@ serve(async (req) => {
 
     if (goalsError) throw goalsError;
 
+    // Fetch booking curves
+    const { data: bookingCurves, error: curvesError } = await supabase
+      .from('booking_curves')
+      .select('*')
+      .eq('listing_id', listingId);
+
+    if (curvesError) console.error('Error loading booking curves:', curvesError);
+
+    // Fetch capacity calendar (next 365 days)
     const today = new Date();
-    const currentMonth = today.getMonth();
+    const endCapacity = new Date();
+    endCapacity.setDate(endCapacity.getDate() + 365);
+
+    const { data: capacityData, error: capacityError } = await supabase
+      .from('capacity_calendar')
+      .select('*')
+      .eq('listing_id', listingId)
+      .gte('date', today.toISOString().split('T')[0])
+      .lte('date', endCapacity.toISOString().split('T')[0]);
+
+    if (capacityError) console.error('Error loading capacity:', capacityError);
+
     const currentYear = year;
+    const currentMonth = today.getMonth();
     const isFutureYear = currentYear > today.getFullYear();
 
-    // Calculate revenue already on the books (all confirmed reservations for this year)
+    // Calculate revenue on books
     const revenueOnBooks = reservations
       ?.filter(r => {
         const checkIn = new Date(r.check_in);
-        return checkIn.getFullYear() === currentYear && 
-               r.fare_accommodation_adjusted;
+        return checkIn.getFullYear() === currentYear && r.fare_accommodation_adjusted;
       })
       .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
 
-    // Calculate revenue from past months (actual completed revenue)
+    // Calculate past revenue (actual completed)
     const pastRevenue = isFutureYear ? 0 : reservations
       ?.filter(r => {
         const checkIn = new Date(r.check_in);
@@ -64,270 +134,390 @@ serve(async (req) => {
       })
       .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
 
-    // Calculate confirmed future bookings
     const futureConfirmed = revenueOnBooks - pastRevenue;
 
-    // Analyze booking window (lead time distribution)
-    const bookingWindowData: { [month: number]: number[] } = {};
-    reservations?.forEach(r => {
-      if (r.created_at_guesty && r.check_in) {
-        const checkInMonth = new Date(r.check_in).getMonth();
-        const createdAt = new Date(r.created_at_guesty);
+    // Helper: Compute pace factor for a month
+    function computePaceFactor(targetMonth: Date, asOfDate: Date): PaceFactor {
+      const dba = Math.floor((targetMonth.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24));
+      const month = targetMonth.getMonth();
+      const targetYear = targetMonth.getFullYear();
+
+      const lastYearSameDay = new Date(asOfDate);
+      lastYearSameDay.setFullYear(lastYearSameDay.getFullYear() - 1);
+
+      const lastYearBookings = reservations?.filter(r => {
         const checkIn = new Date(r.check_in);
-        const leadDays = Math.floor((checkIn.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
-        
-        if (!bookingWindowData[checkInMonth]) bookingWindowData[checkInMonth] = [];
-        if (leadDays >= 0) bookingWindowData[checkInMonth].push(leadDays);
-      }
-    });
-
-    // Calculate percentiles for booking windows
-    const percentile = (arr: number[], p: number) => {
-      const sorted = arr.sort((a, b) => a - b);
-      const index = Math.ceil(sorted.length * p) - 1;
-      return sorted[Math.max(0, index)] || 0;
-    };
-
-    const windowStats = Object.entries(bookingWindowData).map(([month, days]) => ({
-      month: parseInt(month),
-      p10: percentile(days, 0.1),
-      p50: percentile(days, 0.5),
-      p90: percentile(days, 0.9),
-      mean: days.reduce((a, b) => a + b, 0) / days.length
-    }));
-
-    // Calculate booking velocity (current year vs last year)
-    const velocityByMonth: { [month: number]: number } = {};
-    for (let month = currentMonth + 1; month < 12; month++) {
-      const currentYearCount = reservations?.filter(r => {
-        const checkIn = new Date(r.check_in);
-        const createdAt = new Date(r.created_at_guesty || r.check_in);
-        return checkIn.getFullYear() === currentYear &&
+        const created = new Date(r.created_at_guesty || r.check_in);
+        return checkIn.getFullYear() === targetYear - 1 &&
                checkIn.getMonth() === month &&
-               createdAt <= today;
+               created <= lastYearSameDay;
       }).length || 0;
 
-      const lastYearSameDay = new Date(currentYear - 1, today.getMonth(), today.getDate());
-      const lastYearCount = reservations?.filter(r => {
+      const currentBookings = reservations?.filter(r => {
         const checkIn = new Date(r.check_in);
-        const createdAt = new Date(r.created_at_guesty || r.check_in);
-        return checkIn.getFullYear() === currentYear - 1 &&
+        const created = new Date(r.created_at_guesty || r.check_in);
+        return checkIn.getFullYear() === targetYear &&
                checkIn.getMonth() === month &&
-               createdAt <= lastYearSameDay;
+               created <= asOfDate;
       }).length || 0;
 
-      velocityByMonth[month] = lastYearCount > 0 ? currentYearCount / lastYearCount : 1;
+      let paceFactor = lastYearBookings > 0 ? currentBookings / lastYearBookings : 1.0;
+      
+      // Clip to configured range
+      paceFactor = Math.min(config.pace_clip_max, Math.max(config.pace_clip_min, paceFactor));
+
+      return {
+        factor: paceFactor,
+        currentBookings,
+        lastYearBookings,
+        dbaToMonth: dba
+      };
     }
 
-    // Calculate historical revenue by month
-    const historicalRevenue: { [month: number]: number[] } = {};
-    reservations?.forEach(r => {
-      const checkIn = new Date(r.check_in);
-      const month = checkIn.getMonth();
-      const revenue = Number(r.fare_accommodation_adjusted) || 0;
-      
-      if (!historicalRevenue[month]) historicalRevenue[month] = [];
-      if (revenue > 0) historicalRevenue[month].push(revenue);
-    });
+    // Helper: Calculate historical ADR
+    function calculateHistoricalADR(yearMonth: string): number {
+      const [y, m] = yearMonth.split('-').map(Number);
+      const relevantRes = reservations?.filter(r => {
+        const checkIn = new Date(r.check_in);
+        return checkIn.getFullYear() === y && checkIn.getMonth() === m - 1;
+      }) || [];
 
-    const monthlyStats = Object.entries(historicalRevenue).map(([month, revenues]) => {
-      const mean = revenues.reduce((a, b) => a + b, 0) / revenues.length;
-      const variance = revenues.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / revenues.length;
-      const stdDev = Math.sqrt(variance);
-      return {
-        month: parseInt(month),
-        mean,
-        stdDev,
-        count: revenues.length
-      };
-    });
+      if (relevantRes.length === 0) return 150; // Fallback ADR
 
-    // Monte Carlo Simulation
-    const normalSample = (mean: number, stdDev: number) => {
+      const totalRev = relevantRes.reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0);
+      const totalNights = relevantRes.reduce((sum, r) => sum + (Number(r.nights_count) || 0), 0);
+
+      return totalNights > 0 ? totalRev / totalNights : 150;
+    }
+
+    // Helper: Get capacity for a month
+    function getMonthCapacity(yearMonth: string): number {
+      const [y, m] = yearMonth.split('-').map(Number);
+      const monthStart = new Date(y, m - 1, 1);
+      const monthEnd = new Date(y, m, 0);
+
+      if (!capacityData || capacityData.length === 0) {
+        // Fallback: assume 30 days available
+        return 30;
+      }
+
+      const availableNights = capacityData.filter(d => {
+        const date = new Date(d.date);
+        return date >= monthStart && date <= monthEnd && d.is_available;
+      }).length;
+
+      return availableNights;
+    }
+
+    // Helper: Normal distribution sampling
+    function normalSample(mean: number, stdDev: number): number {
       let u = 0, v = 0;
       while (u === 0) u = Math.random();
       while (v === 0) v = Math.random();
       return mean + stdDev * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-    };
-
-    const simResults: number[] = [];
-    
-    // Determine which months to forecast
-    const startMonth = isFutureYear ? 0 : currentMonth + 1;
-    
-    for (let sim = 0; sim < simulations; sim++) {
-      // Start with past actual revenue + future confirmed bookings
-      let simTotal = pastRevenue + futureConfirmed;
-      
-      // Add forecasted revenue for remaining months
-      for (let month = startMonth; month < 12; month++) {
-        const stats = monthlyStats.find(s => s.month === month);
-        if (!stats) continue;
-
-        const velocity = velocityByMonth[month] || 1;
-        const windowStat = windowStats.find(w => w.month === month);
-        
-        // Calculate booking window adjustment
-        const daysToMonth = Math.floor((new Date(currentYear, month, 15).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        const windowAdjustment = windowStat ? 
-          Math.min(1, Math.max(0.1, daysToMonth / windowStat.p50)) : 1;
-        
-        // Sample revenue with velocity and window adjustments
-        const baseRevenue = normalSample(stats.mean * velocity, stats.stdDev);
-        const adjustedRevenue = Math.max(0, baseRevenue * windowAdjustment * (0.8 + Math.random() * 0.4));
-        
-        simTotal += adjustedRevenue;
-      }
-      
-      simResults.push(simTotal);
     }
 
-    simResults.sort((a, b) => a - b);
+    // Deterministic Forecast (Additive Method)
+    function forecastDeterministicAdditive(targetYearMonth: string, asOfDate: Date): any {
+      const [y, m] = targetYearMonth.split('-').map(Number);
+      const targetMonth = new Date(y, m - 1, 15);
+      const currentDBA = Math.floor((targetMonth.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24));
 
-    const forecastedRevenue = {
-      p10: simResults[Math.floor(simulations * 0.1)],
-      p25: simResults[Math.floor(simulations * 0.25)],
-      p50: simResults[Math.floor(simulations * 0.5)],
-      p75: simResults[Math.floor(simulations * 0.75)],
-      p90: simResults[Math.floor(simulations * 0.9)]
-    };
+      // Revenue already on books for this month
+      const onBooks = reservations?.filter(r => {
+        const checkIn = new Date(r.check_in);
+        return checkIn.getFullYear() === y && 
+               checkIn.getMonth() === m - 1 &&
+               ['confirmed', 'checked_in'].includes(r.status);
+      }).reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
+
+      // Get booking curves for this month (or similar months)
+      const curves = bookingCurves?.filter(c => c.listing_id === listingId) || [];
+      
+      let expectedRemaining = 0;
+
+      // Sum up expected pickup from future DBA buckets
+      for (const bucketDef of config.dba_buckets) {
+        const bucketStart = bucketDef[0];
+        const bucketEnd = bucketDef[1];
+        const bucketLabel = bucketEnd >= 365 ? `${bucketStart}+` : `${bucketStart}-${bucketEnd}`;
+
+        // Only include buckets we haven't passed yet
+        if (currentDBA <= bucketEnd || bucketEnd >= 365) {
+          // Find curve for this bucket (ideally same year-month from history)
+          const curve = curves.find(c => 
+            c.dba_bucket === bucketLabel &&
+            c.sample_size >= 2
+          );
+
+          if (curve) {
+            expectedRemaining += curve.pickup_amount_mean;
+          }
+        }
+      }
+
+      // Apply pace factor
+      const paceData = computePaceFactor(targetMonth, asOfDate);
+      const paceAdjustedRemaining = expectedRemaining * paceData.factor;
+
+      // Capacity constraint
+      const openNights = getMonthCapacity(targetYearMonth);
+      const bookedNights = reservations?.filter(r => {
+        const checkIn = new Date(r.check_in);
+        return checkIn.getFullYear() === y && checkIn.getMonth() === m - 1;
+      }).reduce((sum, r) => sum + (Number(r.nights_count) || 0), 0) || 0;
+
+      const remainingCapacity = Math.max(0, openNights - bookedNights);
+      const historicalADR = calculateHistoricalADR(targetYearMonth);
+      const impliedAdditionalNights = paceAdjustedRemaining / historicalADR;
+
+      let capacityScaler = 1.0;
+      let capacityConstrained = false;
+
+      if (impliedAdditionalNights > remainingCapacity) {
+        capacityScaler = remainingCapacity / impliedAdditionalNights;
+        capacityConstrained = true;
+      }
+
+      const finalRemainingPickup = paceAdjustedRemaining * capacityScaler;
+      const forecast = onBooks + finalRemainingPickup;
+
+      return {
+        yearMonth: targetYearMonth,
+        onBooks,
+        remainingPickup: finalRemainingPickup,
+        paceFactor: paceData.factor,
+        capacityScaler,
+        forecast,
+        capacityConstrained,
+        capacityUtilization: openNights > 0 ? (bookedNights / openNights) * 100 : 0
+      };
+    }
+
+    // Monte Carlo Simulation (Enhanced with Capacity)
+    function simulateForecast(targetYearMonth: string, asOfDate: Date, runs: number): any {
+      const [y, m] = targetYearMonth.split('-').map(Number);
+      const targetMonth = new Date(y, m - 1, 15);
+      const currentDBA = Math.floor((targetMonth.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      const onBooks = reservations?.filter(r => {
+        const checkIn = new Date(r.check_in);
+        return checkIn.getFullYear() === y && 
+               checkIn.getMonth() === m - 1 &&
+               ['confirmed', 'checked_in'].includes(r.status);
+      }).reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
+
+      const paceData = computePaceFactor(targetMonth, asOfDate);
+      const curves = bookingCurves?.filter(c => c.listing_id === listingId) || [];
+      const results: number[] = [];
+
+      for (let i = 0; i < runs; i++) {
+        let simTotal = onBooks;
+
+        for (const bucketDef of config.dba_buckets) {
+          const bucketStart = bucketDef[0];
+          const bucketEnd = bucketDef[1];
+          const bucketLabel = bucketEnd >= 365 ? `${bucketStart}+` : `${bucketStart}-${bucketEnd}`;
+
+          if (currentDBA <= bucketEnd || bucketEnd >= 365) {
+            const curve = curves.find(c => 
+              c.dba_bucket === bucketLabel &&
+              c.sample_size >= 2
+            );
+
+            if (curve) {
+              const baseSample = normalSample(curve.pickup_amount_mean, curve.pickup_amount_stddev);
+              const paceAdjusted = Math.max(0, baseSample * paceData.factor);
+              const variability = 0.8 + Math.random() * 0.4;
+              const sample = paceAdjusted * variability;
+              simTotal += sample;
+            }
+          }
+        }
+
+        // Apply capacity constraint
+        const openNights = getMonthCapacity(targetYearMonth);
+        const historicalADR = calculateHistoricalADR(targetYearMonth);
+        const impliedNights = simTotal / historicalADR;
+
+        if (impliedNights > openNights) {
+          simTotal = openNights * historicalADR;
+        }
+
+        results.push(simTotal);
+      }
+
+      results.sort((a, b) => a - b);
+
+      return {
+        p10: results[Math.floor(runs * 0.10)],
+        p25: results[Math.floor(runs * 0.25)],
+        p50: results[Math.floor(runs * 0.50)],
+        p75: results[Math.floor(runs * 0.75)],
+        p90: results[Math.floor(runs * 0.90)],
+        mean: results.reduce((a, b) => a + b, 0) / runs
+      };
+    }
+
+    // Generate monthly forecasts
+    const monthlyForecasts = [];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const dbaBreakdown: any = {};
+
+    let totalForecastP50 = 0;
+
+    for (let month = 0; month < 12; month++) {
+      const isPastMonth = !isFutureYear && month < currentMonth;
+      const yearMonth = `${currentYear}-${String(month + 1).padStart(2, '0')}`;
+
+      const actualRevenue = reservations?.filter(r => {
+        const checkIn = new Date(r.check_in);
+        return checkIn.getFullYear() === currentYear && 
+               checkIn.getMonth() === month;
+      }).reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
+
+      if (isPastMonth) {
+        monthlyForecasts.push({
+          month,
+          monthName: monthNames[month],
+          yearMonth,
+          isPast: true,
+          actualRevenue,
+          revenueOnBooks: actualRevenue,
+          forecast: { p50: actualRevenue, p10: actualRevenue, p90: actualRevenue }
+        });
+        totalForecastP50 += actualRevenue;
+      } else {
+        const deterministic = forecastDeterministicAdditive(yearMonth, today);
+        const simulated = simulateForecast(yearMonth, today, simulationCount);
+
+        monthlyForecasts.push({
+          month,
+          monthName: monthNames[month],
+          yearMonth,
+          isPast: false,
+          actualRevenue: 0,
+          revenueOnBooks: deterministic.onBooks,
+          remainingPickup: deterministic.remainingPickup,
+          paceFactor: deterministic.paceFactor,
+          capacityUtilization: deterministic.capacityUtilization,
+          capacityConstrained: deterministic.capacityConstrained,
+          forecast: {
+            p50: simulated.p50,
+            p10: simulated.p10,
+            p90: simulated.p90
+          }
+        });
+
+        dbaBreakdown[yearMonth] = {
+          onBooks: deterministic.onBooks,
+          paceFactor: deterministic.paceFactor,
+          capacityUtilization: deterministic.capacityUtilization
+        };
+
+        totalForecastP50 += simulated.p50;
+      }
+    }
 
     // Calculate goal probabilities
     const totalBudget = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
     const totalProjection = goals?.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0) || 0;
     const totalGoal = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
 
-    const goalProbabilities = {
-      budget: totalBudget > 0 ? (simResults.filter(s => s >= totalBudget).length / simulations) * 100 : 0,
-      projection: totalProjection > 0 ? (simResults.filter(s => s >= totalProjection).length / simulations) * 100 : 0,
-      goal: totalGoal > 0 ? (simResults.filter(s => s >= totalGoal).length / simulations) * 100 : 0
-    };
-
-    // Generate monthly forecasts
-    const monthlyForecasts = [];
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
-    for (let month = 0; month < 12; month++) {
-      const isPastMonth = !isFutureYear && month < currentMonth;
-      const isCurrentMonth = !isFutureYear && month === currentMonth;
-      // Get actual revenue for this month
-      const actualRevenue = reservations
-        ?.filter(r => {
-          const checkIn = new Date(r.check_in);
-          return checkIn.getFullYear() === currentYear && 
-                 checkIn.getMonth() === month &&
-                 r.fare_accommodation_adjusted;
-        })
-        .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
-
-      const stats = monthlyStats.find(s => s.month === month);
-      const velocity = velocityByMonth[month] || 1;
-      const windowStat = windowStats.find(w => w.month === month);
-      const daysToMonth = Math.floor((new Date(currentYear, month, 15).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      
-      let additionalP50 = 0;
-      let additionalP10 = 0;
-      let additionalP90 = 0;
-      
-      // Only forecast additional revenue for current and future months
-      if (!isPastMonth) {
-        additionalP50 = stats ? stats.mean * velocity * 0.7 : 0;
-        additionalP10 = stats ? stats.mean * velocity * 0.4 : 0;
-        additionalP90 = stats ? stats.mean * velocity * 1.0 : 0;
+    // Run full-year simulation for goal probabilities
+    const yearSimResults: number[] = [];
+    for (let sim = 0; sim < simulationCount; sim++) {
+      let yearTotal = pastRevenue;
+      for (let month = isFutureYear ? 0 : currentMonth; month < 12; month++) {
+        const yearMonth = `${currentYear}-${String(month + 1).padStart(2, '0')}`;
+        const monthSim = simulateForecast(yearMonth, today, 1);
+        yearTotal += monthSim.mean;
       }
-
-      const windowStatus = windowStat ? 
-        (daysToMonth > windowStat.p90 ? 'open' : 
-         daysToMonth > windowStat.p50 ? 'closing' : 'closed') : 'open';
-
-      monthlyForecasts.push({
-        month,
-        monthName: monthNames[month],
-        isPast: isPastMonth,
-        actualRevenue: isPastMonth ? actualRevenue : 0,
-        revenueOnBooks: !isPastMonth ? actualRevenue : 0,
-        forecastedAdditional: {
-          p50: additionalP50,
-          p10: additionalP10,
-          p90: additionalP90
-        },
-        totalForecast: {
-          p50: actualRevenue + additionalP50,
-          p10: actualRevenue + additionalP10,
-          p90: actualRevenue + additionalP90
-        },
-        bookingVelocity: velocity,
-        bookingWindowStatus: windowStatus
-      });
+      yearSimResults.push(yearTotal);
     }
 
+    yearSimResults.sort((a, b) => a - b);
+
+    const goalProbabilities = {
+      budget: totalBudget > 0 ? (yearSimResults.filter(s => s >= totalBudget).length / simulationCount) * 100 : 0,
+      projection: totalProjection > 0 ? (yearSimResults.filter(s => s >= totalProjection).length / simulationCount) * 100 : 0,
+      goal: totalGoal > 0 ? (yearSimResults.filter(s => s >= totalGoal).length / simulationCount) * 100 : 0
+    };
+
     // Generate insights
+    const avgPace = monthlyForecasts
+      .filter(m => !m.isPast && m.paceFactor)
+      .reduce((sum, m) => sum + m.paceFactor, 0) / monthlyForecasts.filter(m => !m.isPast && m.paceFactor).length;
+
     const insights = {
       keyDrivers: [] as string[],
       risks: [] as string[],
       opportunities: [] as string[]
     };
 
-    const avgVelocity = Object.values(velocityByMonth).reduce((a, b) => a + b, 0) / Object.values(velocityByMonth).length;
-    if (avgVelocity > 1.1) {
-      insights.keyDrivers.push(`Strong booking pace: ${((avgVelocity - 1) * 100).toFixed(0)}% ahead of last year`);
-    } else if (avgVelocity < 0.9) {
-      insights.risks.push(`Booking pace ${((1 - avgVelocity) * 100).toFixed(0)}% behind last year`);
+    if (avgPace > 1.1) {
+      insights.keyDrivers.push(`Strong booking pace: ${((avgPace - 1) * 100).toFixed(0)}% ahead of last year`);
+    } else if (avgPace < 0.9) {
+      insights.risks.push(`Booking pace ${((1 - avgPace) * 100).toFixed(0)}% behind last year`);
+    }
+
+    const constrained = monthlyForecasts.filter(m => m.capacityConstrained).length;
+    if (constrained > 0) {
+      insights.keyDrivers.push(`${constrained} month(s) capacity-constrained - optimize pricing`);
     }
 
     if (goalProbabilities.goal < 30) {
-      insights.risks.push('Low probability of hitting year-end goal based on current pace');
+      insights.risks.push('Low probability of hitting year-end goal');
     }
-
-    const closingSoon = monthlyForecasts.filter(m => m.bookingWindowStatus === 'closing').length;
-    if (closingSoon > 0) {
-      insights.opportunities.push(`${closingSoon} month(s) still accepting bookings - optimize pricing now`);
-    }
-
-    console.log(`Forecast complete: P50 = $${forecastedRevenue.p50.toFixed(0)}`);
-
-    const goalTargets = {
-      budget: totalBudget,
-      projection: totalProjection,
-      goal: totalGoal
-    };
 
     const forecastData = {
       listingId,
       year,
       asOfDate: today.toISOString(),
+      forecastMethod: config.forecast_method,
       pastRevenue,
       futureConfirmed,
       revenueOnBooks,
-      forecastedRevenue,
+      forecastedRevenue: {
+        p10: yearSimResults[Math.floor(simulationCount * 0.1)],
+        p50: totalForecastP50,
+        p90: yearSimResults[Math.floor(simulationCount * 0.9)]
+      },
       totalForecast: {
-        p50: forecastedRevenue.p50,
+        p50: totalForecastP50,
         confidence: {
-          lower: simResults[Math.floor(simulations * 0.1)],
-          upper: simResults[Math.floor(simulations * 0.9)]
+          lower: yearSimResults[Math.floor(simulationCount * 0.1)],
+          upper: yearSimResults[Math.floor(simulationCount * 0.9)]
         }
       },
-      goalTargets,
+      goalTargets: {
+        budget: totalBudget,
+        projection: totalProjection,
+        goal: totalGoal
+      },
       goalProbabilities,
       monthlyForecasts,
+      dbaBreakdown,
       insights
     };
 
-    // Save forecast to database (upsert)
+    // Save to database
     const { error: saveError } = await supabase
       .from('revenue_forecasts')
       .upsert({
         listing_id: listingId,
         year,
+        forecast_method: config.forecast_method,
+        pace_factor: avgPace,
+        capacity_utilization: monthlyForecasts
+          .filter(m => !m.isPast && m.capacityUtilization)
+          .reduce((sum, m) => sum + m.capacityUtilization, 0) / monthlyForecasts.filter(m => !m.isPast && m.capacityUtilization).length,
+        dba_breakdown: dbaBreakdown,
         generated_at: today.toISOString(),
         revenue_on_books: revenueOnBooks,
-        forecasted_revenue: forecastedRevenue,
-        total_forecast: {
-          ...forecastData.totalForecast,
-          pastRevenue,
-          futureConfirmed
-        },
-        goal_targets: goalTargets,
+        forecasted_revenue: forecastData.forecastedRevenue,
+        total_forecast: forecastData.totalForecast,
+        goal_targets: forecastData.goalTargets,
         goal_probabilities: goalProbabilities,
         monthly_forecasts: monthlyForecasts,
         insights
@@ -338,7 +528,7 @@ serve(async (req) => {
     if (saveError) {
       console.error('Error saving forecast:', saveError);
     } else {
-      console.log('Forecast saved to database');
+      console.log('Pace-aware forecast saved');
     }
 
     return new Response(
