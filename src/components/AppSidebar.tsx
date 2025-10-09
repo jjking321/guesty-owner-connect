@@ -1,4 +1,4 @@
-import { Home, Building2, Calendar, Settings, FolderOpen, LayoutGrid } from "lucide-react";
+import { Home, Building2, Calendar, Settings, FolderOpen, LayoutGrid, Users } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
   Sidebar,
@@ -17,6 +17,7 @@ const menuItems = [
   { title: "Properties", url: "/listings", icon: Building2 },
   { title: "Portfolio View", url: "/properties/bulk-edit", icon: LayoutGrid },
   { title: "Groups", url: "/groups", icon: FolderOpen },
+  { title: "Owners", url: "/owners", icon: Users },
   { title: "Reservations", url: "/reservations", icon: Calendar },
   { title: "Settings", url: "/settings", icon: Settings },
 ];

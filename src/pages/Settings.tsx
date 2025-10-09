@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Home, Calendar } from "lucide-react";
+import { Plus, Trash2, Loader2, Key, Home, Calendar, Users } from "lucide-react";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { TeamManagement } from "@/components/TeamManagement";
 import {
@@ -27,6 +27,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [syncingListings, setSyncingListings] = useState<string | null>(null);
   const [syncingReservations, setSyncingReservations] = useState<string | null>(null);
+  const [syncingOwners, setSyncingOwners] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [incompleteSyncJobs, setIncompleteSyncJobs] = useState<Record<string, any>>({});
 
@@ -206,6 +207,32 @@ export default function Settings() {
     }
   };
 
+  const handleSyncOwners = async (accountId: string) => {
+    setSyncingOwners(accountId);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-owners", {
+        body: { accountId },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Owners synced successfully",
+        description: `${data.ownersCount} owners synced, ${data.listingsUpdated} listings updated`,
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to sync owners",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingOwners(null);
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-8">
@@ -312,7 +339,13 @@ export default function Settings() {
                                   <span>Reservations: {new Date(account.last_reservations_sync).toLocaleString()}</span>
                                 </div>
                               )}
-                              {!account.last_listings_sync && !account.last_reservations_sync && (
+                              {account.last_owners_sync && (
+                                <div className="flex items-center gap-1">
+                                  <Users className="h-3 w-3" />
+                                  <span>Owners: {new Date(account.last_owners_sync).toLocaleString()}</span>
+                                </div>
+                              )}
+                              {!account.last_listings_sync && !account.last_reservations_sync && !account.last_owners_sync && (
                                 <span>Never synced</span>
                               )}
                             </div>
@@ -344,7 +377,7 @@ export default function Settings() {
                         <div className="flex gap-2">
                           <Button
                             onClick={() => handleSyncListings(account.id)}
-                            disabled={syncingListings === account.id || syncingReservations === account.id}
+                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id}
                             variant="outline"
                             className="flex-1"
                             size="sm"
@@ -363,7 +396,7 @@ export default function Settings() {
                           </Button>
                           <Button
                             onClick={() => handleSyncReservations(account.id)}
-                            disabled={syncingListings === account.id || syncingReservations === account.id}
+                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id}
                             variant="outline"
                             className="flex-1"
                             size="sm"
@@ -388,6 +421,25 @@ export default function Settings() {
                                 </>
                               );
                             })()}
+                          </Button>
+                          <Button
+                            onClick={() => handleSyncOwners(account.id)}
+                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id}
+                            variant="outline"
+                            className="flex-1"
+                            size="sm"
+                          >
+                            {syncingOwners === account.id ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Syncing...
+                              </>
+                            ) : (
+                              <>
+                                <Users className="mr-2 h-4 w-4" />
+                                Sync Owners
+                              </>
+                            )}
                           </Button>
                         </div>
                       </CardContent>

@@ -22,6 +22,7 @@ export type Database = {
           created_at: string
           id: string
           last_listings_sync: string | null
+          last_owners_sync: string | null
           last_reservations_sync: string | null
           organization_id: string
           updated_at: string
@@ -34,6 +35,7 @@ export type Database = {
           created_at?: string
           id?: string
           last_listings_sync?: string | null
+          last_owners_sync?: string | null
           last_reservations_sync?: string | null
           organization_id: string
           updated_at?: string
@@ -46,6 +48,7 @@ export type Database = {
           created_at?: string
           id?: string
           last_listings_sync?: string | null
+          last_owners_sync?: string | null
           last_reservations_sync?: string | null
           organization_id?: string
           updated_at?: string
@@ -81,6 +84,7 @@ export type Database = {
           imported_at: string
           is_listed: boolean | null
           nickname: string | null
+          owner_id: string | null
           property_type: string | null
           status: string | null
           thumbnail: string | null
@@ -98,6 +102,7 @@ export type Database = {
           imported_at?: string
           is_listed?: boolean | null
           nickname?: string | null
+          owner_id?: string | null
           property_type?: string | null
           status?: string | null
           thumbnail?: string | null
@@ -115,6 +120,7 @@ export type Database = {
           imported_at?: string
           is_listed?: boolean | null
           nickname?: string | null
+          owner_id?: string | null
           property_type?: string | null
           status?: string | null
           thumbnail?: string | null
@@ -126,6 +132,13 @@ export type Database = {
             columns: ["guesty_account_id"]
             isOneToOne: false
             referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "listings_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
             referencedColumns: ["id"]
           },
         ]
@@ -233,6 +246,53 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      owners: {
+        Row: {
+          email: string | null
+          first_name: string | null
+          full_name: string | null
+          guesty_account_id: string
+          id: string
+          imported_at: string
+          last_name: string | null
+          listing_ids: Json | null
+          phone: string | null
+          updated_at: string
+        }
+        Insert: {
+          email?: string | null
+          first_name?: string | null
+          full_name?: string | null
+          guesty_account_id: string
+          id: string
+          imported_at?: string
+          last_name?: string | null
+          listing_ids?: Json | null
+          phone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          email?: string | null
+          first_name?: string | null
+          full_name?: string | null
+          guesty_account_id?: string
+          id?: string
+          imported_at?: string
+          last_name?: string | null
+          listing_ids?: Json | null
+          phone?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "owners_guesty_account_id_fkey"
+            columns: ["guesty_account_id"]
+            isOneToOne: false
+            referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {

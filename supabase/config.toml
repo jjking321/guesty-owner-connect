@@ -3,6 +3,9 @@ project_id = "owsvuxxflhghlbrlhxst"
 [functions.sync-guesty-data]
 verify_jwt = false
 
+[functions.sync-owners]
+verify_jwt = false
+
 [functions.sync-new-reservations]
 verify_jwt = false
 

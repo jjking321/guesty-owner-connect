@@ -15,6 +15,8 @@ import Groups from "./pages/Groups";
 import GroupDetail from "./pages/GroupDetail";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import PropertiesBulkEdit from "./pages/PropertiesBulkEdit";
+import Owners from "./pages/Owners";
+import OwnerDetail from "./pages/OwnerDetail";
 
 const queryClient = new QueryClient();
 
@@ -34,6 +36,8 @@ const App = () => (
           <Route path="/reservations" element={<Reservations />} />
           <Route path="/groups" element={<Groups />} />
           <Route path="/groups/:id" element={<GroupDetail />} />
+          <Route path="/owners" element={<Owners />} />
+          <Route path="/owners/:id" element={<OwnerDetail />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
