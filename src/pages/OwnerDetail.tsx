@@ -148,7 +148,7 @@ export default function OwnerDetail() {
 
       // Get forecast
       const listingForecast = forecasts.find(f => f.listing_id === listing.id && f.year === currentYear);
-      const forecastAmount = listingForecast ? (Number(listingForecast.total_forecast?.amount) || 0) : 0;
+      const forecastAmount = listingForecast ? (Number(listingForecast.total_forecast?.p50) || 0) : 0;
       totalForecast += forecastAmount;
 
       // Determine status
@@ -297,7 +297,7 @@ export default function OwnerDetail() {
                   const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
                   const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
                   const goal = listingGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
-                  const forecast = listingForecast ? (Number(listingForecast.total_forecast?.amount) || 0) : 0;
+                  const forecast = listingForecast ? (Number(listingForecast.total_forecast?.p50) || 0) : 0;
                   
                   let status: 'on-track' | 'at-risk' | 'behind' = 'behind';
                   if (projection > 0) {
