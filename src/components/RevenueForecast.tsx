@@ -80,11 +80,12 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
   const loadActualRevenue = async () => {
     try {
       const { data, error } = await supabase
-        .from("reservation_nights")
-        .select("night_date, revenue_allocation")
+        .from("reservations")
+        .select("check_in, fare_accommodation_adjusted")
         .eq("listing_id", listingId)
-        .gte("night_date", `${selectedYear}-01-01`)
-        .lt("night_date", `${selectedYear + 1}-01-01`);
+        .in("status", ["confirmed", "checked_in", "checked_out"])
+        .gte("check_in", `${selectedYear}-01-01`)
+        .lt("check_in", `${selectedYear + 1}-01-01`);
 
       if (error) throw error;
 
@@ -93,9 +94,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
       if (data) {
         data.forEach((row) => {
-          const monthKey = row.night_date.substring(0, 7);
-          monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + (row.revenue_allocation || 0);
-          yearTotal += row.revenue_allocation || 0;
+          if (row.check_in && row.fare_accommodation_adjusted) {
+            const monthKey = row.check_in.substring(0, 7);
+            monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + row.fare_accommodation_adjusted;
+            yearTotal += row.fare_accommodation_adjusted;
+          }
         });
       }
 
