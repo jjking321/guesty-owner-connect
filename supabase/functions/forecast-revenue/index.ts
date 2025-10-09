@@ -249,7 +249,7 @@ serve(async (req) => {
           let curve = curves.find(c => 
             c.year_month === targetYearMonth &&
             c.dba_bucket === bucketLabel &&
-            c.sample_size >= 2
+            c.sample_size >= 1
           );
 
           // FALLBACK: If no exact match, use same calendar month from previous year(s)
@@ -262,7 +262,7 @@ serve(async (req) => {
               const [curveYear, curveMonth] = (c.year_month || '').split('-');
               return curveMonth === calendarMonth &&
                      c.dba_bucket === bucketLabel &&
-                     c.sample_size >= 2 &&
+                     c.sample_size >= 1 &&
                      parseInt(curveYear) < parseInt(targetYear);
             });
 
