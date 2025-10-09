@@ -61,15 +61,49 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
   const [forecast, setForecast] = useState<ForecastData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const { toast } = useToast();
-
+  const [actualRevenue, setActualRevenue] = useState<{
+    yearTotal: number;
+    monthlyActuals: Record<string, number>;
+  }>({ yearTotal: 0, monthlyActuals: {} });
+  
   const currentYear = new Date().getFullYear();
+  const lastYear = currentYear - 1;
   const nextYear = currentYear + 1;
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadForecast();
+    loadActualRevenue();
   }, [listingId, selectedYear]);
+
+  const loadActualRevenue = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("reservation_nights")
+        .select("night_date, revenue_allocation")
+        .eq("listing_id", listingId)
+        .gte("night_date", `${selectedYear}-01-01`)
+        .lt("night_date", `${selectedYear + 1}-01-01`);
+
+      if (error) throw error;
+
+      const monthlyActuals: Record<string, number> = {};
+      let yearTotal = 0;
+
+      if (data) {
+        data.forEach((row) => {
+          const monthKey = row.night_date.substring(0, 7);
+          monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + (row.revenue_allocation || 0);
+          yearTotal += row.revenue_allocation || 0;
+        });
+      }
+
+      setActualRevenue({ yearTotal, monthlyActuals });
+    } catch (err) {
+      console.error("Error loading actual revenue:", err);
+    }
+  };
 
   const loadForecast = async () => {
     setLoading(true);
@@ -228,6 +262,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           <div className="flex items-center gap-2">
             <Tabs value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
               <TabsList>
+                <TabsTrigger value={lastYear.toString()}>{lastYear}</TabsTrigger>
                 <TabsTrigger value={currentYear.toString()}>{currentYear}</TabsTrigger>
                 <TabsTrigger value={nextYear.toString()}>{nextYear}</TabsTrigger>
               </TabsList>
@@ -271,94 +306,135 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
         {forecast && !loading && (
           <>
             {/* Main Forecast Display */}
-            <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-6 text-center">
-              <div className="flex justify-between items-start mb-4">
-                <div className="text-left">
-                  <p className="text-xs text-muted-foreground">
-                    Last updated: {forecast.generated_at ? formatDistanceToNow(new Date(forecast.generated_at)) : 'N/A'} ago
-                  </p>
-                </div>
-                {forecast.forecastMethod && (
-                  <div className="text-right">
+            {selectedYear === lastYear ? (
+              <div className="bg-gradient-to-br from-blue-500/10 to-blue-500/5 rounded-lg p-6 text-center">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="text-left">
                     <p className="text-xs text-muted-foreground">
-                      Method: <span className="font-medium capitalize">{forecast.forecastMethod}</span>
+                      Historical Performance
                     </p>
                   </div>
-                )}
-              </div>
-              <p className="text-sm font-medium text-muted-foreground mb-2">
-                Projected End-of-Year Revenue
-              </p>
-              <p className="text-4xl font-bold mb-2">
-                ${Number(forecast.totalForecast?.p50 ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined) ? (
-                  `80% Confidence: $${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
-                ) : (
-                  'Confidence interval not available'
-                )}
-              </p>
-              <div className="mt-4 pt-4 border-t">
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div className="text-center">
-                    <p className="text-muted-foreground">On Books (Year)</p>
-                    <p className="font-semibold">
-                      ${Number(forecast.revenueOnBooks || 0).toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-muted-foreground">P10–P90 Range</p>
-                    <p className="font-semibold">
-                      {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined)
-                        ? `$${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
-                        : '—'}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-muted-foreground">Forecasted Add'l</p>
-                    <p className="font-semibold">
-                      ${Number((forecast.totalForecast?.p50 ?? 0) - (forecast.revenueOnBooks ?? 0)).toLocaleString()}
-                    </p>
-                  </div>
+                  <CheckCircle className="h-5 w-5 text-green-600" />
                 </div>
+                <p className="text-sm font-medium text-muted-foreground mb-2">
+                  {selectedYear} Actual Revenue
+                </p>
+                <p className="text-4xl font-bold mb-2">
+                  ${Math.round(actualRevenue.yearTotal).toLocaleString()}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Completed Year
+                </p>
               </div>
-              
-              {/* Pace-Aware Metrics */}
-              {(forecast.paceFactor !== null && forecast.paceFactor !== undefined) || 
-               (forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined) ? (
+            ) : (
+              <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-6 text-center">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="text-left">
+                    <p className="text-xs text-muted-foreground">
+                      Last updated: {forecast.generated_at ? formatDistanceToNow(new Date(forecast.generated_at)) : 'N/A'} ago
+                    </p>
+                  </div>
+                  {forecast.forecastMethod && (
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">
+                        Method: <span className="font-medium capitalize">{forecast.forecastMethod}</span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="text-sm font-medium text-muted-foreground mb-2">
+                  Projected End-of-Year Revenue
+                </p>
+                <p className="text-4xl font-bold mb-2">
+                  ${Number(forecast.totalForecast?.p50 ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined) ? (
+                    `80% Confidence: $${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
+                  ) : (
+                    'Confidence interval not available'
+                  )}
+                </p>
                 <div className="mt-4 pt-4 border-t">
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    {forecast.paceFactor !== null && forecast.paceFactor !== undefined && (
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    {selectedYear === currentYear && (
                       <div className="text-center">
-                        <p className="text-muted-foreground">Avg Pace Factor</p>
+                        <p className="text-muted-foreground">YTD Actuals</p>
                         <p className="font-semibold">
-                          {forecast.paceFactor.toFixed(2)}x
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {forecast.paceFactor > 1.1 ? '↑ Ahead of last year' : 
-                           forecast.paceFactor < 0.9 ? '↓ Behind last year' : 
-                           '→ On pace'}
+                          ${Math.round(actualRevenue.yearTotal).toLocaleString()}
                         </p>
                       </div>
                     )}
-                    {forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined && (
+                    <div className="text-center">
+                      <p className="text-muted-foreground">On Books (Year)</p>
+                      <p className="font-semibold">
+                        ${Number(forecast.revenueOnBooks || 0).toLocaleString()}
+                      </p>
+                    </div>
+                    {selectedYear === currentYear ? (
                       <div className="text-center">
-                        <p className="text-muted-foreground">Capacity Utilization</p>
+                        <p className="text-muted-foreground">Forecasted Add'l</p>
                         <p className="font-semibold">
-                          {forecast.capacityUtilization.toFixed(1)}%
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {forecast.capacityUtilization > 80 ? '⚠️ High utilization' : 
-                           forecast.capacityUtilization > 60 ? '✓ Good utilization' : 
-                           '○ Room to grow'}
+                          ${Number((forecast.totalForecast?.p50 ?? 0) - (forecast.revenueOnBooks ?? 0)).toLocaleString()}
                         </p>
                       </div>
+                    ) : (
+                      <>
+                        <div className="text-center">
+                          <p className="text-muted-foreground">P10–P90 Range</p>
+                          <p className="font-semibold">
+                            {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined)
+                              ? `$${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
+                              : '—'}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-muted-foreground">Forecasted Add'l</p>
+                          <p className="font-semibold">
+                            ${Number((forecast.totalForecast?.p50 ?? 0) - (forecast.revenueOnBooks ?? 0)).toLocaleString()}
+                          </p>
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>
-              ) : null}
-            </div>
+                
+                {/* Pace-Aware Metrics */}
+                {(forecast.paceFactor !== null && forecast.paceFactor !== undefined) || 
+                 (forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined) ? (
+                  <div className="mt-4 pt-4 border-t">
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      {forecast.paceFactor !== null && forecast.paceFactor !== undefined && (
+                        <div className="text-center">
+                          <p className="text-muted-foreground">Avg Pace Factor</p>
+                          <p className="font-semibold">
+                            {forecast.paceFactor.toFixed(2)}x
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {forecast.paceFactor > 1.1 ? '↑ Ahead of last year' : 
+                             forecast.paceFactor < 0.9 ? '↓ Behind last year' : 
+                             '→ On pace'}
+                          </p>
+                        </div>
+                      )}
+                      {forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined && (
+                        <div className="text-center">
+                          <p className="text-muted-foreground">Capacity Utilization</p>
+                          <p className="font-semibold">
+                            {forecast.capacityUtilization.toFixed(1)}%
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {forecast.capacityUtilization > 80 ? '⚠️ High utilization' : 
+                             forecast.capacityUtilization > 60 ? '✓ Good utilization' : 
+                             '○ Room to grow'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             {/* Goal Probabilities */}
             <div>
@@ -410,11 +486,17 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                       const daysUntil = Math.floor((monthDate.getTime() - monthStartThisRender.getTime()) / (1000 * 60 * 60 * 24));
                       const windowStatus = daysUntil < 0 ? 'closed' : daysUntil <= 90 ? 'closing' : 'open';
                       const pace = m.velocity_factor;
+                      const actualForMonth = actualRevenue.monthlyActuals[m.month] || 0;
+                      
                       return (
                         <tr key={m.month} className="border-b">
                           <td className="py-2 font-medium">{monthLabel}</td>
                           <td className="py-2 text-right">
-                            <span className="text-muted-foreground">-</span>
+                            {isPast && actualForMonth > 0 ? (
+                              `$${Math.round(actualForMonth).toLocaleString()}`
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
                           </td>
                           <td className="py-2 text-right">
                             {!isPast ? (
@@ -431,10 +513,10 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                             )}
                           </td>
                           <td className="py-2 text-right font-semibold">
-                            {!isPast ? (
-                              `$${Math.round(Number(m.total_forecast_p50 || 0)).toLocaleString()}`
+                            {isPast && actualForMonth > 0 ? (
+                              `$${Math.round(actualForMonth).toLocaleString()}`
                             ) : (
-                              <span className="text-muted-foreground">-</span>
+                              `$${Math.round(Number(m.total_forecast_p50 || 0)).toLocaleString()}`
                             )}
                           </td>
                           <td className="py-2 text-center">
@@ -447,7 +529,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                             )}
                           </td>
                           <td className="py-2 text-center">
-                            {!isPast ? getWindowIcon(windowStatus) : <span className="text-muted-foreground">-</span>}
+                            {!isPast ? getWindowIcon(windowStatus) : <span className="text-muted-foreground text-xs">Past</span>}
                           </td>
                         </tr>
                       );
