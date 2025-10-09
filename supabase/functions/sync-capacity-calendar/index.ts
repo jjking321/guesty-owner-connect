@@ -78,17 +78,35 @@ Deno.serve(async (req) => {
       .gte('check_out', startDate.toISOString())
       .lte('check_in', endDate.toISOString());
 
+    // Build batch of updates
+    const unavailableDates = [];
     for (const reservation of reservations || []) {
       const checkIn = new Date(reservation.check_in);
       const checkOut = new Date(reservation.check_out);
 
-      // Mark each night as unavailable
+      // Collect each night that should be marked unavailable
       for (let date = new Date(checkIn); date < checkOut; date.setDate(date.getDate() + 1)) {
-        await supabase
-          .from('capacity_calendar')
-          .update({ is_available: false, block_reason: 'reservation' })
-          .eq('listing_id', reservation.listing_id)
-          .eq('date', date.toISOString().split('T')[0]);
+        unavailableDates.push({
+          listing_id: reservation.listing_id,
+          date: date.toISOString().split('T')[0],
+          is_available: false,
+          block_reason: 'reservation'
+        });
+      }
+    }
+
+    // Batch update in chunks
+    console.log(`Updating ${unavailableDates.length} reserved dates...`);
+    const updateBatchSize = 1000;
+    for (let i = 0; i < unavailableDates.length; i += updateBatchSize) {
+      const batch = unavailableDates.slice(i, i + updateBatchSize);
+      
+      const { error: updateError } = await supabase
+        .from('capacity_calendar')
+        .upsert(batch, { onConflict: 'listing_id,date' });
+
+      if (updateError) {
+        console.error(`Error updating batch ${i}-${i + batch.length}:`, updateError);
       }
     }
 
