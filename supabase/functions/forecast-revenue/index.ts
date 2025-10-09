@@ -91,13 +91,55 @@ serve(async (req) => {
 
     if (goalsError) throw goalsError;
 
-    // Fetch booking curves
+    // Fetch listing info for cohort lookups
+    const { data: listingInfo, error: listingError } = await supabase
+      .from('listings')
+      .select('bedrooms, guesty_account_id')
+      .eq('id', listingId)
+      .single();
+
+    if (listingError) console.error('Error loading listing info:', listingError);
+
+    // Fetch booking curves for this listing
     const { data: bookingCurves, error: curvesError } = await supabase
       .from('booking_curves')
       .select('*')
       .eq('listing_id', listingId);
 
     if (curvesError) console.error('Error loading booking curves:', curvesError);
+
+    // Fetch cohort listing IDs (same bedroom count)
+    const { data: cohortListings } = await supabase
+      .from('listings')
+      .select('id')
+      .eq('bedrooms', listingInfo?.bedrooms)
+      .eq('guesty_account_id', listingInfo?.guesty_account_id);
+
+    const cohortListingIds = cohortListings?.map(l => l.id) || [];
+
+    // Fetch cohort booking curves for fallback
+    const { data: cohortCurves } = await supabase
+      .from('booking_curves')
+      .select('*')
+      .in('listing_id', cohortListingIds)
+      .gte('sample_size', 1);
+
+    // Fetch portfolio listing IDs (same guesty account)
+    const { data: portfolioListings } = await supabase
+      .from('listings')
+      .select('id')
+      .eq('guesty_account_id', listingInfo?.guesty_account_id);
+
+    const portfolioListingIds = portfolioListings?.map(l => l.id) || [];
+
+    // Fetch portfolio booking curves for fallback
+    const { data: portfolioCurves } = await supabase
+      .from('booking_curves')
+      .select('*')
+      .in('listing_id', portfolioListingIds)
+      .gte('sample_size', 1);
+
+    console.log(`Property: ${listingId}, Cohort (${listingInfo?.bedrooms}-bed): ${cohortListingIds.length} properties with ${cohortCurves?.length || 0} curves, Portfolio: ${portfolioListingIds.length} properties with ${portfolioCurves?.length || 0} curves`);
 
     // Fetch capacity calendar (next 365 days)
     const today = new Date();
@@ -252,7 +294,7 @@ serve(async (req) => {
             c.sample_size >= 1
           );
 
-          // FALLBACK: If no exact match, use same calendar month from previous year(s)
+          // FALLBACK 1: If no exact match, use same calendar month from previous year(s) for this property
           if (!curve) {
             const [targetYear, targetMonthStr] = targetYearMonth.split('-');
             const calendarMonth = targetMonthStr; // e.g., '04' for April
@@ -281,10 +323,73 @@ serve(async (req) => {
                 sample_size: Math.min(...historicalCurves.map(c => c.sample_size)),
                 listing_id: listingId,
                 year_month: targetYearMonth,
-                dba_bucket: bucketLabel
+                dba_bucket: bucketLabel,
+                pickup_share: 0
               };
               
-              console.log(`Historical fallback for ${targetYearMonth} bucket ${bucketLabel}: avg $${avgPickup.toFixed(0)} from ${historicalCurves.length} year(s)`);
+              console.log(`Property historical fallback ${targetYearMonth} ${bucketLabel}: $${avgPickup.toFixed(0)} from ${historicalCurves.length} year(s)`);
+            }
+          }
+
+          // FALLBACK 2: If still no curve, try bedroom cohort average for same calendar month
+          if (!curve && cohortCurves && cohortCurves.length > 0) {
+            const [targetYear, targetMonthStr] = targetYearMonth.split('-');
+            const calendarMonth = targetMonthStr;
+
+            // Get all cohort curves for this calendar month
+            const cohortCurvesForMonth = cohortCurves.filter(c => {
+              const [curveYear, curveMonth] = (c.year_month || '').split('-');
+              return curveMonth === calendarMonth &&
+                     c.dba_bucket === bucketLabel &&
+                     c.sample_size >= 1;
+            });
+
+            if (cohortCurvesForMonth.length > 0) {
+              const avgPickup = cohortCurvesForMonth.reduce((sum, c) => 
+                sum + (Number(c.pickup_amount_mean) || 0), 0) / cohortCurvesForMonth.length;
+
+              curve = {
+                pickup_amount_mean: avgPickup,
+                pickup_amount_stddev: avgPickup * 0.3, // Estimate stddev
+                sample_size: cohortCurvesForMonth.length,
+                listing_id: listingId,
+                year_month: targetYearMonth,
+                dba_bucket: bucketLabel,
+                pickup_share: 0
+              };
+
+              console.log(`Cohort fallback ${targetYearMonth} ${bucketLabel}: $${avgPickup.toFixed(0)} from ${cohortCurvesForMonth.length} curves`);
+            }
+          }
+
+          // FALLBACK 3: If still no curve, try portfolio-wide average for same calendar month
+          if (!curve && portfolioCurves && portfolioCurves.length > 0) {
+            const [targetYear, targetMonthStr] = targetYearMonth.split('-');
+            const calendarMonth = targetMonthStr;
+
+            // Get all portfolio curves for this calendar month
+            const portfolioCurvesForMonth = portfolioCurves.filter(c => {
+              const [curveYear, curveMonth] = (c.year_month || '').split('-');
+              return curveMonth === calendarMonth &&
+                     c.dba_bucket === bucketLabel &&
+                     c.sample_size >= 1;
+            });
+
+            if (portfolioCurvesForMonth.length > 0) {
+              const avgPickup = portfolioCurvesForMonth.reduce((sum, c) => 
+                sum + (Number(c.pickup_amount_mean) || 0), 0) / portfolioCurvesForMonth.length;
+
+              curve = {
+                pickup_amount_mean: avgPickup,
+                pickup_amount_stddev: avgPickup * 0.4, // Wider estimate for portfolio
+                sample_size: portfolioCurvesForMonth.length,
+                listing_id: listingId,
+                year_month: targetYearMonth,
+                dba_bucket: bucketLabel,
+                pickup_share: 0
+              };
+
+              console.log(`Portfolio fallback ${targetYearMonth} ${bucketLabel}: $${avgPickup.toFixed(0)} from ${portfolioCurvesForMonth.length} curves`);
             }
           }
 
