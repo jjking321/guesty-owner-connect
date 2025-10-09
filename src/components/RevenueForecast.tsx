@@ -11,7 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 interface ForecastData {
   listingId: string;
   year: number;
-  asOfDate: string;
+  generated_at?: string;
   forecastMethod?: string;
   paceFactor?: number;
   capacityUtilization?: number;
@@ -95,7 +95,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
         setForecast({
           listingId: data.listing_id,
           year: data.year,
-          asOfDate: data.generated_at,
+          generated_at: data.generated_at,
           forecastMethod: data.forecast_method,
           paceFactor: data.pace_factor,
           capacityUtilization: data.capacity_utilization,
@@ -265,7 +265,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               <div className="flex justify-between items-start mb-4">
                 <div className="text-left">
                   <p className="text-xs text-muted-foreground">
-                    Last updated: {formatDistanceToNow(new Date(forecast.asOfDate))} ago
+                    Last updated: {forecast.generated_at ? formatDistanceToNow(new Date(forecast.generated_at)) : 'N/A'} ago
                   </p>
                 </div>
                 {forecast.forecastMethod && (
@@ -494,7 +494,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
             <div className="pt-4 border-t flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                Last updated: {forecast.asOfDate ? formatDistanceToNow(new Date(forecast.asOfDate), { addSuffix: true }) : 'Unknown'}
+                Last updated: {forecast.generated_at ? formatDistanceToNow(new Date(forecast.generated_at), { addSuffix: true }) : 'Unknown'}
               </p>
               <p className="text-xs text-muted-foreground">
                 Forecasts regenerate weekly
