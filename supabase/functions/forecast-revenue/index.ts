@@ -412,10 +412,18 @@ serve(async (req) => {
     yearSimResults.sort((a, b) => a - b);
 
     const goalProbabilities = {
-      budget: totalBudget > 0 ? (yearSimResults.filter(s => s >= totalBudget).length / simulationCount) * 100 : 0,
-      projection: totalProjection > 0 ? (yearSimResults.filter(s => s >= totalProjection).length / simulationCount) * 100 : 0,
-      goal: totalGoal > 0 ? (yearSimResults.filter(s => s >= totalGoal).length / simulationCount) * 100 : 0
+      budget: totalBudget > 0 ? (yearSimResults.filter(s => s >= totalBudget).length / yearSimResults.length) * 100 : 0,
+      projection: totalProjection > 0 ? (yearSimResults.filter(s => s >= totalProjection).length / yearSimResults.length) * 100 : 0,
+      goal: totalGoal > 0 ? (yearSimResults.filter(s => s >= totalGoal).length / yearSimResults.length) * 100 : 0
     };
+
+    console.log(`Goal probabilities calculated from ${yearSimResults.length} simulations:`, {
+      budget: goalProbabilities.budget,
+      projection: goalProbabilities.projection,
+      goal: goalProbabilities.goal,
+      totalForecastP50,
+      targets: { totalBudget, totalProjection, totalGoal }
+    });
 
     // Generate insights
     const avgPace = monthlyForecasts
