@@ -17,6 +17,7 @@ import AcceptInvitation from "./pages/AcceptInvitation";
 import PropertiesBulkEdit from "./pages/PropertiesBulkEdit";
 import Owners from "./pages/Owners";
 import OwnerDetail from "./pages/OwnerDetail";
+import ForecastAdmin from "./pages/ForecastAdmin";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +49,7 @@ const App = () => (
           <Route path="/owners" element={<Owners />} />
           <Route path="/owners/:id" element={<OwnerDetail />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/forecast-admin" element={<ForecastAdmin />} />
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />

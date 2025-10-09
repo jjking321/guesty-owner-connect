@@ -12,6 +12,10 @@ interface ForecastData {
   listingId: string;
   year: number;
   asOfDate: string;
+  forecastMethod?: string;
+  paceFactor?: number;
+  capacityUtilization?: number;
+  dbaBreakdown?: any;
   revenueOnBooks: number;
   forecastedRevenue: {
     p10: number;
@@ -40,8 +44,13 @@ interface ForecastData {
     isPast?: boolean;
     actualRevenue?: number;
     revenueOnBooks: number;
-    forecastedAdditional: { p50: number; p10: number; p90: number };
+    forecastedAdditional?: { p50: number; p10: number; p90: number };
+    remainingPickup?: number;
+    paceFactor?: number;
+    capacityUtilization?: number;
+    capacityConstrained?: boolean;
     totalForecast: { p50: number; p10: number; p90: number };
+    forecast?: { p50: number; p10: number; p90: number };
     bookingVelocity: number;
     bookingWindowStatus: string;
   }>;
@@ -87,6 +96,10 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           listingId: data.listing_id,
           year: data.year,
           asOfDate: data.generated_at,
+          forecastMethod: data.forecast_method,
+          paceFactor: data.pace_factor,
+          capacityUtilization: data.capacity_utilization,
+          dbaBreakdown: data.dba_breakdown,
           revenueOnBooks: Number(data.revenue_on_books),
           forecastedRevenue: data.forecasted_revenue as any,
           totalForecast: data.total_forecast as any,
@@ -249,6 +262,20 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           <>
             {/* Main Forecast Display */}
             <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-6 text-center">
+              <div className="flex justify-between items-start mb-4">
+                <div className="text-left">
+                  <p className="text-xs text-muted-foreground">
+                    Last updated: {formatDistanceToNow(new Date(forecast.asOfDate))} ago
+                  </p>
+                </div>
+                {forecast.forecastMethod && (
+                  <div className="text-right">
+                    <p className="text-xs text-muted-foreground">
+                      Method: <span className="font-medium capitalize">{forecast.forecastMethod}</span>
+                    </p>
+                  </div>
+                )}
+              </div>
               <p className="text-sm font-medium text-muted-foreground mb-2">
                 Projected End-of-Year Revenue
               </p>
@@ -284,6 +311,41 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                   </div>
                 </div>
               </div>
+              
+              {/* Pace-Aware Metrics */}
+              {(forecast.paceFactor !== null && forecast.paceFactor !== undefined) || 
+               (forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined) ? (
+                <div className="mt-4 pt-4 border-t">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    {forecast.paceFactor !== null && forecast.paceFactor !== undefined && (
+                      <div className="text-center">
+                        <p className="text-muted-foreground">Avg Pace Factor</p>
+                        <p className="font-semibold">
+                          {forecast.paceFactor.toFixed(2)}x
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {forecast.paceFactor > 1.1 ? '↑ Ahead of last year' : 
+                           forecast.paceFactor < 0.9 ? '↓ Behind last year' : 
+                           '→ On pace'}
+                        </p>
+                      </div>
+                    )}
+                    {forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined && (
+                      <div className="text-center">
+                        <p className="text-muted-foreground">Capacity Utilization</p>
+                        <p className="font-semibold">
+                          {forecast.capacityUtilization.toFixed(1)}%
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {forecast.capacityUtilization > 80 ? '⚠️ High utilization' : 
+                           forecast.capacityUtilization > 60 ? '✓ Good utilization' : 
+                           '○ Room to grow'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {/* Goal Probabilities */}
@@ -342,18 +404,30 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
-                        <td className="py-2 text-right text-muted-foreground">
+                        <td className="py-2 text-right">
                           {!month.isPast ? (
-                            `$${Number(month.forecastedAdditional?.p50 ?? 0).toLocaleString()}`
+                            `$${Number((month.forecastedAdditional?.p50 || month.remainingPickup || 0)).toLocaleString()}`
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="py-2 text-right font-semibold">
-                          ${Number(month.totalForecast?.p50 ?? 0).toLocaleString()}
+                          {!month.isPast ? (
+                            `$${Number((month.totalForecast?.p50 || month.forecast?.p50 || 0)).toLocaleString()}`
+                          ) : (
+                            `$${Number(month.actualRevenue || 0).toLocaleString()}`
+                          )}
                         </td>
                         <td className="py-2 text-center">
-                          {!month.isPast ? (
+                          {!month.isPast && (month.paceFactor !== null && month.paceFactor !== undefined) ? (
+                            <span className={`text-xs font-medium ${
+                              month.paceFactor > 1.1 ? 'text-green-600' : 
+                              month.paceFactor < 0.9 ? 'text-red-600' : 
+                              'text-muted-foreground'
+                            }`}>
+                              {month.paceFactor.toFixed(2)}x
+                            </span>
+                          ) : !month.isPast ? (
                             <span className={month.bookingVelocity >= 1 ? "text-green-600" : "text-red-600"}>
                               {(month.bookingVelocity * 100).toFixed(0)}%
                             </span>
