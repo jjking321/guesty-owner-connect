@@ -433,19 +433,38 @@ serve(async (req) => {
     const weakestMonth = sortedByVelocity[11];
 
     if (strongestMonth.velocity_factor > 1.3) {
-      insights.drivers.push(
-        `${strongestMonth.month} showing exceptional demand ` +
-        `(${strongestMonth.velocity_factor.toFixed(2)}x vs last year, ` +
-        `${strongestMonth.current_bookings} bookings vs ${strongestMonth.last_year_bookings})`
-      );
+      const bookingChange = strongestMonth.current_bookings - strongestMonth.last_year_bookings;
+      
+      let message = `${strongestMonth.month} outperforming with RevPAR of $${strongestMonth.current_revpar.toFixed(0)}/day ` +
+        `(${strongestMonth.velocity_factor.toFixed(2)}x last year's $${strongestMonth.last_year_revpar.toFixed(0)})`;
+      
+      if (bookingChange > 0) {
+        message += ` - driven by ${bookingChange} more bookings`;
+      } else if (bookingChange < 0) {
+        message += ` - higher rates offsetting ${Math.abs(bookingChange)} fewer bookings`;
+      } else {
+        message += ` - same booking volume with higher rates`;
+      }
+      
+      insights.drivers.push(message);
     }
 
     if (weakestMonth.velocity_factor < 0.7) {
-      insights.risks.push(
-        `${weakestMonth.month} significantly underperforming ` +
-        `(${weakestMonth.velocity_factor.toFixed(2)}x vs last year, ` +
-        `${weakestMonth.current_bookings} bookings vs ${weakestMonth.last_year_bookings})`
-      );
+      const revparDrop = ((1 - weakestMonth.velocity_factor) * 100).toFixed(0);
+      const bookingChange = weakestMonth.current_bookings - weakestMonth.last_year_bookings;
+      
+      let message = `${weakestMonth.month} underperforming with RevPAR of $${weakestMonth.current_revpar.toFixed(0)}/day ` +
+        `(${revparDrop}% below last year's $${weakestMonth.last_year_revpar.toFixed(0)})`;
+      
+      if (bookingChange < 0) {
+        message += ` - ${Math.abs(bookingChange)} fewer bookings`;
+      } else if (bookingChange > 0) {
+        message += ` - lower rates despite ${bookingChange} more bookings`;
+      } else {
+        message += ` - lower rates with same booking volume`;
+      }
+      
+      insights.risks.push(message);
     }
 
     // Identify booking window opportunities
