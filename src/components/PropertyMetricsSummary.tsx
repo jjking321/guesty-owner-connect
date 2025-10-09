@@ -65,12 +65,13 @@ export function PropertyMetricsSummary({
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Annual Goal</CardTitle>
+          <CardTitle className="text-sm font-medium">Annual Projection</CardTitle>
           <Target className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold">{formatCurrency(totalGoal)}</div>
-          <div className="flex gap-2 text-xs text-muted-foreground">
+          <div className="text-2xl font-bold">{formatCurrency(totalProjection)}</div>
+          <div className="flex gap-3 text-xs text-muted-foreground mt-1">
+            <span>Goal: {formatCurrency(totalGoal)}</span>
             <span>Budget: {formatCurrency(totalBudget)}</span>
           </div>
         </CardContent>
