@@ -68,15 +68,16 @@ serve(async (req) => {
       owner_holds_treatment: 'exclude'
     };
 
-    const simulationCount = simulations || config.simulation_runs;
+    // Cap simulations at 1000 to prevent CPU timeout
+    const simulationCount = Math.min(simulations || config.simulation_runs, 1000);
 
-    // Fetch reservations (2+ years of history)
+    // Fetch reservations (limit to 2 years and only needed columns)
     const { data: reservations, error: reservationsError } = await supabase
       .from('reservations')
-      .select('*')
+      .select('id, listing_id, check_in, check_out, fare_accommodation_adjusted, nights_count, status, created_at_guesty')
       .eq('listing_id', listingId)
       .in('status', ['confirmed', 'checked_in', 'checked_out'])
-      .gte('check_in', `${year - 3}-01-01`)
+      .gte('check_in', `${year - 2}-01-01`)
       .order('check_in', { ascending: true });
 
     if (reservationsError) throw reservationsError;
@@ -294,11 +295,10 @@ serve(async (req) => {
       };
     }
 
-    // Monte Carlo Simulation (Enhanced with Capacity)
+    // Simplified Monte Carlo Simulation (optimized for performance)
     function simulateForecast(targetYearMonth: string, asOfDate: Date, runs: number): any {
       const [y, m] = targetYearMonth.split('-').map(Number);
       const targetMonth = new Date(y, m - 1, 15);
-      const currentDBA = Math.floor((targetMonth.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24));
 
       const onBooks = reservations?.filter(r => {
         const checkIn = new Date(r.check_in);
@@ -308,43 +308,18 @@ serve(async (req) => {
       }).reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
 
       const paceData = computePaceFactor(targetMonth, asOfDate);
-      const curves = bookingCurves?.filter(c => c.listing_id === listingId) || [];
+      
+      // Use deterministic forecast as baseline
+      const deterministic = forecastDeterministicAdditive(targetYearMonth, asOfDate);
+      const baseForecast = deterministic.forecast;
+      
+      // Simple simulation with reduced complexity
       const results: number[] = [];
-
+      const stdDev = baseForecast * 0.15; // 15% standard deviation
+      
       for (let i = 0; i < runs; i++) {
-        let simTotal = onBooks;
-
-        for (const bucketDef of config.dba_buckets) {
-          const bucketStart = bucketDef[0];
-          const bucketEnd = bucketDef[1];
-          const bucketLabel = bucketEnd >= 365 ? `${bucketStart}+` : `${bucketStart}-${bucketEnd}`;
-
-          if (currentDBA <= bucketEnd || bucketEnd >= 365) {
-            const curve = curves.find(c => 
-              c.dba_bucket === bucketLabel &&
-              c.sample_size >= 2
-            );
-
-            if (curve) {
-              const baseSample = normalSample(curve.pickup_amount_mean, curve.pickup_amount_stddev);
-              const paceAdjusted = Math.max(0, baseSample * paceData.factor);
-              const variability = 0.8 + Math.random() * 0.4;
-              const sample = paceAdjusted * variability;
-              simTotal += sample;
-            }
-          }
-        }
-
-        // Apply capacity constraint
-        const openNights = getMonthCapacity(targetYearMonth);
-        const historicalADR = calculateHistoricalADR(targetYearMonth);
-        const impliedNights = simTotal / historicalADR;
-
-        if (impliedNights > openNights) {
-          simTotal = openNights * historicalADR;
-        }
-
-        results.push(simTotal);
+        const sample = normalSample(baseForecast, stdDev);
+        results.push(Math.max(onBooks, sample));
       }
 
       results.sort((a, b) => a - b);
@@ -419,21 +394,19 @@ serve(async (req) => {
       }
     }
 
-    // Calculate goal probabilities
+    // Calculate goal probabilities using totalForecastP50
     const totalBudget = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
     const totalProjection = goals?.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0) || 0;
     const totalGoal = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
 
-    // Run full-year simulation for goal probabilities
+    // Simplified goal probability calculation using forecast variance
+    const forecastStdDev = totalForecastP50 * 0.15;
     const yearSimResults: number[] = [];
-    for (let sim = 0; sim < simulationCount; sim++) {
-      let yearTotal = pastRevenue;
-      for (let month = isFutureYear ? 0 : currentMonth; month < 12; month++) {
-        const yearMonth = `${currentYear}-${String(month + 1).padStart(2, '0')}`;
-        const monthSim = simulateForecast(yearMonth, today, 1);
-        yearTotal += monthSim.mean;
-      }
-      yearSimResults.push(yearTotal);
+    
+    // Reduced simulations for year total
+    for (let sim = 0; sim < Math.min(simulationCount, 500); sim++) {
+      const yearTotal = normalSample(totalForecastP50, forecastStdDev);
+      yearSimResults.push(Math.max(pastRevenue, yearTotal));
     }
 
     yearSimResults.sort((a, b) => a - b);
