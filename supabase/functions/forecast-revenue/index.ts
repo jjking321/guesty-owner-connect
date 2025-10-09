@@ -245,14 +245,51 @@ serve(async (req) => {
 
         // Only include buckets we haven't passed yet
         if (currentDBA <= bucketEnd || bucketEnd >= 365) {
-          // Find curve for this bucket (ideally same year-month from history)
-          const curve = curves.find(c => 
+          // Try exact year-month match first
+          let curve = curves.find(c => 
+            c.year_month === targetYearMonth &&
             c.dba_bucket === bucketLabel &&
             c.sample_size >= 2
           );
 
+          // FALLBACK: If no exact match, use same calendar month from previous year(s)
+          if (!curve) {
+            const [targetYear, targetMonthStr] = targetYearMonth.split('-');
+            const calendarMonth = targetMonthStr; // e.g., '04' for April
+            
+            // Find all curves for this calendar month from previous years
+            const historicalCurves = curves.filter(c => {
+              const [curveYear, curveMonth] = (c.year_month || '').split('-');
+              return curveMonth === calendarMonth &&
+                     c.dba_bucket === bucketLabel &&
+                     c.sample_size >= 2 &&
+                     parseInt(curveYear) < parseInt(targetYear);
+            });
+
+            if (historicalCurves.length > 0) {
+              // Average the pickup_amount_mean across historical years
+              const avgPickup = historicalCurves.reduce((sum, c) => 
+                sum + (Number(c.pickup_amount_mean) || 0), 0) / historicalCurves.length;
+              
+              const avgStddev = historicalCurves.reduce((sum, c) => 
+                sum + (Number(c.pickup_amount_stddev) || 0), 0) / historicalCurves.length;
+              
+              // Create a synthetic curve based on historical average
+              curve = {
+                pickup_amount_mean: avgPickup,
+                pickup_amount_stddev: avgStddev,
+                sample_size: Math.min(...historicalCurves.map(c => c.sample_size)),
+                listing_id: listingId,
+                year_month: targetYearMonth,
+                dba_bucket: bucketLabel
+              };
+              
+              console.log(`Historical fallback for ${targetYearMonth} bucket ${bucketLabel}: avg $${avgPickup.toFixed(0)} from ${historicalCurves.length} year(s)`);
+            }
+          }
+
           if (curve) {
-            expectedRemaining += curve.pickup_amount_mean;
+            expectedRemaining += Number(curve.pickup_amount_mean) || 0;
           }
         }
       }
@@ -260,6 +297,8 @@ serve(async (req) => {
       // Apply pace factor
       const paceData = computePaceFactor(targetMonth, asOfDate);
       const paceAdjustedRemaining = expectedRemaining * paceData.factor;
+      
+      console.log(`${targetYearMonth} - Base: $${expectedRemaining.toFixed(0)}, Pace: ${paceData.factor.toFixed(2)}, Adjusted: $${paceAdjustedRemaining.toFixed(0)}`);
 
       // Capacity constraint
       const openNights = getMonthCapacity(targetYearMonth);
