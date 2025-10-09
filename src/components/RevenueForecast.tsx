@@ -26,7 +26,8 @@ interface ForecastData {
   };
   totalForecast: {
     p50: number;
-    confidence: { lower: number; upper: number };
+    p10?: number; p25?: number; p75?: number; p90?: number;
+    confidence?: { lower: number; upper: number };
   };
   goalTargets: {
     budget: number;
@@ -39,20 +40,11 @@ interface ForecastData {
     goal: number;
   };
   monthlyForecasts: Array<{
-    month: number;
-    monthName: string;
-    isPast?: boolean;
-    actualRevenue?: number;
-    revenueOnBooks: number;
-    forecastedAdditional?: { p50: number; p10: number; p90: number };
-    remainingPickup?: number;
-    paceFactor?: number;
-    capacityUtilization?: number;
-    capacityConstrained?: boolean;
-    totalForecast: { p50: number; p10: number; p90: number };
-    forecast?: { p50: number; p10: number; p90: number };
-    bookingVelocity: number;
-    bookingWindowStatus: string;
+    month: string; // YYYY-MM
+    revenue_on_books: number;
+    additional_forecast: number;
+    total_forecast_p50: number;
+    velocity_factor?: number;
   }>;
   insights: {
     drivers: string[];
@@ -127,7 +119,25 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
       if (error) throw error;
 
-      setForecast(data);
+      if (data) {
+        setForecast({
+          listingId: data.listing_id,
+          year: data.year,
+          generated_at: data.generated_at,
+          forecastMethod: data.forecast_method,
+          paceFactor: data.pace_factor,
+          capacityUtilization: data.capacity_utilization,
+          dbaBreakdown: data.dba_breakdown,
+          revenueOnBooks: Number(data.revenue_on_books),
+          forecastedRevenue: data.forecasted_revenue as any,
+          totalForecast: data.total_forecast as any,
+          goalTargets: data.goal_targets as any,
+          goalProbabilities: data.goal_probabilities as any,
+          monthlyForecasts: data.monthly_forecasts as any,
+          insights: data.insights as any
+        });
+      }
+
       toast({
         title: "Forecast Updated",
         description: `Revenue forecast for ${selectedYear} has been recalculated`,
@@ -283,8 +293,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 ${Number(forecast.totalForecast?.p50 ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </p>
               <p className="text-sm text-muted-foreground">
-                {forecast.totalForecast.confidence?.lower && forecast.totalForecast.confidence?.upper ? (
-                  `80% Confidence: $${forecast.totalForecast.confidence.lower.toLocaleString()} - $${forecast.totalForecast.confidence.upper.toLocaleString()}`
+                {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined) ? (
+                  `80% Confidence: $${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
                 ) : (
                   'Confidence interval not available'
                 )}
@@ -292,15 +302,17 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               <div className="mt-4 pt-4 border-t">
                 <div className="grid grid-cols-3 gap-4 text-sm">
                   <div className="text-center">
-                    <p className="text-muted-foreground">Past Revenue</p>
+                    <p className="text-muted-foreground">On Books (Year)</p>
                     <p className="font-semibold">
-                      ${((forecast.totalForecast as any).pastRevenue || 0).toLocaleString()}
+                      ${Number(forecast.revenueOnBooks || 0).toLocaleString()}
                     </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-muted-foreground">Future Confirmed</p>
+                    <p className="text-muted-foreground">P10–P90 Range</p>
                     <p className="font-semibold">
-                      ${((forecast.totalForecast as any).futureConfirmed || 0).toLocaleString()}
+                      {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined)
+                        ? `$${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
+                        : '—'}
                     </p>
                   </div>
                   <div className="text-center">
@@ -387,59 +399,59 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {forecast.monthlyForecasts.map((month) => (
-                      <tr key={month.month} className="border-b">
-                        <td className="py-2 font-medium">{month.monthName}</td>
-                        <td className="py-2 text-right">
-                          {month.isPast ? (
-                            <span className="font-semibold">${(month.actualRevenue || 0).toLocaleString()}</span>
-                          ) : (
+                    {forecast.monthlyForecasts.map((m) => {
+                      const [yStr, mStr] = (m.month || '').split('-');
+                      const y = Number(yStr); const mo = Number(mStr) - 1;
+                      const monthDate = isNaN(y) || isNaN(mo) ? new Date() : new Date(y, mo, 1);
+                      const monthLabel = monthDate.toLocaleString('en-US', { month: 'short' });
+                      const today = new Date();
+                      const monthStartThisRender = new Date(today.getFullYear(), today.getMonth(), 1);
+                      const isPast = monthDate < monthStartThisRender && y <= today.getFullYear();
+                      const daysUntil = Math.floor((monthDate.getTime() - monthStartThisRender.getTime()) / (1000 * 60 * 60 * 24));
+                      const windowStatus = daysUntil < 0 ? 'closed' : daysUntil <= 90 ? 'closing' : 'open';
+                      const pace = m.velocity_factor;
+                      return (
+                        <tr key={m.month} className="border-b">
+                          <td className="py-2 font-medium">{monthLabel}</td>
+                          <td className="py-2 text-right">
                             <span className="text-muted-foreground">-</span>
-                          )}
-                        </td>
-                        <td className="py-2 text-right">
-                          {!month.isPast ? (
-                            `$${Math.round(Number(month.revenueOnBooks ?? 0)).toLocaleString()}`
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </td>
-                        <td className="py-2 text-right">
-                          {!month.isPast ? (
-                            `$${Math.round(Number((month.forecastedAdditional?.p50 || month.remainingPickup || 0))).toLocaleString()}`
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </td>
-                        <td className="py-2 text-right font-semibold">
-                          {!month.isPast ? (
-                            `$${Math.round(Number((month.totalForecast?.p50 || month.forecast?.p50 || 0))).toLocaleString()}`
-                          ) : (
-                            `$${Math.round(Number(month.actualRevenue || 0)).toLocaleString()}`
-                          )}
-                        </td>
-                        <td className="py-2 text-center">
-                          {!month.isPast && (month.paceFactor !== null && month.paceFactor !== undefined) ? (
-                            <span className={`text-xs font-medium ${
-                              month.paceFactor > 1.1 ? 'text-green-600' : 
-                              month.paceFactor < 0.9 ? 'text-red-600' : 
-                              'text-muted-foreground'
-                            }`}>
-                              {month.paceFactor.toFixed(2)}x
-                            </span>
-                          ) : !month.isPast ? (
-                            <span className={month.bookingVelocity >= 1 ? "text-green-600" : "text-red-600"}>
-                              {(month.bookingVelocity * 100).toFixed(0)}%
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </td>
-                        <td className="py-2 text-center">
-                          {!month.isPast ? getWindowIcon(month.bookingWindowStatus) : <span className="text-muted-foreground">-</span>}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="py-2 text-right">
+                            {!isPast ? (
+                              `$${Math.round(Number(m.revenue_on_books || 0)).toLocaleString()}`
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                          <td className="py-2 text-right">
+                            {!isPast ? (
+                              `$${Math.round(Number(m.additional_forecast || 0)).toLocaleString()}`
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                          <td className="py-2 text-right font-semibold">
+                            {!isPast ? (
+                              `$${Math.round(Number(m.total_forecast_p50 || 0)).toLocaleString()}`
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                          <td className="py-2 text-center">
+                            {!isPast && pace !== undefined ? (
+                              <span className={`text-xs font-medium ${pace > 1.1 ? 'text-green-600' : pace < 0.9 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                                {(pace * 100).toFixed(0)}%
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                          <td className="py-2 text-center">
+                            {!isPast ? getWindowIcon(windowStatus) : <span className="text-muted-foreground">-</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
