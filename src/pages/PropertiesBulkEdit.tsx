@@ -232,8 +232,8 @@ export default function PropertiesBulkEdit() {
       // Determine status based on forecast vs projection
       let status: "on-track" | "at-risk" | "behind" = "on-track";
       if (projectionTotal > 0) {
-        if (forecastGoalAchievement >= 95) status = "on-track";
-        else if (forecastGoalAchievement >= 80) status = "at-risk";
+        if (forecastProjectionAchievement >= 95) status = "on-track";
+        else if (forecastProjectionAchievement >= 80) status = "at-risk";
         else status = "behind";
       }
 

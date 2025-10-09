@@ -194,7 +194,7 @@ export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, 
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-2">
-                    {getAchievementIndicator(property.forecastGoalAchievement)}
+                    {getAchievementIndicator(property.forecastProjectionAchievement)}
                     <span className="font-medium">
                       {formatCurrency(property.forecastedRevenue)}
                     </span>
@@ -203,19 +203,19 @@ export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, 
                 <TableCell className="text-center">
                   <div className="flex flex-col items-center gap-1">
                     <span className="text-sm font-medium">
-                      {property.forecastGoalAchievement.toFixed(1)}%
+                      {property.forecastProjectionAchievement.toFixed(1)}%
                     </span>
                     <div className="w-full max-w-[100px] h-2 bg-muted rounded-full overflow-hidden">
                       <div
                         className={`h-full transition-all ${
-                          property.forecastGoalAchievement >= 95
+                          property.forecastProjectionAchievement >= 95
                             ? "bg-green-600"
-                            : property.forecastGoalAchievement >= 80
+                            : property.forecastProjectionAchievement >= 80
                             ? "bg-yellow-600"
                             : "bg-red-600"
                         }`}
                         style={{
-                          width: `${Math.min(property.forecastGoalAchievement, 100)}%`,
+                          width: `${Math.min(property.forecastProjectionAchievement, 100)}%`,
                         }}
                       />
                     </div>
