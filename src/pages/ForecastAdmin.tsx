@@ -124,14 +124,13 @@ export default function ForecastAdmin() {
         <div>
           <h1 className="text-3xl font-bold mb-2">Forecast System Administration</h1>
           <p className="text-muted-foreground">
-            Run ETL processes to prepare data for pace-aware forecasting
+            Prepare data and regenerate forecasts using the RevPAR velocity model
           </p>
         </div>
 
         <Alert>
           <AlertDescription>
-            <strong>First-time setup:</strong> Run these functions in order (1 → 2 → 3 → 4) to initialize the pace-aware forecasting system.
-            After the initial setup, you can regenerate forecasts as needed.
+            <strong>First-time setup:</strong> Run step 1 to prepare reservation data, then step 2 to generate forecasts using the RevPAR velocity model.
           </AlertDescription>
         </Alert>
 
@@ -165,65 +164,7 @@ export default function ForecastAdmin() {
             </CardContent>
           </Card>
 
-          {/* Step 2: Build Booking Curves */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <TrendingUp className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle>2. Build Booking Curves</CardTitle>
-                    <CardDescription>
-                      Analyze historical data to create DBA bucket pickup patterns (requires 2+ years of data)
-                    </CardDescription>
-                  </div>
-                </div>
-                {status['build-booking-curves'] && getStatusBadge(status['build-booking-curves'])}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Button
-                onClick={() => runFunction('build-booking-curves', 'Booking Curve Generation')}
-                disabled={loading['build-booking-curves']}
-              >
-                {loading['build-booking-curves'] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Run Step 2
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Step 3: Sync Capacity Calendar */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <Calendar className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <CardTitle>3. Sync Capacity Calendar</CardTitle>
-                    <CardDescription>
-                      Generate 365-day availability calendar and mark booked dates for capacity constraints
-                    </CardDescription>
-                  </div>
-                </div>
-                {status['sync-capacity-calendar'] && getStatusBadge(status['sync-capacity-calendar'])}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Button
-                onClick={() => runFunction('sync-capacity-calendar', 'Capacity Calendar Sync')}
-                disabled={loading['sync-capacity-calendar']}
-              >
-                {loading['sync-capacity-calendar'] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Run Step 3
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Step 4: Regenerate All Forecasts */}
+          {/* Step 2: Regenerate All Forecasts */}
           <Card className="border-2 border-primary">
             <CardHeader>
               <div className="flex items-start justify-between">
@@ -232,9 +173,9 @@ export default function ForecastAdmin() {
                     <RefreshCw className="h-5 w-5 text-primary" />
                   </div>
                   <div>
-                    <CardTitle>4. Regenerate All Forecasts</CardTitle>
+                    <CardTitle>2. Regenerate All Forecasts</CardTitle>
                     <CardDescription>
-                      Use the new pace-aware algorithm with booking curves and capacity constraints to regenerate all property forecasts
+                      Use the RevPAR velocity model (Baseline × Velocity) to regenerate all property forecasts
                     </CardDescription>
                   </div>
                 </div>
@@ -279,30 +220,32 @@ export default function ForecastAdmin() {
         <Card className="bg-muted/50">
           <CardHeader>
             <CardTitle>System Information</CardTitle>
-            <CardDescription>Understanding the pace-aware forecasting system</CardDescription>
+            <CardDescription>Understanding the RevPAR velocity forecasting model</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <h3 className="font-semibold mb-2">What's New:</h3>
+              <h3 className="font-semibold mb-2">How It Works:</h3>
               <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                <li>DBA (Days Before Arrival) bucketing for pickup patterns</li>
-                <li>Pace factor calculation (clipped between 0.6-1.4x)</li>
-                <li>Capacity constraint enforcement</li>
-                <li>Enhanced Monte Carlo simulation with booking curves</li>
-                <li>Per-month pace and capacity utilization tracking</li>
+                <li><strong>Baseline:</strong> Last year's actual monthly revenue for each month</li>
+                <li><strong>Velocity Factor:</strong> Current RevPAR ÷ Last Year RevPAR (same-store comparison)</li>
+                <li><strong>Forecast:</strong> Baseline × Velocity Factor (clipped between 0.5x - 2.0x)</li>
+                <li><strong>Same-Store Logic:</strong> Compares bookings confirmed "as of today" vs "same day last year"</li>
+                <li><strong>Monte Carlo Simulation:</strong> Applies ±20% noise to velocity for P10-P90 ranges</li>
               </ul>
             </div>
             <div>
-              <h3 className="font-semibold mb-2">DBA Buckets:</h3>
-              <p className="text-sm text-muted-foreground">
-                0-3, 4-7, 8-14, 15-30, 31-60, 61-90, 91-180, 181+ days before arrival
-              </p>
+              <h3 className="font-semibold mb-2">Key Benefits:</h3>
+              <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                <li>Intuitive: "Pacing 97% of last year" is instantly understandable</li>
+                <li>Fair Comparison: Same booking window comparison for accurate trends</li>
+                <li>Realistic: Uses actual historical performance as baseline</li>
+                <li>No Complex Dependencies: No booking curves or capacity calendar required</li>
+              </ul>
             </div>
             <div>
               <h3 className="font-semibold mb-2">Maintenance:</h3>
               <p className="text-sm text-muted-foreground">
-                The system should automatically rebuild booking curves nightly. 
-                Forecasts are regenerated when triggered manually or when new data arrives.
+                Forecasts update dynamically as new bookings arrive. Re-run step 2 anytime to refresh all forecasts with the latest data.
               </p>
             </div>
           </CardContent>
