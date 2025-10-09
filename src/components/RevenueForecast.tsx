@@ -399,23 +399,23 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                         </td>
                         <td className="py-2 text-right">
                           {!month.isPast ? (
-                            `$${Number(month.revenueOnBooks ?? 0).toLocaleString()}`
+                            `$${Math.round(Number(month.revenueOnBooks ?? 0)).toLocaleString()}`
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="py-2 text-right">
                           {!month.isPast ? (
-                            `$${Number((month.forecastedAdditional?.p50 || month.remainingPickup || 0)).toLocaleString()}`
+                            `$${Math.round(Number((month.forecastedAdditional?.p50 || month.remainingPickup || 0))).toLocaleString()}`
                           ) : (
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
                         <td className="py-2 text-right font-semibold">
                           {!month.isPast ? (
-                            `$${Number((month.totalForecast?.p50 || month.forecast?.p50 || 0)).toLocaleString()}`
+                            `$${Math.round(Number((month.totalForecast?.p50 || month.forecast?.p50 || 0))).toLocaleString()}`
                           ) : (
-                            `$${Number(month.actualRevenue || 0).toLocaleString()}`
+                            `$${Math.round(Number(month.actualRevenue || 0)).toLocaleString()}`
                           )}
                         </td>
                         <td className="py-2 text-center">
