@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Loader2, Database, TrendingUp, Calendar, RefreshCw } from 'lucide-react';
@@ -11,6 +12,58 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 export default function ForecastAdmin() {
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<Record<string, string>>({});
+  const [forecastProgress, setForecastProgress] = useState<{
+    progressId: string | null;
+    total: number;
+    completed: number;
+    failed: number;
+  }>({ progressId: null, total: 0, completed: 0, failed: 0 });
+
+  // Poll for forecast generation progress
+  useEffect(() => {
+    if (!forecastProgress.progressId) return;
+
+    const pollInterval = setInterval(async () => {
+      const { data, error } = await supabase
+        .from('forecast_generation_progress')
+        .select('*')
+        .eq('id', forecastProgress.progressId)
+        .single();
+
+      if (error) {
+        console.error('Error polling progress:', error);
+        return;
+      }
+
+      if (data) {
+        setForecastProgress(prev => ({
+          ...prev,
+          completed: data.completed_forecasts,
+          failed: data.failed_forecasts
+        }));
+
+        if (data.status === 'completed') {
+          setStatus(prev => ({ ...prev, 'generate-all-forecasts': 'success' }));
+          setLoading(prev => ({ ...prev, 'generate-all-forecasts': false }));
+          setForecastProgress({ progressId: null, total: 0, completed: 0, failed: 0 });
+          toast.success('All forecasts generated successfully', {
+            description: `${data.completed_forecasts} forecasts completed, ${data.failed_forecasts} failed`
+          });
+          clearInterval(pollInterval);
+        } else if (data.status === 'failed') {
+          setStatus(prev => ({ ...prev, 'generate-all-forecasts': 'error' }));
+          setLoading(prev => ({ ...prev, 'generate-all-forecasts': false }));
+          setForecastProgress({ progressId: null, total: 0, completed: 0, failed: 0 });
+          toast.error('Forecast generation failed', {
+            description: data.error_message || 'An error occurred'
+          });
+          clearInterval(pollInterval);
+        }
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [forecastProgress.progressId]);
 
   const runFunction = async (functionName: string, displayName: string) => {
     setLoading(prev => ({ ...prev, [functionName]: true }));
@@ -20,6 +73,20 @@ export default function ForecastAdmin() {
       const { data, error } = await supabase.functions.invoke(functionName);
 
       if (error) throw error;
+
+      // Special handling for forecast generation
+      if (functionName === 'generate-all-forecasts' && data?.progress_id) {
+        setForecastProgress({
+          progressId: data.progress_id,
+          total: data.total_forecasts,
+          completed: 0,
+          failed: 0
+        });
+        toast.info('Forecast generation started', {
+          description: `Processing ${data.total_properties} properties...`
+        });
+        return;
+      }
 
       setStatus(prev => ({ ...prev, [functionName]: 'success' }));
       toast.success(`${displayName} completed successfully`, {
@@ -32,7 +99,9 @@ export default function ForecastAdmin() {
         description: error.message || 'An error occurred'
       });
     } finally {
-      setLoading(prev => ({ ...prev, [functionName]: false }));
+      if (functionName !== 'generate-all-forecasts') {
+        setLoading(prev => ({ ...prev, [functionName]: false }));
+      }
     }
   };
 
@@ -172,7 +241,7 @@ export default function ForecastAdmin() {
                 {status['generate-all-forecasts'] && getStatusBadge(status['generate-all-forecasts'])}
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <Button
                 onClick={() => runFunction('generate-all-forecasts', 'Forecast Regeneration')}
                 disabled={loading['generate-all-forecasts']}
@@ -181,6 +250,28 @@ export default function ForecastAdmin() {
                 {loading['generate-all-forecasts'] && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Regenerate All Forecasts
               </Button>
+              
+              {loading['generate-all-forecasts'] && forecastProgress.progressId && (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Progress: {forecastProgress.completed} / {forecastProgress.total} forecasts
+                    </span>
+                    <span className="text-muted-foreground">
+                      {Math.round((forecastProgress.completed / forecastProgress.total) * 100)}%
+                    </span>
+                  </div>
+                  <Progress 
+                    value={(forecastProgress.completed / forecastProgress.total) * 100} 
+                    className="h-2"
+                  />
+                  {forecastProgress.failed > 0 && (
+                    <p className="text-xs text-destructive">
+                      {forecastProgress.failed} forecasts failed
+                    </p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

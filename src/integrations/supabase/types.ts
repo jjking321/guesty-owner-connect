@@ -143,6 +143,42 @@ export type Database = {
           },
         ]
       }
+      forecast_generation_progress: {
+        Row: {
+          completed_at: string | null
+          completed_forecasts: number | null
+          created_by: string | null
+          error_message: string | null
+          failed_forecasts: number | null
+          id: string
+          started_at: string | null
+          status: string | null
+          total_forecasts: number
+        }
+        Insert: {
+          completed_at?: string | null
+          completed_forecasts?: number | null
+          created_by?: string | null
+          error_message?: string | null
+          failed_forecasts?: number | null
+          id?: string
+          started_at?: string | null
+          status?: string | null
+          total_forecasts: number
+        }
+        Update: {
+          completed_at?: string | null
+          completed_forecasts?: number | null
+          created_by?: string | null
+          error_message?: string | null
+          failed_forecasts?: number | null
+          id?: string
+          started_at?: string | null
+          status?: string | null
+          total_forecasts?: number
+        }
+        Relationships: []
+      }
       forecast_settings: {
         Row: {
           created_at: string

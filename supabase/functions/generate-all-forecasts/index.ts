@@ -16,6 +16,12 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // Get user ID from the request
+    const authHeader = req.headers.get('Authorization');
+    const token = authHeader?.replace('Bearer ', '');
+    const { data: userData } = await supabase.auth.getUser(token || '');
+    const userId = userData?.user?.id;
+
     console.log('Starting background forecast generation for all properties...');
 
     // Get all active listings (exclude archived)
@@ -28,7 +34,27 @@ serve(async (req) => {
     if (listingsError) throw listingsError;
 
     const totalProperties = listings?.length || 0;
+    const totalForecasts = totalProperties * 2;
     console.log(`Found ${totalProperties} active properties - processing in background`);
+
+    // Create progress tracking record
+    const { data: progressRecord, error: progressError } = await supabase
+      .from('forecast_generation_progress')
+      .insert({
+        total_forecasts: totalForecasts,
+        completed_forecasts: 0,
+        failed_forecasts: 0,
+        status: 'running',
+        created_by: userId
+      })
+      .select()
+      .single();
+
+    if (progressError) {
+      console.error('Error creating progress record:', progressError);
+    }
+
+    const progressId = progressRecord?.id;
 
     // Start background task
     const backgroundTask = async () => {
@@ -94,9 +120,33 @@ serve(async (req) => {
         });
 
         console.log(`Batch complete. Progress: ${successCount} success, ${failureCount} failures`);
+
+        // Update progress
+        if (progressId) {
+          await supabase
+            .from('forecast_generation_progress')
+            .update({
+              completed_forecasts: successCount,
+              failed_forecasts: failureCount
+            })
+            .eq('id', progressId);
+        }
       }
 
       console.log(`Background forecast generation complete: ${successCount} success, ${failureCount} failures out of ${totalProperties * 2} total forecasts`);
+
+      // Mark progress as complete
+      if (progressId) {
+        await supabase
+          .from('forecast_generation_progress')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            completed_forecasts: successCount,
+            failed_forecasts: failureCount
+          })
+          .eq('id', progressId);
+      }
     };
 
     // Run in background using EdgeRuntime.waitUntil
@@ -108,8 +158,9 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         message: 'Forecast generation started in background',
+        progress_id: progressId,
         total_properties: totalProperties,
-        total_forecasts: totalProperties * 2,
+        total_forecasts: totalForecasts,
         estimated_duration_minutes: Math.ceil(totalProperties / 10 * 2)
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
