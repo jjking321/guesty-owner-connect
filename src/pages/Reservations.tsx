@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,8 @@ export default function Reservations() {
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
+  const [mostRecentReservation, setMostRecentReservation] = useState<Date | null>(null);
+  const [isSyncingNew, setIsSyncingNew] = useState(false);
   
   // Filter states
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
@@ -148,6 +150,16 @@ export default function Reservations() {
 
       setReservations(allReservations);
 
+      // Calculate most recent reservation update
+      if (allReservations.length > 0) {
+        const mostRecent = allReservations.reduce((latest, r) => {
+          if (!r.last_updated_at_guesty) return latest;
+          const rDate = new Date(r.last_updated_at_guesty);
+          return rDate > latest ? rDate : latest;
+        }, new Date(0));
+        setMostRecentReservation(mostRecent);
+      }
+
       // Load listings for display (exclude archived)
       const { data: listingsData, error: listingsError } = await supabase
         .from("listings")
@@ -214,6 +226,64 @@ export default function Reservations() {
     setMaxGuests("");
     setMinAccommodation("");
     setMaxAccommodation("");
+  };
+
+  const handleSyncNewReservations = async () => {
+    try {
+      setIsSyncingNew(true);
+      
+      // Get first guesty account
+      const { data: accounts } = await supabase
+        .from('guesty_accounts')
+        .select('id')
+        .limit(1)
+        .maybeSingle();
+      
+      if (!accounts) {
+        toast({
+          title: "No Guesty account found",
+          description: "Please set up a Guesty integration in Settings first.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const { data, error } = await supabase.functions.invoke('sync-new-reservations', {
+        body: { accountId: accounts.id }
+      });
+      
+      if (error) {
+        throw error;
+      }
+      
+      // Check if it's the initial sync required response
+      if (data?.requiresInitialSync) {
+        toast({
+          title: "Initial sync required",
+          description: "Please perform a full sync from the Settings page first.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      toast({
+        title: "Sync completed",
+        description: `${data.newOrUpdatedCount} reservations updated since ${new Date(data.cutoffDate).toLocaleDateString()}`,
+      });
+      
+      // Reload the data
+      await loadData();
+      
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      toast({
+        title: "Sync failed",
+        description: error.message || "An error occurred during sync",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncingNew(false);
+    }
   };
 
   
@@ -330,6 +400,18 @@ export default function Reservations() {
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Reservations</h2>
             <p className="text-muted-foreground">View and manage all your bookings</p>
+            {mostRecentReservation && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Most recent update: {mostRecentReservation.toLocaleString()}
+                {(() => {
+                  const ageHours = (Date.now() - mostRecentReservation.getTime()) / (1000 * 60 * 60);
+                  if (ageHours > 24) {
+                    return <span className="ml-2 text-yellow-600">(Data may be outdated - click "Sync New")</span>;
+                  }
+                  return null;
+                })()}
+              </p>
+            )}
           </div>
           <div className="flex gap-2">
             <Popover>
@@ -381,7 +463,24 @@ export default function Reservations() {
               <Filter className="mr-2 h-4 w-4" />
               {showFilters ? "Hide" : "Show"} Filters
             </Button>
-            <Button onClick={loadData} variant="outline">
+            <Button 
+              onClick={handleSyncNewReservations} 
+              disabled={isSyncingNew || loading}
+              variant="default"
+            >
+              {isSyncingNew ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Sync New
+                </>
+              )}
+            </Button>
+            <Button onClick={loadData} variant="outline" disabled={loading}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
             </Button>

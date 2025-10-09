@@ -3,6 +3,9 @@ project_id = "owsvuxxflhghlbrlhxst"
 [functions.sync-guesty-data]
 verify_jwt = false
 
+[functions.sync-new-reservations]
+verify_jwt = false
+
 [functions.suggest-property-goals]
 verify_jwt = true
 
@@ -10,6 +13,9 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.generate-all-forecasts]
+verify_jwt = false
+
+[functions.generate-missing-forecasts]
 verify_jwt = false
 
 [functions.generate-bulk-goals]
