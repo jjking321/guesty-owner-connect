@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle2, XCircle, Loader2, X } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, X, StopCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 interface SyncJob {
   id: string;
@@ -21,8 +22,10 @@ interface SyncProgressCardProps {
 }
 
 export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps) {
+  const { toast } = useToast();
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
   useEffect(() => {
     // Reset dismissed state when account or sync type changes
@@ -88,6 +91,30 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     setSyncJob(null);
   };
 
+  const handleStop = async () => {
+    if (!syncJob) return;
+    
+    try {
+      setStopping(true);
+      const { error } = await supabase.rpc('cancel_sync_job', { job_id: syncJob.id });
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Sync stopped",
+        description: "The sync operation has been cancelled.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to stop sync",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setStopping(false);
+    }
+  };
+
   if (!syncJob || dismissed) return null;
 
   const progress = syncJob.total_items && syncJob.items_synced
@@ -123,6 +150,20 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
                   {syncJob.items_synced?.toLocaleString() || 0}
                   {syncJob.total_items && ` / ${syncJob.total_items.toLocaleString()}`}
                 </div>
+              )}
+              
+              {/* Stop button - only show for running syncs */}
+              {syncJob.status === 'running' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleStop}
+                  disabled={stopping}
+                >
+                  <StopCircle className="h-3 w-3 mr-1" />
+                  Stop
+                </Button>
               )}
               
               {/* Dismiss button - only show for completed/failed */}

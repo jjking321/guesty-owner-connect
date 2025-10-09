@@ -643,6 +643,10 @@ export type Database = {
         Args: { _token: string; _user_id: string }
         Returns: Json
       }
+      cancel_sync_job: {
+        Args: { job_id: string }
+        Returns: undefined
+      }
       get_ytd_revenue_by_listing: {
         Args: { end_date: string; target_year: number }
         Returns: {
