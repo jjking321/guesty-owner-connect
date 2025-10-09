@@ -55,7 +55,7 @@ interface ForecastData {
     bookingWindowStatus: string;
   }>;
   insights: {
-    keyDrivers: string[];
+    drivers: string[];
     risks: string[];
     opportunities: string[];
   };
@@ -449,13 +449,13 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
             <div className="space-y-3">
               <h4 className="text-sm font-medium">Key Insights</h4>
               
-              {forecast.insights.keyDrivers.length > 0 && (
+              {forecast.insights.drivers?.length > 0 && (
                 <div className="flex gap-2 text-sm">
                   <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="font-medium text-green-600">Drivers</p>
                     <ul className="list-disc list-inside text-muted-foreground">
-                      {forecast.insights.keyDrivers.map((driver, i) => (
+                      {forecast.insights.drivers.map((driver, i) => (
                         <li key={i}>{driver}</li>
                       ))}
                     </ul>
@@ -463,7 +463,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 </div>
               )}
 
-              {forecast.insights.risks.length > 0 && (
+              {forecast.insights.risks?.length > 0 && (
                 <div className="flex gap-2 text-sm">
                   <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
                   <div>
@@ -477,7 +477,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 </div>
               )}
 
-              {forecast.insights.opportunities.length > 0 && (
+              {forecast.insights.opportunities?.length > 0 && (
                 <div className="flex gap-2 text-sm">
                   <DollarSign className="h-4 w-4 text-yellow-600 mt-0.5 flex-shrink-0" />
                   <div>
