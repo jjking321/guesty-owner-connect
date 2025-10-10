@@ -259,7 +259,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               Revenue Forecast
             </CardTitle>
             <CardDescription>
-              AI-powered year-end revenue projection using Monte Carlo simulation
+              AI-powered year-end revenue projection
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
