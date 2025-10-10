@@ -80,29 +80,39 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
   const loadActualRevenue = async () => {
     try {
-      // Load checked_out reservations for YTD actuals
-      const { data: actualsData, error: actualsError } = await supabase
-        .from("reservations")
-        .select("check_in, fare_accommodation_adjusted")
+      // Load nightly allocations for true actuals (completed nights only)
+      const { data: nightsData, error: nightsError } = await supabase
+        .from("reservation_nights")
+        .select("night_date, revenue_allocation")
         .eq("listing_id", listingId)
-        .eq("status", "checked_out")
-        .gte("check_in", `${selectedYear}-01-01`)
-        .lt("check_in", `${selectedYear + 1}-01-01`);
+        .gte("night_date", `${selectedYear}-01-01`)
+        .lt("night_date", `${selectedYear + 1}-01-01`);
 
-      if (actualsError) throw actualsError;
+      if (nightsError) throw nightsError;
 
       const monthlyActuals: Record<string, number> = {};
       let yearTotal = 0;
 
-      if (actualsData) {
-        actualsData.forEach((row) => {
-          if (row.check_in && row.fare_accommodation_adjusted) {
-            const monthKey = row.check_in.substring(0, 7);
-            monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + row.fare_accommodation_adjusted;
-            yearTotal += row.fare_accommodation_adjusted;
-          }
-        });
-      }
+      const today = new Date();
+      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+
+      nightsData?.forEach((row: any) => {
+        const nightDate = row.night_date ? new Date(row.night_date) : null;
+        if (!nightDate) return;
+        const include =
+          selectedYear < today.getFullYear()
+            ? true
+            : selectedYear > today.getFullYear()
+            ? false
+            : nightDate < monthStart;
+
+        if (include && row.revenue_allocation != null) {
+          const monthKey = String(row.night_date).substring(0, 7);
+          const val = Number(row.revenue_allocation) || 0;
+          monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + val;
+          yearTotal += val;
+        }
+      });
 
       setActualRevenue({ yearTotal, monthlyActuals });
 
