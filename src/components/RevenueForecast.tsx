@@ -65,7 +65,6 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
     yearTotal: number;
     monthlyActuals: Record<string, number>;
   }>({ yearTotal: 0, monthlyActuals: {} });
-  const [onBooksRevenue, setOnBooksRevenue] = useState<number>(0);
   
   const currentYear = new Date().getFullYear();
   const lastYear = currentYear - 1;
@@ -80,57 +79,30 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
   const loadActualRevenue = async () => {
     try {
-      // Load nightly allocations for true actuals (completed nights only)
-      const { data: nightsData, error: nightsError } = await supabase
-        .from("reservation_nights")
-        .select("night_date, revenue_allocation")
-        .eq("listing_id", listingId)
-        .gte("night_date", `${selectedYear}-01-01`)
-        .lt("night_date", `${selectedYear + 1}-01-01`);
-
-      if (nightsError) throw nightsError;
-
-      const monthlyActuals: Record<string, number> = {};
-      let yearTotal = 0;
-
-      const today = new Date();
-      const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-
-      nightsData?.forEach((row: any) => {
-        const nightDate = row.night_date ? new Date(row.night_date) : null;
-        if (!nightDate) return;
-        const include =
-          selectedYear < today.getFullYear()
-            ? true
-            : selectedYear > today.getFullYear()
-            ? false
-            : nightDate < monthStart;
-
-        if (include && row.revenue_allocation != null) {
-          const monthKey = String(row.night_date).substring(0, 7);
-          const val = Number(row.revenue_allocation) || 0;
-          monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + val;
-          yearTotal += val;
-        }
-      });
-
-      setActualRevenue({ yearTotal, monthlyActuals });
-
-      // Load all confirmed/checked_in/checked_out reservations for on books
-      const { data: onBooksData, error: onBooksError } = await supabase
+      const { data, error } = await supabase
         .from("reservations")
-        .select("fare_accommodation_adjusted")
+        .select("check_in, fare_accommodation_adjusted")
         .eq("listing_id", listingId)
         .in("status", ["confirmed", "checked_in", "checked_out"])
         .gte("check_in", `${selectedYear}-01-01`)
         .lt("check_in", `${selectedYear + 1}-01-01`);
 
-      if (onBooksError) throw onBooksError;
+      if (error) throw error;
 
-      const onBooksTotal = onBooksData?.reduce((sum, row) => 
-        sum + (row.fare_accommodation_adjusted || 0), 0) || 0;
-      
-      setOnBooksRevenue(onBooksTotal);
+      const monthlyActuals: Record<string, number> = {};
+      let yearTotal = 0;
+
+      if (data) {
+        data.forEach((row) => {
+          if (row.check_in && row.fare_accommodation_adjusted) {
+            const monthKey = row.check_in.substring(0, 7);
+            monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + row.fare_accommodation_adjusted;
+            yearTotal += row.fare_accommodation_adjusted;
+          }
+        });
+      }
+
+      setActualRevenue({ yearTotal, monthlyActuals });
     } catch (err) {
       console.error("Error loading actual revenue:", err);
     }
@@ -399,7 +371,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                     <div className="text-center">
                       <p className="text-muted-foreground">On Books (Year)</p>
                       <p className="font-semibold">
-                        ${Math.round(onBooksRevenue).toLocaleString()}
+                        ${Number(forecast.revenueOnBooks || 0).toLocaleString()}
                       </p>
                     </div>
                     {selectedYear === currentYear ? (
