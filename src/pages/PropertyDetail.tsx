@@ -471,12 +471,34 @@ export default function PropertyDetail() {
       };
     }
 
-    const totalRevenue = reservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
-    const totalNights = reservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
-    const totalGuests = reservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
+    // Filter to last 12 months only
+    const twelveMonthsAgo = subMonths(new Date(), 12);
+    const last12MonthsReservations = reservations.filter((r) => {
+      if (!r.check_in) return false;
+      const checkInDate = parseISO(r.check_in);
+      return checkInDate >= twelveMonthsAgo;
+    });
+
+    if (last12MonthsReservations.length === 0) {
+      return {
+        totalReservations: 0,
+        totalRevenue: 0,
+        totalNights: 0,
+        averageADR: 0,
+        averageNightsPerReservation: 0,
+        totalGuests: 0,
+        averageGuestsPerReservation: 0,
+        overallOccupancy: 0,
+        revPAR: 0,
+      };
+    }
+
+    const totalRevenue = last12MonthsReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+    const totalNights = last12MonthsReservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
+    const totalGuests = last12MonthsReservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
     const averageADR = totalNights > 0 ? totalRevenue / totalNights : 0;
-    const averageNightsPerReservation = totalNights / reservations.length;
-    const averageGuestsPerReservation = totalGuests / reservations.length;
+    const averageNightsPerReservation = totalNights / last12MonthsReservations.length;
+    const averageGuestsPerReservation = totalGuests / last12MonthsReservations.length;
 
     // Calculate overall occupancy for last 12 months
     const monthlyOccupancy = calculateMonthlyOccupancy();
@@ -488,7 +510,7 @@ export default function PropertyDetail() {
     const revPAR = averageADR * (overallOccupancy / 100);
 
     return {
-      totalReservations: reservations.length,
+      totalReservations: last12MonthsReservations.length,
       totalRevenue,
       totalNights,
       averageADR,
