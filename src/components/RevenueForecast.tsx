@@ -65,6 +65,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
     yearTotal: number;
     monthlyActuals: Record<string, number>;
   }>({ yearTotal: 0, monthlyActuals: {} });
+  const [onBooksRevenue, setOnBooksRevenue] = useState<number>(0);
   
   const currentYear = new Date().getFullYear();
   const lastYear = currentYear - 1;
@@ -79,8 +80,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
   const loadActualRevenue = async () => {
     try {
-      // Only load checked_out reservations for true YTD actuals
-      const { data, error } = await supabase
+      // Load checked_out reservations for YTD actuals
+      const { data: actualsData, error: actualsError } = await supabase
         .from("reservations")
         .select("check_in, fare_accommodation_adjusted")
         .eq("listing_id", listingId)
@@ -88,13 +89,13 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
         .gte("check_in", `${selectedYear}-01-01`)
         .lt("check_in", `${selectedYear + 1}-01-01`);
 
-      if (error) throw error;
+      if (actualsError) throw actualsError;
 
       const monthlyActuals: Record<string, number> = {};
       let yearTotal = 0;
 
-      if (data) {
-        data.forEach((row) => {
+      if (actualsData) {
+        actualsData.forEach((row) => {
           if (row.check_in && row.fare_accommodation_adjusted) {
             const monthKey = row.check_in.substring(0, 7);
             monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + row.fare_accommodation_adjusted;
@@ -104,6 +105,22 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
       }
 
       setActualRevenue({ yearTotal, monthlyActuals });
+
+      // Load all confirmed/checked_in/checked_out reservations for on books
+      const { data: onBooksData, error: onBooksError } = await supabase
+        .from("reservations")
+        .select("fare_accommodation_adjusted")
+        .eq("listing_id", listingId)
+        .in("status", ["confirmed", "checked_in", "checked_out"])
+        .gte("check_in", `${selectedYear}-01-01`)
+        .lt("check_in", `${selectedYear + 1}-01-01`);
+
+      if (onBooksError) throw onBooksError;
+
+      const onBooksTotal = onBooksData?.reduce((sum, row) => 
+        sum + (row.fare_accommodation_adjusted || 0), 0) || 0;
+      
+      setOnBooksRevenue(onBooksTotal);
     } catch (err) {
       console.error("Error loading actual revenue:", err);
     }
@@ -372,7 +389,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                     <div className="text-center">
                       <p className="text-muted-foreground">On Books (Year)</p>
                       <p className="font-semibold">
-                        ${Number(forecast.revenueOnBooks || 0).toLocaleString()}
+                        ${Math.round(onBooksRevenue).toLocaleString()}
                       </p>
                     </div>
                     {selectedYear === currentYear ? (
