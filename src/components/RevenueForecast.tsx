@@ -79,12 +79,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
   const loadActualRevenue = async () => {
     try {
-      // Load only checked_out reservations for actual realized revenue
       const { data, error } = await supabase
         .from("reservations")
         .select("check_in, fare_accommodation_adjusted")
         .eq("listing_id", listingId)
-        .eq("status", "checked_out")
+        .in("status", ["confirmed", "checked_in", "checked_out"])
         .gte("check_in", `${selectedYear}-01-01`)
         .lt("check_in", `${selectedYear + 1}-01-01`);
 
