@@ -548,31 +548,35 @@ Deno.serve(async (req) => {
 
         await updateSyncJob(supabase, jobId, { progress_message: 'Saving listings to database...' });
 
-        const listingsToUpsert = guestyListings.map((listing: GuestyListing) => {
-          // Extract thumbnail from picture or pictures array
-          let thumbnail = null;
-          if (listing.picture?.thumbnail) {
-            thumbnail = listing.picture.thumbnail;
-          } else if (listing.pictures && listing.pictures.length > 0 && listing.pictures[0].thumbnail) {
-            thumbnail = listing.pictures[0].thumbnail;
-          }
-          
-          return {
-            id: listing._id,
-            guesty_account_id: accountId,
-            created_at_guesty: listing.createdAt,
-            nickname: listing.nickname,
-            status: listing.status,
-            is_listed: listing.isListed,
-            active: listing.active,
-            property_type: listing.propertyType,
-            accommodates: listing.accommodates,
-            bedrooms: listing.bedrooms,
-            address: listing.address,
-            thumbnail: thumbnail,
-            updated_at: new Date().toISOString(),
-          };
-        });
+  const listingsToUpsert = guestyListings.map((listing: GuestyListing) => {
+    // Extract thumbnail from picture or pictures array
+    let thumbnail = null;
+    if (listing.picture?.thumbnail) {
+      thumbnail = listing.picture.thumbnail;
+    } else if (listing.pictures && listing.pictures.length > 0 && listing.pictures[0].thumbnail) {
+      thumbnail = listing.pictures[0].thumbnail;
+    }
+    
+    // Store the full pictures array for higher quality images
+    const pictures = listing.pictures || [];
+    
+    return {
+      id: listing._id,
+      guesty_account_id: accountId,
+      created_at_guesty: listing.createdAt,
+      nickname: listing.nickname,
+      status: listing.status,
+      is_listed: listing.isListed,
+      active: listing.active,
+      property_type: listing.propertyType,
+      accommodates: listing.accommodates,
+      bedrooms: listing.bedrooms,
+      address: listing.address,
+      thumbnail: thumbnail,
+      pictures: pictures,
+      updated_at: new Date().toISOString(),
+    };
+  });
 
         // Deduplicate listings by ID (keep last occurrence)
         const uniqueListings = Array.from(

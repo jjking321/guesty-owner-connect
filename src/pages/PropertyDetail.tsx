@@ -95,6 +95,18 @@ export default function PropertyDetail() {
     return parts.join(", ") || "N/A";
   };
 
+  const getBestQualityImage = (listing: any) => {
+    // Try to get regular or original from pictures array first
+    if (listing.pictures && Array.isArray(listing.pictures) && listing.pictures.length > 0) {
+      const firstPicture = listing.pictures[0];
+      // Prefer original, then regular, then thumbnail
+      return firstPicture.original || firstPicture.regular || firstPicture.thumbnail;
+    }
+    
+    // Fall back to thumbnail field
+    return listing.thumbnail || "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800&h=600&fit=crop";
+  };
+
   // Calculate year-over-year occupancy comparison
 
   const calculateYearOverYearOccupancy = () => {
@@ -544,7 +556,7 @@ export default function PropertyDetail() {
           <Card className="md:col-span-2 overflow-hidden">
             <div className="aspect-video w-full overflow-hidden bg-muted">
               <img
-                src={listing.thumbnail || "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800&h=600&fit=crop"}
+                src={getBestQualityImage(listing)}
                 alt={listing.nickname || "Property"}
                 className="w-full h-full object-cover"
                 onError={(e) => {

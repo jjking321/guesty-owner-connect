@@ -298,6 +298,7 @@ export type Database = {
           is_listed: boolean | null
           nickname: string | null
           owner_id: string | null
+          pictures: Json | null
           property_type: string | null
           status: string | null
           thumbnail: string | null
@@ -316,6 +317,7 @@ export type Database = {
           is_listed?: boolean | null
           nickname?: string | null
           owner_id?: string | null
+          pictures?: Json | null
           property_type?: string | null
           status?: string | null
           thumbnail?: string | null
@@ -334,6 +336,7 @@ export type Database = {
           is_listed?: boolean | null
           nickname?: string | null
           owner_id?: string | null
+          pictures?: Json | null
           property_type?: string | null
           status?: string | null
           thumbnail?: string | null
