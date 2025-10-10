@@ -471,15 +471,15 @@ export default function PropertyDetail() {
       };
     }
 
-    // Filter to last 12 months only
-    const twelveMonthsAgo = subMonths(new Date(), 12);
-    const last12MonthsReservations = reservations.filter((r) => {
+    // Filter to current year only
+    const currentYear = new Date().getFullYear();
+    const currentYearReservations = reservations.filter((r) => {
       if (!r.check_in) return false;
       const checkInDate = parseISO(r.check_in);
-      return checkInDate >= twelveMonthsAgo;
+      return checkInDate.getFullYear() === currentYear;
     });
 
-    if (last12MonthsReservations.length === 0) {
+    if (currentYearReservations.length === 0) {
       return {
         totalReservations: 0,
         totalRevenue: 0,
@@ -493,24 +493,28 @@ export default function PropertyDetail() {
       };
     }
 
-    const totalRevenue = last12MonthsReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
-    const totalNights = last12MonthsReservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
-    const totalGuests = last12MonthsReservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
+    const totalRevenue = currentYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+    const totalNights = currentYearReservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
+    const totalGuests = currentYearReservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
     const averageADR = totalNights > 0 ? totalRevenue / totalNights : 0;
-    const averageNightsPerReservation = totalNights / last12MonthsReservations.length;
-    const averageGuestsPerReservation = totalGuests / last12MonthsReservations.length;
+    const averageNightsPerReservation = totalNights / currentYearReservations.length;
+    const averageGuestsPerReservation = totalGuests / currentYearReservations.length;
 
-    // Calculate overall occupancy for last 12 months
+    // Calculate overall occupancy for current year (Jan-Dec or Jan-current month)
     const monthlyOccupancy = calculateMonthlyOccupancy();
-    const overallOccupancy = monthlyOccupancy.length > 0
-      ? monthlyOccupancy.reduce((sum, month) => sum + month.occupancyRate, 0) / monthlyOccupancy.length
+    const currentYearMonths = monthlyOccupancy.filter(m => {
+      const monthDate = parseISO(m.monthKey + '-01');
+      return monthDate.getFullYear() === currentYear;
+    });
+    const overallOccupancy = currentYearMonths.length > 0
+      ? currentYearMonths.reduce((sum, month) => sum + month.occupancyRate, 0) / currentYearMonths.length
       : 0;
 
     // Calculate RevPAR = ADR × Occupancy Rate
     const revPAR = averageADR * (overallOccupancy / 100);
 
     return {
-      totalReservations: last12MonthsReservations.length,
+      totalReservations: currentYearReservations.length,
       totalRevenue,
       totalNights,
       averageADR,
