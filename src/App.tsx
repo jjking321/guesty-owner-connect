@@ -18,6 +18,7 @@ import PropertiesBulkEdit from "./pages/PropertiesBulkEdit";
 import Owners from "./pages/Owners";
 import OwnerDetail from "./pages/OwnerDetail";
 import ForecastAdmin from "./pages/ForecastAdmin";
+import Reviews from "./pages/Reviews";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +45,7 @@ const App = () => (
           <Route path="/listings/:id" element={<PropertyDetail />} />
           <Route path="/properties/bulk-edit" element={<PropertiesBulkEdit />} />
           <Route path="/reservations" element={<Reservations />} />
+          <Route path="/reviews" element={<Reviews />} />
           <Route path="/groups" element={<Groups />} />
           <Route path="/groups/:id" element={<GroupDetail />} />
           <Route path="/owners" element={<Owners />} />
