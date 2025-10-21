@@ -244,6 +244,37 @@ export default function GroupDetail() {
     enabled: listingIds.length > 0,
   });
 
+  // Fetch capacity calendar data for occupancy calculation
+  const { data: capacityData } = useQuery({
+    queryKey: ["group-capacity", listingIds, dateRange.from, dateRange.to],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("capacity_calendar")
+          .select("listing_id, date, is_available")
+          .in("listing_id", listingIds)
+          .gte("date", format(dateRange.from, "yyyy-MM-dd"))
+          .lte("date", format(dateRange.to, "yyyy-MM-dd"))
+          .order("date", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
+    },
+    enabled: listingIds.length > 0,
+  });
 
   const { data: goals } = useQuery({
     queryKey: ["group-goals", listingIds, dateRange.from],
@@ -299,6 +330,12 @@ export default function GroupDetail() {
 
   const totalReservations = filteredReservations.length;
   const totalNights = reservationNights?.length || 0;
+
+  // Calculate overall occupancy
+  const totalAvailableNights = capacityData?.filter(c => c.is_available).length || 0;
+  const overallOccupancy = totalAvailableNights > 0 
+    ? (totalNights / totalAvailableNights) * 100 
+    : 0;
 
   // Check if data is incomplete (reservations exist but nights data is missing)
   const hasReservations = totalReservations > 0;
@@ -830,7 +867,7 @@ export default function GroupDetail() {
           </Alert>
         )}
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-5">
           <MetricCard
             title="Total Revenue"
             value={`$${totalRevenue.toLocaleString()}`}
@@ -845,6 +882,12 @@ export default function GroupDetail() {
             title="Total Nights"
             value={totalNights.toString()}
             icon={TrendingUp}
+          />
+          <MetricCard
+            title="Overall Occupancy"
+            value={`${overallOccupancy.toFixed(1)}%`}
+            icon={TrendingUp}
+            description={`${totalNights.toLocaleString()} / ${totalAvailableNights.toLocaleString()} nights`}
           />
           <MetricCard
             title="Properties"
