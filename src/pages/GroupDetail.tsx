@@ -170,7 +170,7 @@ export default function GroupDetail() {
   ) || [];
 
   const { data: reservations, isLoading: isReservationsLoading } = useQuery({
-    queryKey: ["group-reservations", listingIds, dateRange.from, dateRange.to],
+    queryKey: ["group-reservations", listingIds, dateRange.from.getFullYear()],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
