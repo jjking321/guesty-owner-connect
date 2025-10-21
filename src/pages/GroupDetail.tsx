@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -174,11 +174,15 @@ export default function GroupDetail() {
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
+      // Expand date range to include previous year for year-over-year comparison
+      const startDate = new Date(dateRange.from);
+      startDate.setFullYear(startDate.getFullYear() - 1);
+
       const { data, error } = await supabase
         .from("reservations")
         .select("*")
         .in("listing_id", listingIds)
-        .gte("check_out", format(dateRange.from, "yyyy-MM-dd"))
+        .gte("check_out", format(startDate, "yyyy-MM-dd"))
         .lte("check_in", format(dateRange.to, "yyyy-MM-dd"))
         .in("status", ["confirmed", "checked_in", "checked_out"]);
 
@@ -287,6 +291,39 @@ export default function GroupDetail() {
       totalOnBooks: acc.totalOnBooks + revenueOnBooks,
     };
   }, { totalProjected: 0, totalOnBooks: 0 });
+
+  // Calculate aggregated monthly forecast for TrendChart
+  const aggregatedMonthlyForecast = useMemo(() => {
+    if (!forecasts || forecasts.length === 0) return null;
+
+    const monthlyData: { [key: string]: { p50: number, onBooks: number } } = {};
+
+    // Initialize all 12 months
+    for (let i = 1; i <= 12; i++) {
+      const monthKey = `${dateRange.from.getFullYear()}-${String(i).padStart(2, '0')}`;
+      monthlyData[monthKey] = { p50: 0, onBooks: 0 };
+    }
+
+    // Aggregate each property's monthly forecast
+    forecasts.forEach(forecast => {
+      const monthlyForecasts = (forecast.monthly_forecasts as any[]) || [];
+      monthlyForecasts.forEach((mf: any) => {
+        const month = mf.month;
+        if (monthlyData[month]) {
+          monthlyData[month].p50 += mf.total_forecast?.p50 || 0;
+          monthlyData[month].onBooks += mf.revenue_on_books || 0;
+        }
+      });
+    });
+
+    return {
+      monthly_forecasts: Object.entries(monthlyData).map(([month, data]) => ({
+        month,
+        totalForecast: { p50: data.p50 },
+        revenue_on_books: data.onBooks,
+      })),
+    };
+  }, [forecasts, dateRange.from]);
 
   // Calculate goal probabilities (average across all properties)
   const avgGoalProbabilities = forecasts?.reduce((acc, f: any) => {
@@ -849,7 +886,7 @@ export default function GroupDetail() {
                   revparData={revparData}
                   goalsData={goals || []}
                   reservations={reservations || []}
-                  revenueForecast={aggregatedForecast}
+                  revenueForecast={aggregatedMonthlyForecast}
                 />
               </CardContent>
             </Card>

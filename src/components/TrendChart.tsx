@@ -26,58 +26,31 @@ const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep
 export function TrendChart({ occupancyData, revenueData, revparData, goalsData, reservations, revenueForecast }: TrendChartProps) {
   const [activeTab, setActiveTab] = useState<"occupancy" | "revenue" | "revpar">("occupancy");
   const [showComparison, setShowComparison] = useState(true);
-  const [showGoals, setShowGoals] = useState(false);
   const [showForecast, setShowForecast] = useState(false);
 
-  // Calculate revenue with goals and forecast overlay
-  const revenueWithGoals = useMemo(() => {
-    if (activeTab !== "revenue") return revenueData;
+  // Add forecast overlay to revenue data
+  const revenueWithForecast = useMemo(() => {
+    if (activeTab !== "revenue" || !showForecast || !revenueForecast) return revenueData;
 
-    const currentYear = new Date().getFullYear();
-    
     return revenueData.map((dataPoint, index) => {
-      const month = index + 1;
-      const monthGoal = goalsData.find(g => g.month === month);
-      
-      // Calculate actual revenue for this month
-      const actualRevenue = reservations
-        .filter(r => {
-          if (!r.check_in) return false;
-          const checkIn = new Date(r.check_in);
-          return checkIn.getFullYear() === currentYear && 
-                 checkIn.getMonth() === index &&
-                 ["confirmed", "checked_in", "checked_out"].includes(r.status);
-        })
-        .reduce((sum, r) => {
-          const revenue = parseFloat(r.fare_accommodation_adjusted || 0);
-          const nightsCount = r.nights_count || 0;
-          return sum + (nightsCount > 0 ? revenue / nightsCount : 0);
-        }, 0) * (reservations.filter(r => {
-          if (!r.check_in) return false;
-          const checkIn = new Date(r.check_in);
-          return checkIn.getFullYear() === currentYear && checkIn.getMonth() === index;
-        }).reduce((sum, r) => sum + (r.nights_count || 0), 0));
-
       // Get forecast data for this month if available
-      // Handle both the raw DB format and the formatted format
-      const monthlyForecasts = revenueForecast?.monthly_forecasts || revenueForecast?.monthlyForecasts;
-      const monthForecast = monthlyForecasts?.find((f: any) => f.month === index);
+      const monthlyForecasts = revenueForecast?.monthly_forecasts;
+      const monthForecast = monthlyForecasts?.find((f: any) => {
+        const forecastMonth = f.month.split('-')[1]; // Extract month from "2025-01"
+        return parseInt(forecastMonth) === index + 1;
+      });
 
       return {
         ...dataPoint,
-        actual: Math.round(actualRevenue),
-        budget: showGoals && monthGoal?.budget_revenue ? Math.round(monthGoal.budget_revenue) : undefined,
-        projection: showGoals && monthGoal?.projection_revenue ? Math.round(monthGoal.projection_revenue) : undefined,
-        goal: showGoals && monthGoal?.goal_revenue ? Math.round(monthGoal.goal_revenue) : undefined,
-        forecast: showForecast && monthForecast?.totalForecast?.p50 ? Math.round(monthForecast.totalForecast.p50) : undefined,
+        forecast: monthForecast?.totalForecast?.p50 ? Math.round(monthForecast.totalForecast.p50) : undefined,
       };
     });
-  }, [revenueData, goalsData, reservations, revenueForecast, showGoals, showForecast, activeTab]);
+  }, [revenueData, revenueForecast, showForecast, activeTab]);
 
   const data = activeTab === "occupancy" 
     ? occupancyData 
     : activeTab === "revenue" 
-    ? revenueWithGoals 
+    ? revenueWithForecast
     : revparData;
   const isOccupancy = activeTab === "occupancy";
   const isRevPAR = activeTab === "revpar";
@@ -136,18 +109,6 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
                 Compare with Last Year
               </Label>
             </div>
-            {isRevenue && goalsData.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="goals"
-                  checked={showGoals}
-                  onCheckedChange={(checked) => setShowGoals(checked as boolean)}
-                />
-                <Label htmlFor="goals" className="text-sm font-normal cursor-pointer">
-                  Show Goals
-                </Label>
-              </div>
-            )}
             {isRevenue && revenueForecast && (
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -212,40 +173,6 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
                   name="Last Year"
                   connectNulls
                 />
-              )}
-              {showGoals && isRevenue && (
-                <>
-                  <Line
-                    type="monotone"
-                    dataKey="budget"
-                    stroke="#8b5cf6"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    name="Budget"
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="projection"
-                    stroke="#f59e0b"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    name="Projection"
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="goal"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    name="Goal"
-                    connectNulls
-                  />
-                </>
               )}
               {showForecast && isRevenue && (
                 <Line
