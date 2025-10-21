@@ -237,6 +237,7 @@ export type Database = {
           last_listings_sync: string | null
           last_owners_sync: string | null
           last_reservations_sync: string | null
+          last_reviews_sync: string | null
           organization_id: string
           updated_at: string
           user_id: string
@@ -250,6 +251,7 @@ export type Database = {
           last_listings_sync?: string | null
           last_owners_sync?: string | null
           last_reservations_sync?: string | null
+          last_reviews_sync?: string | null
           organization_id: string
           updated_at?: string
           user_id: string
@@ -263,6 +265,7 @@ export type Database = {
           last_listings_sync?: string | null
           last_owners_sync?: string | null
           last_reservations_sync?: string | null
+          last_reviews_sync?: string | null
           organization_id?: string
           updated_at?: string
           user_id?: string
@@ -856,6 +859,74 @@ export type Database = {
           year?: number
         }
         Relationships: []
+      }
+      reviews: {
+        Row: {
+          category_ratings: Json | null
+          guest_name: string | null
+          guesty_account_id: string
+          id: string
+          imported_at: string
+          is_removed: boolean
+          listing_id: string
+          rating: number | null
+          removed_at: string | null
+          removed_by: string | null
+          removed_reason: string | null
+          reservation_id: string | null
+          response_text: string | null
+          review_date: string | null
+          review_text: string | null
+          source: string | null
+          updated_at: string
+        }
+        Insert: {
+          category_ratings?: Json | null
+          guest_name?: string | null
+          guesty_account_id: string
+          id: string
+          imported_at?: string
+          is_removed?: boolean
+          listing_id: string
+          rating?: number | null
+          removed_at?: string | null
+          removed_by?: string | null
+          removed_reason?: string | null
+          reservation_id?: string | null
+          response_text?: string | null
+          review_date?: string | null
+          review_text?: string | null
+          source?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category_ratings?: Json | null
+          guest_name?: string | null
+          guesty_account_id?: string
+          id?: string
+          imported_at?: string
+          is_removed?: boolean
+          listing_id?: string
+          rating?: number | null
+          removed_at?: string | null
+          removed_by?: string | null
+          removed_reason?: string | null
+          reservation_id?: string | null
+          response_text?: string | null
+          review_date?: string | null
+          review_text?: string | null
+          source?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reviews_guesty_account_id_fkey"
+            columns: ["guesty_account_id"]
+            isOneToOne: false
+            referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sync_jobs: {
         Row: {

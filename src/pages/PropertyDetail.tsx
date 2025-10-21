@@ -13,6 +13,9 @@ import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { PropertySettings } from "@/components/PropertySettings";
 import { RevenueForecast } from "@/components/RevenueForecast";
+import { ReviewsSummary } from "@/components/ReviewsSummary";
+import { ReviewsTable } from "@/components/ReviewsTable";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -860,7 +863,140 @@ export default function PropertyDetail() {
             )}
           </CardContent>
         </Card>
+
+        {/* Reviews Section */}
+        <ReviewsSection listingId={id!} />
       </div>
     </DashboardLayout>
+  );
+}
+
+function ReviewsSection({ listingId }: { listingId: string }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [selectedPlatform, setSelectedPlatform] = useState<string>('all');
+
+  // Fetch reviews
+  const { data: reviews = [], isLoading } = useQuery({
+    queryKey: ['reviews', listingId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('listing_id', listingId)
+        .order('review_date', { ascending: false });
+
+      if (error) throw error;
+      return (data || []).map(review => ({
+        ...review,
+        category_ratings: review.category_ratings as Record<string, number> | undefined,
+      }));
+    },
+  });
+
+  // Mark as removed mutation
+  const markAsRemovedMutation = useMutation({
+    mutationFn: async ({ reviewId, reason }: { reviewId: string; reason: string }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('reviews')
+        .update({
+          is_removed: true,
+          removed_at: new Date().toISOString(),
+          removed_by: user?.id,
+          removed_reason: reason,
+        })
+        .eq('id', reviewId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reviews', listingId] });
+      toast({
+        title: "Review marked as removed",
+        description: "The review has been marked as removed and will be excluded from calculations.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to mark review as removed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Restore mutation
+  const restoreMutation = useMutation({
+    mutationFn: async (reviewId: string) => {
+      const { error } = await supabase
+        .from('reviews')
+        .update({
+          is_removed: false,
+          removed_at: null,
+          removed_by: null,
+          removed_reason: null,
+        })
+        .eq('id', reviewId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['reviews', listingId] });
+      toast({
+        title: "Review restored",
+        description: "The review has been restored and will be included in calculations.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to restore review",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-center text-muted-foreground">Loading reviews...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Reviews</CardTitle>
+          <CardDescription>
+            Guest reviews and ratings for this property
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-6 md:grid-cols-3">
+            <div className="md:col-span-1">
+              <ReviewsSummary
+                reviews={reviews}
+                onPlatformClick={(platform) => setSelectedPlatform(platform)}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <ReviewsTable
+                reviews={reviews}
+                selectedPlatform={selectedPlatform !== 'all' ? selectedPlatform : undefined}
+                onMarkAsRemoved={(reviewId, reason) =>
+                  markAsRemovedMutation.mutateAsync({ reviewId, reason })
+                }
+                onRestore={(reviewId) => restoreMutation.mutateAsync(reviewId)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
