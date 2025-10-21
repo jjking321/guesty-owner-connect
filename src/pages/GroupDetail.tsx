@@ -26,7 +26,8 @@ import { TrendChart } from "@/components/TrendChart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PacingReport } from "@/components/PacingReport";
-import { format, startOfYear, endOfYear } from "date-fns";
+import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
+import { format, startOfYear } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
 export default function GroupDetail() {
@@ -43,6 +44,11 @@ export default function GroupDetail() {
   const [searchQuery, setSearchQuery] = useState("");
   const [addSearchQuery, setAddSearchQuery] = useState("");
   const [removeListingId, setRemoveListingId] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    from: startOfYear(new Date()),
+    to: new Date(),
+    preset: "ytd",
+  });
 
   const { data: group, isLoading: isGroupLoading, refetch: refetchGroup } = useQuery({
     queryKey: ["property-group", id],
@@ -162,20 +168,16 @@ export default function GroupDetail() {
   ) || [];
 
   const { data: reservations, isLoading: isReservationsLoading } = useQuery({
-    queryKey: ["group-reservations", listingIds],
+    queryKey: ["group-reservations", listingIds, dateRange.from, dateRange.to],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
-
-      const currentYear = new Date().getFullYear();
-      const yearStart = format(startOfYear(new Date(currentYear, 0)), "yyyy-MM-dd");
-      const yearEnd = format(endOfYear(new Date(currentYear, 0)), "yyyy-MM-dd");
 
       const { data, error } = await supabase
         .from("reservations")
         .select("*")
         .in("listing_id", listingIds)
-        .gte("check_in", yearStart)
-        .lte("check_in", yearEnd)
+        .gte("check_in", format(dateRange.from, "yyyy-MM-dd"))
+        .lte("check_in", format(dateRange.to, "yyyy-MM-dd"))
         .in("status", ["confirmed", "checked_in", "checked_out"]);
 
       if (error) throw error;
@@ -185,17 +187,33 @@ export default function GroupDetail() {
   });
 
   const { data: goals } = useQuery({
-    queryKey: ["group-goals", listingIds],
+    queryKey: ["group-goals", listingIds, dateRange.from, dateRange.to],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
-      const currentYear = new Date().getFullYear();
+      const startYear = dateRange.from.getFullYear();
+      const endYear = dateRange.to.getFullYear();
+      const startMonth = dateRange.from.getMonth() + 1;
+      const endMonth = dateRange.to.getMonth() + 1;
 
-      const { data, error } = await supabase
+      let query = supabase
         .from("property_goals")
         .select("*")
-        .in("listing_id", listingIds)
-        .eq("year", currentYear);
+        .in("listing_id", listingIds);
+
+      // Filter by year range
+      if (startYear === endYear) {
+        query = query.eq("year", startYear);
+        if (startMonth === endMonth) {
+          query = query.eq("month", startMonth);
+        } else {
+          query = query.gte("month", startMonth).lte("month", endMonth);
+        }
+      } else {
+        query = query.gte("year", startYear).lte("year", endYear);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       return data;
@@ -205,17 +223,17 @@ export default function GroupDetail() {
 
   // Fetch all forecasts for properties in the group
   const { data: forecasts } = useQuery({
-    queryKey: ["group-forecasts", listingIds],
+    queryKey: ["group-forecasts", listingIds, dateRange.from],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
-      const currentYear = new Date().getFullYear();
+      const year = dateRange.from.getFullYear();
 
       const { data, error } = await supabase
         .from("revenue_forecasts")
         .select("*")
         .in("listing_id", listingIds)
-        .eq("year", currentYear);
+        .eq("year", year);
 
       if (error) throw error;
       return data;
@@ -498,6 +516,7 @@ export default function GroupDetail() {
           </div>
 
           <div className="flex gap-2">
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
             {directListingIds.length > 0 && (
               <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
                 <DialogTrigger asChild>
