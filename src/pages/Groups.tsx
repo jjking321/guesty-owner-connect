@@ -109,6 +109,7 @@ export default function Groups() {
         .from("property_groups")
         .insert({
           organization_id: membership.organization_id,
+          user_id: session?.user?.id,
           name: groupName,
           description: groupDescription,
         } as any)
