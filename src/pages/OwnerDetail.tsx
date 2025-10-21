@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { PropertiesTable } from "@/components/PropertiesTable";
+import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
 import { supabase } from "@/integrations/supabase/client";
 import { ArrowLeft, Mail, Phone, Building2, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { format, startOfYear } from "date-fns";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -31,79 +34,157 @@ export default function OwnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [owner, setOwner] = useState<Owner | null>(null);
-  const [listings, setListings] = useState<any[]>([]);
-  const [goals, setGoals] = useState<any[]>([]);
-  const [forecasts, setForecasts] = useState<any[]>([]);
-  const [reservations, setReservations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("actual");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [dateRange, setDateRange] = useState<DateRange>({
+    from: startOfYear(new Date()),
+    to: new Date(),
+    preset: "ytd",
+  });
 
-  useEffect(() => {
-    if (id) {
-      loadOwnerData();
-    }
-  }, [id]);
-
-  const loadOwnerData = async () => {
-    try {
-      setLoading(true);
-
-      // Load owner
-      const { data: ownerData, error: ownerError } = await supabase
+  // Fetch owner data
+  const { data: owner, isLoading: isOwnerLoading } = useQuery({
+    queryKey: ["owner", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from('owners')
         .select('*')
         .eq('id', id)
         .single();
 
-      if (ownerError) throw ownerError;
-      setOwner(ownerData);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
 
-      // Load listings for this owner
-      const { data: listingsData, error: listingsError } = await supabase
+  // Fetch listings for this owner
+  const { data: listings } = useQuery({
+    queryKey: ["owner-listings", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from('listings')
         .select('*')
         .eq('owner_id', id);
 
-      if (listingsError) throw listingsError;
-      setListings(listingsData || []);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!id,
+  });
 
-      const listingIds = (listingsData || []).map(l => l.id);
+  const listingIds = listings?.map(l => l.id) || [];
 
-      if (listingIds.length > 0) {
-        // Load goals
-        const { data: goalsData } = await supabase
-          .from('property_goals')
-          .select('*')
-          .in('listing_id', listingIds);
-        setGoals(goalsData || []);
+  // Fetch goals
+  const { data: goals } = useQuery({
+    queryKey: ["owner-goals", listingIds, dateRange.from],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
 
-        // Load forecasts
-        const { data: forecastsData } = await supabase
-          .from('revenue_forecasts')
-          .select('*')
-          .in('listing_id', listingIds);
-        setForecasts(forecastsData || []);
+      const year = dateRange.from.getFullYear();
 
-        // Load reservations
-        const { data: reservationsData } = await supabase
-          .from('reservations')
-          .select('*')
-          .in('listing_id', listingIds);
-        setReservations(reservationsData || []);
+      const { data, error } = await supabase
+        .from('property_goals')
+        .select('*')
+        .in('listing_id', listingIds)
+        .eq('year', year);
+
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: listingIds.length > 0,
+  });
+
+  // Fetch forecasts
+  const { data: forecasts } = useQuery({
+    queryKey: ["owner-forecasts", listingIds, dateRange.from],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const year = dateRange.from.getFullYear();
+
+      const { data, error } = await supabase
+        .from('revenue_forecasts')
+        .select('*')
+        .in('listing_id', listingIds)
+        .eq('year', year);
+
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: listingIds.length > 0,
+  });
+
+  // Fetch reservations
+  const { data: reservations } = useQuery({
+    queryKey: ["owner-reservations", listingIds, dateRange.from],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const startDate = new Date(dateRange.from);
+      startDate.setFullYear(startDate.getFullYear() - 1);
+
+      const endOfYear = new Date(dateRange.from);
+      endOfYear.setMonth(11, 31);
+
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservations")
+          .select("*")
+          .in("listing_id", listingIds)
+          .gte("check_out", format(startDate, "yyyy-MM-dd"))
+          .lte("check_in", format(endOfYear, "yyyy-MM-dd"))
+          .in("status", ["confirmed", "checked_in", "checked_out"])
+          .order("check_in", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
       }
-    } catch (error: any) {
-      toast({
-        title: "Error loading owner data",
-        description: error.message,
-        variant: "destructive",
-      });
-      navigate('/owners');
-    } finally {
-      setLoading(false);
-    }
-  };
+
+      return results;
+    },
+    enabled: listingIds.length > 0,
+  });
+
+  // Fetch reservation nights for accurate revenue calculation
+  const { data: reservationNights } = useQuery({
+    queryKey: ["owner-reservation-nights", listingIds, dateRange.from, dateRange.to],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(dateRange.from, "yyyy-MM-dd"))
+          .lte("night_date", format(dateRange.to, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
+    },
+    enabled: listingIds.length > 0,
+  });
 
   const getOwnerName = (owner: Owner) => {
     if (owner.full_name) return owner.full_name;
@@ -113,8 +194,17 @@ export default function OwnerDetail() {
     return 'Unknown Owner';
   };
 
+  const handleSort = (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => {
+    if (sortBy === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortDirection("desc");
+    }
+  };
+
   // Calculate metrics for PropertyMetricsSummary
-  const currentYear = new Date().getFullYear();
+  const currentYear = dateRange.from.getFullYear();
   const currentDate = new Date();
 
   const calculateMetrics = () => {
@@ -127,19 +217,15 @@ export default function OwnerDetail() {
     let atRiskCount = 0;
     let behindCount = 0;
 
-    listings.forEach(listing => {
-      // Calculate YTD revenue (check_out <= today)
-      const listingReservations = reservations.filter(
-        r => r.listing_id === listing.id && 
-        r.status === 'confirmed' &&
-        new Date(r.check_out) <= currentDate &&
-        new Date(r.check_out).getFullYear() === currentYear
-      );
-      const ytdRevenue = listingReservations.reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0);
+    listings?.forEach(listing => {
+      // Calculate revenue from reservation nights
+      const ytdRevenue = reservationNights
+        ?.filter(n => n.listing_id === listing.id)
+        .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
       totalActualRevenue += ytdRevenue;
 
       // Get goals for this listing
-      const listingGoals = goals.filter(g => g.listing_id === listing.id && g.year === currentYear);
+      const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
       const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
       const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
       const goal = listingGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
@@ -149,8 +235,8 @@ export default function OwnerDetail() {
       totalGoal += goal;
 
       // Get forecast
-      const listingForecast = forecasts.find(f => f.listing_id === listing.id && f.year === currentYear);
-      const forecastAmount = listingForecast ? (Number(listingForecast.total_forecast?.p50) || 0) : 0;
+      const listingForecast = forecasts?.find(f => f.listing_id === listing.id && f.year === currentYear);
+      const forecastAmount = listingForecast ? (Number((listingForecast.total_forecast as any)?.p50) || 0) : 0;
       totalForecast += forecastAmount;
 
       // Determine status
@@ -168,7 +254,7 @@ export default function OwnerDetail() {
       totalProjection,
       totalGoal,
       totalForecast,
-      propertiesCount: listings.length,
+      propertiesCount: listings?.length || 0,
       onTrackCount,
       atRiskCount,
       behindCount,
@@ -176,17 +262,9 @@ export default function OwnerDetail() {
   };
 
   const metrics = calculateMetrics();
+  const isLoading = isOwnerLoading;
 
-  const handleSort = (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => {
-    if (sortBy === field) {
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
-    } else {
-      setSortBy(field);
-      setSortDirection("desc");
-    }
-  };
-
-  if (loading) {
+  if (isLoading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center py-12">
@@ -230,10 +308,13 @@ export default function OwnerDetail() {
         </Breadcrumb>
 
         {/* Back Button */}
-        <Button variant="outline" onClick={() => navigate('/owners')}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back to Owners
-        </Button>
+        <div className="flex items-center justify-between">
+          <Button variant="outline" onClick={() => navigate('/owners')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Owners
+          </Button>
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+        </div>
 
         {/* Owner Info Card */}
         <Card>
@@ -265,7 +346,7 @@ export default function OwnerDetail() {
                   <Building2 className="h-3 w-3" />
                   Properties
                 </p>
-                <p className="font-medium">{listings.length}</p>
+                <p className="font-medium">{listings?.length || 0}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Last Synced</p>
@@ -286,29 +367,24 @@ export default function OwnerDetail() {
             <CardTitle>Properties</CardTitle>
           </CardHeader>
           <CardContent>
-            {listings.length === 0 ? (
+            {listings && listings.length === 0 ? (
               <p className="text-center text-muted-foreground py-8">
                 No properties found for this owner
               </p>
             ) : (
               <PropertiesTable
-                properties={listings.map(listing => {
-                  const listingGoals = goals.filter(g => g.listing_id === listing.id && g.year === currentYear);
-                  const listingForecast = forecasts.find(f => f.listing_id === listing.id && f.year === currentYear);
+                properties={(listings || []).map(listing => {
+                  const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
+                  const listingForecast = forecasts?.find(f => f.listing_id === listing.id && f.year === currentYear);
                   
-                  const ytdRevenue = reservations
-                    .filter(r => 
-                      r.listing_id === listing.id && 
-                      r.status === 'confirmed' &&
-                      new Date(r.check_out) <= currentDate &&
-                      new Date(r.check_out).getFullYear() === currentYear
-                    )
-                    .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0);
+                  const ytdRevenue = reservationNights
+                    ?.filter(n => n.listing_id === listing.id)
+                    .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
 
                   const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
                   const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
                   const goal = listingGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
-                  const forecast = listingForecast ? (Number(listingForecast.total_forecast?.p50) || 0) : 0;
+                  const forecast = listingForecast ? (Number((listingForecast.total_forecast as any)?.p50) || 0) : 0;
                   
                   let status: 'on-track' | 'at-risk' | 'behind' = 'behind';
                   if (projection > 0) {
