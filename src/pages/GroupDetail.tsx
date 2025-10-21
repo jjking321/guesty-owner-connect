@@ -853,43 +853,6 @@ export default function GroupDetail() {
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Goal Revenue</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${totalGoalRevenue.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">
-                {totalGoalRevenue > 0
-                  ? `${((totalRevenue / totalGoalRevenue) * 100).toFixed(1)}% of goal`
-                  : "No goal set"}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Budget Revenue</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${totalBudgetRevenue.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">
-                {totalBudgetRevenue > 0
-                  ? `${((totalRevenue / totalBudgetRevenue) * 100).toFixed(1)}% of budget`
-                  : "No budget set"}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Projection Revenue</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${totalProjectionRevenue.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">Target projection</p>
-            </CardContent>
-          </Card>
-        </div>
 
         <Tabs defaultValue="overview" className="space-y-6">
           <TabsList className="grid w-full max-w-md grid-cols-3">
