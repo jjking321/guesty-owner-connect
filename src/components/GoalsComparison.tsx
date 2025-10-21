@@ -29,19 +29,15 @@ const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep
 
 export function GoalsComparison({ listingId, reservations, goals: externalGoals, forecasts: externalForecasts }: GoalsComparisonProps) {
   const [activeTab, setActiveTab] = useState<'monthly' | 'cumulative'>('monthly');
-  const [year, setYear] = useState(new Date().getFullYear());
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
   const [cumulativeData, setCumulativeData] = useState<GoalData[]>([]);
   const [showForecast, setShowForecast] = useState(false);
-  const [availableYears, setAvailableYears] = useState<number[]>([]);
   const { toast } = useToast();
 
+  // Derive year from the data instead of maintaining separate state
+  const year = externalGoals?.[0]?.year || new Date().getFullYear();
+
   useEffect(() => {
-    // Get available years from goals
-    if (externalGoals && externalGoals.length > 0) {
-      const years = [...new Set(externalGoals.map(g => g.year))].sort();
-      setAvailableYears(years);
-    }
     loadGoalsComparison();
   }, [listingId, year, reservations, externalGoals, externalForecasts]);
 
@@ -138,8 +134,8 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         if (forecastData && forecastData.length > 0) {
           forecastRevenue = forecastData.reduce((sum, f) => {
             const monthlyForecasts = f.monthly_forecasts as any[];
-            const monthForecast = monthlyForecasts?.find(mf => mf.month === month + 1);
-            return sum + (monthForecast?.total_forecast_p50 || 0);
+            const monthForecast = monthlyForecasts?.find(mf => mf.month === month);
+            return sum + (monthForecast?.totalForecast?.p50 || 0);
           }, 0);
         }
 
@@ -293,27 +289,6 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           <CardDescription>Track actual revenue against goals</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* Year Selector */}
-          <div className="flex items-center gap-2 mb-4">
-            <span className="text-sm font-medium">Year:</span>
-            {[2024, 2025, 2026].map(y => (
-              <Button
-                key={y}
-                variant={year === y ? "default" : "outline"}
-                size="sm"
-                onClick={() => setYear(y)}
-                disabled={!availableYears.includes(y) && y !== new Date().getFullYear()}
-              >
-                {y}
-              </Button>
-            ))}
-            {year === 2026 && !availableYears.includes(2026) && (
-              <span className="text-xs text-muted-foreground ml-2">
-                No 2026 goals yet
-              </span>
-            )}
-          </div>
-
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'monthly' | 'cumulative')}>
             <div className="flex items-center justify-between mb-6">
               <TabsList className="grid w-full max-w-md grid-cols-2">
