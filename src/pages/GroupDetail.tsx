@@ -208,7 +208,8 @@ export default function GroupDetail() {
         .select("listing_id, night_date, revenue_allocation")
         .in("listing_id", listingIds)
         .gte("night_date", format(dateRange.from, "yyyy-MM-dd"))
-        .lte("night_date", format(dateRange.to, "yyyy-MM-dd"));
+        .lte("night_date", format(dateRange.to, "yyyy-MM-dd"))
+        .limit(10000);
 
       if (error) throw error;
       return data;
