@@ -58,6 +58,9 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
+      const forecastIndex = showComparison ? 2 : 1;
+      const hasForecast = showForecast && isRevenue && payload[forecastIndex] && payload[forecastIndex].value !== undefined;
+      
       return (
         <div className="bg-background border border-border rounded-lg shadow-lg p-4">
           <p className="font-medium text-sm mb-2">{label}</p>
@@ -83,6 +86,15 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
                     : isRevPAR
                     ? `$${payload[1].value.toFixed(2)}`
                     : `$${payload[1].value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+                </span>
+              </div>
+            )}
+            {hasForecast && (
+              <div className="flex items-center gap-2 text-sm">
+                <div className="w-3 h-3 rounded-full bg-cyan-500" />
+                <span className="text-muted-foreground">Forecast:</span>
+                <span className="font-medium">
+                  ${payload[forecastIndex].value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </span>
               </div>
             )}
