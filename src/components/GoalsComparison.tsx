@@ -132,10 +132,14 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         // Aggregate forecast for this month
         let forecastRevenue = 0;
         if (forecastData && forecastData.length > 0) {
+          const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
           forecastRevenue = forecastData.reduce((sum, f) => {
-            const monthlyForecasts = f.monthly_forecasts as any[];
-            const monthForecast = monthlyForecasts?.find(mf => mf.month === month);
-            return sum + (monthForecast?.totalForecast?.p50 || 0);
+            const monthlyForecasts = Array.isArray(f.monthly_forecasts) ? f.monthly_forecasts : [];
+            const monthForecast = monthlyForecasts.find((mf: any) =>
+              mf?.month === monthKey || mf?.month === month || mf?.month === month + 1
+            );
+            const p50 = (monthForecast?.totalForecast?.p50 ?? monthForecast?.total_forecast_p50 ?? 0);
+            return sum + p50;
           }, 0);
         }
 
