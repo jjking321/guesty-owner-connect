@@ -260,7 +260,16 @@ export default function GroupDetail() {
   // Calculate aggregated metrics
   const totalRevenue = reservationNights?.reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
 
-  const totalReservations = reservations?.length || 0;
+  // Filter reservations to only those overlapping with the selected date range
+  const filteredReservations = reservations?.filter((r) => {
+    if (!r.check_in || !r.check_out) return false;
+    const checkIn = new Date(r.check_in);
+    const checkOut = new Date(r.check_out);
+    // Reservation overlaps if: check_in <= dateRange.to AND check_out >= dateRange.from
+    return checkIn <= dateRange.to && checkOut >= dateRange.from;
+  }) || [];
+
+  const totalReservations = filteredReservations.length;
   const totalNights = reservationNights?.length || 0;
 
   // Check if data is incomplete (reservations exist but nights data is missing)
