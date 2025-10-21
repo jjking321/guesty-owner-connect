@@ -213,33 +213,18 @@ export default function GroupDetail() {
 
 
   const { data: goals } = useQuery({
-    queryKey: ["group-goals", listingIds, dateRange.from, dateRange.to],
+    queryKey: ["group-goals", listingIds, dateRange.from],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
-      const startYear = dateRange.from.getFullYear();
-      const endYear = dateRange.to.getFullYear();
-      const startMonth = dateRange.from.getMonth() + 1;
-      const endMonth = dateRange.to.getMonth() + 1;
+      // Always fetch all months for the selected year
+      const year = dateRange.from.getFullYear();
 
-      let query = supabase
+      const { data, error } = await supabase
         .from("property_goals")
         .select("*")
-        .in("listing_id", listingIds);
-
-      // Filter by year range
-      if (startYear === endYear) {
-        query = query.eq("year", startYear);
-        if (startMonth === endMonth) {
-          query = query.eq("month", startMonth);
-        } else {
-          query = query.gte("month", startMonth).lte("month", endMonth);
-        }
-      } else {
-        query = query.gte("year", startYear).lte("year", endYear);
-      }
-
-      const { data, error } = await query;
+        .in("listing_id", listingIds)
+        .eq("year", year);
 
       if (error) throw error;
       return data;
@@ -895,6 +880,7 @@ export default function GroupDetail() {
               listingId={null}
               reservations={reservations || []}
               goals={goals || []}
+              forecasts={forecasts || []}
             />
           </TabsContent>
 

@@ -5,11 +5,15 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Target, TrendingUp, TrendingDown } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 
 interface GoalsComparisonProps {
   listingId?: string | null;
   reservations: any[];
   goals?: any[];
+  forecasts?: any[];
 }
 
 interface GoalData {
@@ -18,20 +22,28 @@ interface GoalData {
   budget: number;
   projection: number;
   goal: number;
+  forecast?: number;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function GoalsComparison({ listingId, reservations, goals: externalGoals }: GoalsComparisonProps) {
+export function GoalsComparison({ listingId, reservations, goals: externalGoals, forecasts: externalForecasts }: GoalsComparisonProps) {
   const [activeTab, setActiveTab] = useState<'monthly' | 'cumulative'>('monthly');
   const [year, setYear] = useState(new Date().getFullYear());
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
   const [cumulativeData, setCumulativeData] = useState<GoalData[]>([]);
+  const [showForecast, setShowForecast] = useState(false);
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
+    // Get available years from goals
+    if (externalGoals && externalGoals.length > 0) {
+      const years = [...new Set(externalGoals.map(g => g.year))].sort();
+      setAvailableYears(years);
+    }
     loadGoalsComparison();
-  }, [listingId, year, reservations, externalGoals]);
+  }, [listingId, year, reservations, externalGoals, externalForecasts]);
 
   const loadGoalsComparison = async () => {
     try {
@@ -55,6 +67,24 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
         goalsData = [];
       }
 
+      // Get forecast data for this year
+      let forecastData;
+      if (externalForecasts) {
+        forecastData = externalForecasts.filter(f => f.year === year);
+      } else if (listingId) {
+        const { data } = await supabase
+          .from('revenue_forecasts')
+          .select('*')
+          .eq('listing_id', listingId)
+          .eq('year', year)
+          .order('generated_at', { ascending: false })
+          .limit(1)
+          .single();
+        forecastData = data ? [data] : [];
+      } else {
+        forecastData = [];
+      }
+
       // Calculate actual revenue per month
       const monthly: GoalData[] = [];
       const cumulative: GoalData[] = [];
@@ -62,6 +92,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
       let cumulativeBudget = 0;
       let cumulativeProjection = 0;
       let cumulativeGoal = 0;
+      let cumulativeForecast = 0;
 
       for (let month = 0; month < 12; month++) {
         // For group-level, aggregate goals for this month
@@ -102,6 +133,16 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
         const projection = monthGoals.reduce((sum, g) => sum + (Number(g?.projection_revenue) || 0), 0);
         const goal = monthGoals.reduce((sum, g) => sum + (Number(g?.goal_revenue) || 0), 0);
 
+        // Aggregate forecast for this month
+        let forecastRevenue = 0;
+        if (forecastData && forecastData.length > 0) {
+          forecastRevenue = forecastData.reduce((sum, f) => {
+            const monthlyForecasts = f.monthly_forecasts as any[];
+            const monthForecast = monthlyForecasts?.find(mf => mf.month === month + 1);
+            return sum + (monthForecast?.total_forecast_p50 || 0);
+          }, 0);
+        }
+
         // Monthly data
         monthly.push({
           month: monthNames[month],
@@ -109,6 +150,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
           budget: Math.round(budget),
           projection: Math.round(projection),
           goal: Math.round(goal),
+          forecast: Math.round(forecastRevenue),
         });
 
         // Cumulative data
@@ -116,6 +158,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
         cumulativeBudget += budget;
         cumulativeProjection += projection;
         cumulativeGoal += goal;
+        cumulativeForecast += forecastRevenue;
 
         cumulative.push({
           month: monthNames[month],
@@ -123,6 +166,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
           goal: Math.round(cumulativeGoal),
+          forecast: Math.round(cumulativeForecast),
         });
       }
 
@@ -249,11 +293,45 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
           <CardDescription>Track actual revenue against goals</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Year Selector */}
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-sm font-medium">Year:</span>
+            {[2024, 2025, 2026].map(y => (
+              <Button
+                key={y}
+                variant={year === y ? "default" : "outline"}
+                size="sm"
+                onClick={() => setYear(y)}
+                disabled={!availableYears.includes(y) && y !== new Date().getFullYear()}
+              >
+                {y}
+              </Button>
+            ))}
+            {year === 2026 && !availableYears.includes(2026) && (
+              <span className="text-xs text-muted-foreground ml-2">
+                No 2026 goals yet
+              </span>
+            )}
+          </div>
+
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'monthly' | 'cumulative')}>
-            <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
-              <TabsTrigger value="monthly">Monthly</TabsTrigger>
-              <TabsTrigger value="cumulative">Cumulative</TabsTrigger>
-            </TabsList>
+            <div className="flex items-center justify-between mb-6">
+              <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsTrigger value="monthly">Monthly</TabsTrigger>
+                <TabsTrigger value="cumulative">Cumulative</TabsTrigger>
+              </TabsList>
+              
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="show-forecast"
+                  checked={showForecast}
+                  onCheckedChange={(checked) => setShowForecast(checked as boolean)}
+                />
+                <Label htmlFor="show-forecast" className="text-sm cursor-pointer">
+                  Show Forecast
+                </Label>
+              </div>
+            </div>
 
             <TabsContent value="monthly">
               <ResponsiveContainer width="100%" height={400}>
@@ -275,6 +353,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
                   <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
                   <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
                   <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                  {showForecast && <Line type="monotone" dataKey="forecast" stroke="#06b6d4" strokeWidth={2} name="Forecast" />}
                 </LineChart>
               </ResponsiveContainer>
             </TabsContent>
@@ -299,6 +378,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals 
                   <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
                   <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
                   <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                  {showForecast && <Line type="monotone" dataKey="forecast" stroke="#06b6d4" strokeWidth={2} name="Forecast" />}
                 </LineChart>
               </ResponsiveContainer>
             </TabsContent>
