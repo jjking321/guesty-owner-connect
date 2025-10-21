@@ -36,16 +36,16 @@ export function DateRangeFilter({ value, onChange }: DateRangeFilterProps) {
       value: "last365",
       label: "Last 365 Days",
       getRange: () => ({
-        from: subDays(new Date(), 365),
+        from: subDays(new Date(), 364),
         to: new Date(),
       }),
     },
     {
       value: "lastWeek",
-      label: "Last Week",
+      label: "Last 7 Days",
       getRange: () => ({
-        from: startOfWeek(subDays(new Date(), 7), { weekStartsOn: 0 }),
-        to: endOfWeek(subDays(new Date(), 7), { weekStartsOn: 0 }),
+        from: subDays(new Date(), 6),
+        to: new Date(),
       }),
     },
     {
