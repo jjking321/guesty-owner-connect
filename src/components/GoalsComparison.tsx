@@ -170,18 +170,15 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         cumulativeForecastP50 += forecastP50;
         cumulativeForecastP75 += forecastP75;
 
-        // Only constrain forecast to actuals for past/current months
-        const isCurrentOrPast = month <= currentMonth;
-
         cumulative.push({
           month: monthNames[month],
           actual: Math.round(cumulativeActual),
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
           goal: Math.round(cumulativeGoal),
-          forecastP25: Math.round(isCurrentOrPast ? Math.max(cumulativeForecastP25, cumulativeActual) : cumulativeForecastP25),
-          forecastP50: Math.round(isCurrentOrPast ? Math.max(cumulativeForecastP50, cumulativeActual) : cumulativeForecastP50),
-          forecastP75: Math.round(isCurrentOrPast ? Math.max(cumulativeForecastP75, cumulativeActual) : cumulativeForecastP75),
+          forecastP25: Math.round(Math.max(cumulativeForecastP25, cumulativeActual)),
+          forecastP50: Math.round(Math.max(cumulativeForecastP50, cumulativeActual)),
+          forecastP75: Math.round(Math.max(cumulativeForecastP75, cumulativeActual)),
         });
       }
 
