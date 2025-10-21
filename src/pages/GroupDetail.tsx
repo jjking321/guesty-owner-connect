@@ -29,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
+import { PropertiesTable } from "@/components/PropertiesTable";
 import { format, startOfYear } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -51,6 +52,8 @@ export default function GroupDetail() {
     to: new Date(),
     preset: "ytd",
   });
+  const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("actual");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   const { data: group, isLoading: isGroupLoading, refetch: refetchGroup } = useQuery({
     queryKey: ["property-group", id],
@@ -702,6 +705,32 @@ export default function GroupDetail() {
     }
   };
 
+  const handleSort = (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => {
+    if (sortBy === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortDirection("desc");
+    }
+  };
+
+  // Fetch all listings data for the properties table
+  const { data: allListings } = useQuery({
+    queryKey: ["group-all-listings", listingIds],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const { data, error } = await supabase
+        .from("listings")
+        .select("*")
+        .in("id", listingIds);
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: listingIds.length > 0,
+  });
+
   const isLoading = isGroupLoading || isReservationsLoading;
 
   if (isLoading) {
@@ -1203,47 +1232,90 @@ export default function GroupDetail() {
                 <p>No properties in this group yet</p>
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {group.property_group_members.map((member: any) => (
-                  <Card
-                    key={member.listing_id}
-                    className="relative group/card"
-                  >
-                    {isEditingProperties && (
-                      <Button
-                        variant="destructive"
-                        size="icon"
-                        className="absolute top-2 right-2 z-10 h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setRemoveListingId(member.listing_id);
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    )}
-                    <div
-                      className="cursor-pointer"
-                      onClick={() => navigate(`/listings/${member.listing_id}`)}
-                    >
-                      {member.listings?.thumbnail && (
-                        <div className="aspect-video overflow-hidden rounded-t-lg">
-                          <img
-                            src={member.listings.thumbnail}
-                            alt={member.listings.nickname || "Property"}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      )}
-                      <CardContent className="pt-4">
-                        <h3 className="font-semibold">
-                          {member.listings?.nickname || "Unnamed Property"}
-                        </h3>
-                      </CardContent>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+              <PropertiesTable
+                properties={(allListings || []).map(listing => {
+                  const currentYear = dateRange.from.getFullYear();
+                  const currentDate = new Date();
+                  
+                  const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
+                  const listingForecast = forecasts?.find(f => f.listing_id === listing.id && f.year === currentYear);
+                  
+                  const ytdRevenue = reservationNights
+                    ?.filter(n => n.listing_id === listing.id)
+                    .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
+
+                  const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
+                  const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
+                  const goal = listingGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
+                  const forecast = listingForecast ? (Number((listingForecast.total_forecast as any)?.p50) || 0) : 0;
+                  
+                  let status: 'on-track' | 'at-risk' | 'behind' = 'behind';
+                  if (projection > 0) {
+                    const pacing = (forecast / projection) * 100;
+                    if (pacing >= 95) status = 'on-track';
+                    else if (pacing >= 85) status = 'at-risk';
+                  }
+
+                  const lockedGoals = listingGoals.filter(g => g.locked === true);
+                  const budgetAchievement = budget > 0 ? (ytdRevenue / budget) * 100 : 0;
+                  const projectionAchievement = projection > 0 ? (ytdRevenue / projection) * 100 : 0;
+                  const goalAchievement = goal > 0 ? (ytdRevenue / goal) * 100 : 0;
+                  const forecastBudgetAchievement = budget > 0 ? (forecast / budget) * 100 : 0;
+                  const forecastProjectionAchievement = projection > 0 ? (forecast / projection) * 100 : 0;
+                  const forecastGoalAchievement = goal > 0 ? (forecast / goal) * 100 : 0;
+
+                  return {
+                    id: listing.id,
+                    nickname: listing.nickname,
+                    address: listing.address,
+                    thumbnail: listing.thumbnail,
+                    propertyType: listing.property_type,
+                    actualRevenue: ytdRevenue,
+                    budgetTotal: budget,
+                    projectionTotal: projection,
+                    goalTotal: goal,
+                    forecastedRevenue: forecast,
+                    forecastUpdatedAt: listingForecast?.updated_at || null,
+                    budgetAchievement,
+                    projectionAchievement,
+                    goalAchievement,
+                    forecastBudgetAchievement,
+                    forecastProjectionAchievement,
+                    forecastGoalAchievement,
+                    status,
+                    hasGoals: listingGoals.length > 0,
+                    hasLockedGoals: lockedGoals.length > 0,
+                    goalsLockedCount: lockedGoals.length,
+                  };
+                }).sort((a, b) => {
+                  let comparison = 0;
+                  
+                  switch (sortBy) {
+                    case "name":
+                      comparison = a.nickname.localeCompare(b.nickname);
+                      break;
+                    case "actual":
+                      comparison = a.actualRevenue - b.actualRevenue;
+                      break;
+                    case "forecast":
+                      comparison = a.forecastedRevenue - b.forecastedRevenue;
+                      break;
+                    case "goalProgress":
+                      comparison = a.forecastProjectionAchievement - b.forecastProjectionAchievement;
+                      break;
+                    case "status":
+                      const statusOrder = { "on-track": 3, "at-risk": 2, "behind": 1 };
+                      comparison = statusOrder[a.status] - statusOrder[b.status];
+                      break;
+                  }
+                  
+                  return sortDirection === "asc" ? comparison : -comparison;
+                })}
+                isLoading={false}
+                sortBy={sortBy}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+              />
             )}
           </CardContent>
         </Card>
