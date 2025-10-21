@@ -7,8 +7,9 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Target, TrendingUp, TrendingDown } from "lucide-react";
 
 interface GoalsComparisonProps {
-  listingId: string;
+  listingId?: string | null;
   reservations: any[];
+  goals?: any[];
 }
 
 interface GoalData {
@@ -21,7 +22,7 @@ interface GoalData {
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function GoalsComparison({ listingId, reservations }: GoalsComparisonProps) {
+export function GoalsComparison({ listingId, reservations, goals: externalGoals }: GoalsComparisonProps) {
   const [activeTab, setActiveTab] = useState<'monthly' | 'cumulative'>('monthly');
   const [year, setYear] = useState(new Date().getFullYear());
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
@@ -30,18 +31,29 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
 
   useEffect(() => {
     loadGoalsComparison();
-  }, [listingId, year, reservations]);
+  }, [listingId, year, reservations, externalGoals]);
 
   const loadGoalsComparison = async () => {
     try {
-      const { data: goalsData, error } = await supabase
-        .from('property_goals')
-        .select('*')
-        .eq('listing_id', listingId)
-        .eq('year', year)
-        .order('month');
+      let goalsData;
 
-      if (error) throw error;
+      // If external goals provided (group-level), use them
+      if (externalGoals) {
+        goalsData = externalGoals.filter(g => g.year === year);
+      } else if (listingId) {
+        // Otherwise fetch for specific listing
+        const { data, error } = await supabase
+          .from('property_goals')
+          .select('*')
+          .eq('listing_id', listingId)
+          .eq('year', year)
+          .order('month');
+
+        if (error) throw error;
+        goalsData = data;
+      } else {
+        goalsData = [];
+      }
 
       // Calculate actual revenue per month
       const monthly: GoalData[] = [];
@@ -52,19 +64,19 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
       let cumulativeGoal = 0;
 
       for (let month = 0; month < 12; month++) {
-        const monthGoal = goalsData?.find(g => g.month === month + 1);
+        // For group-level, aggregate goals for this month
+        const monthGoals = externalGoals 
+          ? goalsData?.filter(g => g.month === month + 1) || []
+          : [goalsData?.find(g => g.month === month + 1)].filter(Boolean);
         
         // Calculate actual revenue for this month
         const actualRevenue = reservations
           .filter(r => {
             if (!r.check_in) return false;
-            const checkIn = new Date(r.check_in);
-            return checkIn.getFullYear() === year && 
-                   checkIn.getMonth() === month &&
-                   ["confirmed", "checked_in", "checked_out"].includes(r.status);
+            return ["confirmed", "checked_in", "checked_out"].includes(r.status);
           })
           .reduce((sum, r) => {
-            const revenue = parseFloat(r.fare_accommodation_adjusted || 0);
+            const revenue = Number(r.fare_accommodation_adjusted) || 0;
             const nightsCount = r.nights_count || 0;
             const revenuePerNight = nightsCount > 0 ? revenue / nightsCount : 0;
             
@@ -72,7 +84,7 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
             const checkIn = new Date(r.check_in);
             const checkOut = new Date(r.check_out);
             let nightsInMonth = 0;
-            let currentDate = checkIn;
+            let currentDate = new Date(checkIn);
             
             while (currentDate < checkOut) {
               if (currentDate.getFullYear() === year && currentDate.getMonth() === month) {
@@ -85,9 +97,10 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
             return sum + (revenuePerNight * nightsInMonth);
           }, 0);
 
-        const budget = monthGoal?.budget_revenue || 0;
-        const projection = monthGoal?.projection_revenue || 0;
-        const goal = monthGoal?.goal_revenue || 0;
+        // Aggregate goals for group-level or use single goal
+        const budget = monthGoals.reduce((sum, g) => sum + (Number(g?.budget_revenue) || 0), 0);
+        const projection = monthGoals.reduce((sum, g) => sum + (Number(g?.projection_revenue) || 0), 0);
+        const goal = monthGoals.reduce((sum, g) => sum + (Number(g?.goal_revenue) || 0), 0);
 
         // Monthly data
         monthly.push({

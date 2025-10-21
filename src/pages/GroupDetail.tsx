@@ -27,6 +27,7 @@ import { TrendChart } from "@/components/TrendChart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PacingReport } from "@/components/PacingReport";
+import { GoalsComparison } from "@/components/GoalsComparison";
 import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
 import { format, startOfYear } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -304,45 +305,150 @@ export default function GroupDetail() {
     goal: avgGoalProbabilities.goal / avgGoalProbabilities.count,
   } : null;
 
-  // Prepare chart data
-  const monthlyData = Array.from({ length: 12 }, (_, i) => {
-    const monthReservations = reservations?.filter((r) => {
-      const checkIn = new Date(r.check_in || "");
-      return checkIn.getMonth() === i;
-    }) || [];
+  // Calculate year-over-year revenue data
+  const calculateYearOverYearRevenue = () => {
+    const currentYear = dateRange.from.getFullYear();
+    const monthlyRevenue: { [key: string]: { current: number; last: number } } = {};
 
-    const revenue = monthReservations.reduce((sum, r) => sum + (Number(r.owner_revenue) || 0), 0);
-    const monthGoals = goals?.filter((g) => g.month === i + 1) || [];
-    const goal = monthGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
+    // Initialize all months
+    for (let i = 0; i < 12; i++) {
+      const monthKey = `${i}`;
+      monthlyRevenue[monthKey] = { current: 0, last: 0 };
+    }
 
-    return {
+    // Calculate revenue per night and allocate to correct month
+    reservations?.forEach((r) => {
+      if (!r.check_in || !r.check_out || !r.nights_count || r.nights_count <= 0) return;
+
+      const checkIn = new Date(r.check_in);
+      const checkOut = new Date(r.check_out);
+      const revenuePerNight = (Number(r.fare_accommodation_adjusted) || 0) / r.nights_count;
+
+      let currentDate = new Date(checkIn);
+      while (currentDate < checkOut) {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+
+        if (year === currentYear) {
+          monthlyRevenue[month].current += revenuePerNight;
+        } else if (year === currentYear - 1) {
+          monthlyRevenue[month].last += revenuePerNight;
+        }
+
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+    });
+
+    return Array.from({ length: 12 }, (_, i) => ({
       month: format(new Date(2025, i), "MMM"),
-      revenue,
-      goal,
-    };
-  });
+      monthKey: `${currentYear}-${String(i + 1).padStart(2, '0')}`,
+      currentYear: Math.round(monthlyRevenue[i].current),
+      lastYear: Math.round(monthlyRevenue[i].last),
+    }));
+  };
 
-  // Prepare chart data for TrendChart component
-  const occupancyData = monthlyData.map((d) => ({
-    month: d.month,
-    monthKey: d.month,
-    currentYear: 0, // Would need reservation data to calculate
-    lastYear: 0,
-  }));
+  // Calculate year-over-year occupancy data
+  const calculateYearOverYearOccupancy = () => {
+    const currentYear = dateRange.from.getFullYear();
+    const monthlyOccupancy: { [key: string]: { currentNights: number; lastNights: number; totalDays: number } } = {};
 
-  const revenueData = monthlyData.map((d) => ({
-    month: d.month,
-    monthKey: d.month,
-    currentYear: d.revenue,
-    lastYear: 0, // Would need last year data
-  }));
+    // Initialize all months
+    for (let i = 0; i < 12; i++) {
+      const daysInMonth = new Date(currentYear, i + 1, 0).getDate();
+      monthlyOccupancy[i] = { currentNights: 0, lastNights: 0, totalDays: daysInMonth };
+    }
 
-  const revparData = monthlyData.map((d) => ({
-    month: d.month,
-    monthKey: d.month,
-    currentYear: 0,
-    lastYear: 0,
-  }));
+    // Count nights booked per month
+    reservations?.forEach((r) => {
+      if (!r.check_in || !r.check_out) return;
+
+      const checkIn = new Date(r.check_in);
+      const checkOut = new Date(r.check_out);
+
+      let currentDate = new Date(checkIn);
+      while (currentDate < checkOut) {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+
+        if (year === currentYear) {
+          monthlyOccupancy[month].currentNights++;
+        } else if (year === currentYear - 1) {
+          monthlyOccupancy[month].lastNights++;
+        }
+
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+    });
+
+    // Calculate occupancy percentage: (nights booked / (days in month × number of properties)) × 100
+    const propertyCount = listingIds.length || 1;
+
+    return Array.from({ length: 12 }, (_, i) => {
+      const data = monthlyOccupancy[i];
+      const totalAvailableNights = data.totalDays * propertyCount;
+
+      return {
+        month: format(new Date(2025, i), "MMM"),
+        monthKey: `${currentYear}-${String(i + 1).padStart(2, '0')}`,
+        currentYear: totalAvailableNights > 0 ? (data.currentNights / totalAvailableNights) * 100 : 0,
+        lastYear: totalAvailableNights > 0 ? (data.lastNights / totalAvailableNights) * 100 : 0,
+      };
+    });
+  };
+
+  // Calculate year-over-year RevPAR data
+  const calculateYearOverYearRevPAR = () => {
+    const currentYear = dateRange.from.getFullYear();
+    const monthlyData: { [key: string]: { currentRevenue: number; lastRevenue: number; totalDays: number } } = {};
+
+    // Initialize all months
+    for (let i = 0; i < 12; i++) {
+      const daysInMonth = new Date(currentYear, i + 1, 0).getDate();
+      monthlyData[i] = { currentRevenue: 0, lastRevenue: 0, totalDays: daysInMonth };
+    }
+
+    // Calculate revenue per night and allocate to correct month
+    reservations?.forEach((r) => {
+      if (!r.check_in || !r.check_out || !r.nights_count || r.nights_count <= 0) return;
+
+      const checkIn = new Date(r.check_in);
+      const checkOut = new Date(r.check_out);
+      const revenuePerNight = (Number(r.fare_accommodation_adjusted) || 0) / r.nights_count;
+
+      let currentDate = new Date(checkIn);
+      while (currentDate < checkOut) {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+
+        if (year === currentYear) {
+          monthlyData[month].currentRevenue += revenuePerNight;
+        } else if (year === currentYear - 1) {
+          monthlyData[month].lastRevenue += revenuePerNight;
+        }
+
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+    });
+
+    // Calculate RevPAR: Total Revenue / Total Available Nights
+    const propertyCount = listingIds.length || 1;
+
+    return Array.from({ length: 12 }, (_, i) => {
+      const data = monthlyData[i];
+      const totalAvailableNights = data.totalDays * propertyCount;
+
+      return {
+        month: format(new Date(2025, i), "MMM"),
+        monthKey: `${currentYear}-${String(i + 1).padStart(2, '0')}`,
+        currentYear: totalAvailableNights > 0 ? data.currentRevenue / totalAvailableNights : 0,
+        lastYear: totalAvailableNights > 0 ? data.lastRevenue / totalAvailableNights : 0,
+      };
+    });
+  };
+
+  const occupancyData = calculateYearOverYearOccupancy();
+  const revenueData = calculateYearOverYearRevenue();
+  const revparData = calculateYearOverYearRevPAR();
 
   const handleAddProperties = async () => {
     if (selectedNewListings.length === 0) {
@@ -731,7 +837,10 @@ export default function GroupDetail() {
           <TabsContent value="overview" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>Revenue vs Goals</CardTitle>
+                <CardTitle>Year-over-Year Performance</CardTitle>
+                <CardDescription>
+                  Comparing {dateRange.from.getFullYear()} vs {dateRange.from.getFullYear() - 1} across all {listingIds.length} properties
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <TrendChart
@@ -740,9 +849,16 @@ export default function GroupDetail() {
                   revparData={revparData}
                   goalsData={goals || []}
                   reservations={reservations || []}
+                  revenueForecast={aggregatedForecast}
                 />
               </CardContent>
             </Card>
+
+            <GoalsComparison 
+              listingId={null}
+              reservations={reservations || []}
+              goals={goals || []}
+            />
           </TabsContent>
 
           <TabsContent value="forecast" className="space-y-6">
