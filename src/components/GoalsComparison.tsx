@@ -22,9 +22,9 @@ interface GoalData {
   budget: number;
   projection: number;
   goal: number;
-  forecastLow?: number;
-  forecastMid?: number;
-  forecastHigh?: number;
+  forecastP25?: number;
+  forecastP50?: number;
+  forecastP75?: number;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -90,9 +90,10 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       let cumulativeBudget = 0;
       let cumulativeProjection = 0;
       let cumulativeGoal = 0;
-      let cumulativeForecastP10 = 0;
+      let cumulativeForecastP25 = 0;
       let cumulativeForecastP50 = 0;
-      let cumulativeForecastP90 = 0;
+      let cumulativeForecastP75 = 0;
+      const currentMonth = new Date().getMonth();
 
       for (let month = 0; month < 12; month++) {
         // For group-level, aggregate goals for this month
@@ -134,7 +135,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         const goal = monthGoals.reduce((sum, g) => sum + (Number(g?.goal_revenue) || 0), 0);
 
         // Aggregate forecast for this month with confidence intervals
-        let forecastP10 = 0, forecastP50 = 0, forecastP90 = 0;
+        let forecastP25 = 0, forecastP50 = 0, forecastP75 = 0;
         if (forecastData && forecastData.length > 0) {
           const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
           forecastData.forEach(f => {
@@ -142,9 +143,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
             const monthForecast = monthlyForecasts.find((mf: any) =>
               mf?.month === monthKey || mf?.month === month || mf?.month === month + 1
             );
-            forecastP10 += (monthForecast?.totalForecast?.p10 ?? monthForecast?.total_forecast_p10 ?? 0);
+            forecastP25 += (monthForecast?.totalForecast?.p25 ?? monthForecast?.total_forecast_p25 ?? 0);
             forecastP50 += (monthForecast?.totalForecast?.p50 ?? monthForecast?.total_forecast_p50 ?? 0);
-            forecastP90 += (monthForecast?.totalForecast?.p90 ?? monthForecast?.total_forecast_p90 ?? 0);
+            forecastP75 += (monthForecast?.totalForecast?.p75 ?? monthForecast?.total_forecast_p75 ?? 0);
           });
         }
 
@@ -155,9 +156,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(budget),
           projection: Math.round(projection),
           goal: Math.round(goal),
-          forecastLow: Math.round(forecastP10),
-          forecastMid: Math.round(forecastP50),
-          forecastHigh: Math.round(forecastP90),
+          forecastP25: Math.round(forecastP25),
+          forecastP50: Math.round(forecastP50),
+          forecastP75: Math.round(forecastP75),
         });
 
         // Cumulative data
@@ -165,9 +166,12 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         cumulativeBudget += budget;
         cumulativeProjection += projection;
         cumulativeGoal += goal;
-        cumulativeForecastP10 += forecastP10;
+        cumulativeForecastP25 += forecastP25;
         cumulativeForecastP50 += forecastP50;
-        cumulativeForecastP90 += forecastP90;
+        cumulativeForecastP75 += forecastP75;
+
+        // Only constrain forecast to actuals for past/current months
+        const isCurrentOrPast = month <= currentMonth;
 
         cumulative.push({
           month: monthNames[month],
@@ -175,10 +179,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
           goal: Math.round(cumulativeGoal),
-          // For cumulative, ensure forecast never goes below actuals
-          forecastLow: Math.round(Math.max(cumulativeForecastP10, cumulativeActual)),
-          forecastMid: Math.round(Math.max(cumulativeForecastP50, cumulativeActual)),
-          forecastHigh: Math.round(Math.max(cumulativeForecastP90, cumulativeActual)),
+          forecastP25: Math.round(isCurrentOrPast ? Math.max(cumulativeForecastP25, cumulativeActual) : cumulativeForecastP25),
+          forecastP50: Math.round(isCurrentOrPast ? Math.max(cumulativeForecastP50, cumulativeActual) : cumulativeForecastP50),
+          forecastP75: Math.round(isCurrentOrPast ? Math.max(cumulativeForecastP75, cumulativeActual) : cumulativeForecastP75),
         });
       }
 
@@ -197,7 +200,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     if (!active || !payload || !payload.length) return null;
 
     const data = payload[0].payload;
-    const hasForecast = data.forecastLow !== undefined;
+    const hasForecast = data.forecastP25 !== undefined;
 
     return (
       <div className="bg-popover border border-border rounded-lg shadow-lg p-3">
@@ -216,9 +219,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
             <div className="mt-2 pt-2 border-t border-border">
               <div className="text-xs text-muted-foreground mb-1">Forecast Range:</div>
               <div className="text-xs space-y-0.5">
-                <div>Low (P10): ${data.forecastLow?.toLocaleString()}</div>
-                <div>Mid (P50): ${data.forecastMid?.toLocaleString()}</div>
-                <div>High (P90): ${data.forecastHigh?.toLocaleString()}</div>
+                <div>P25 (Low): ${data.forecastP25?.toLocaleString()}</div>
+                <div>P50 (Mid): ${data.forecastP50?.toLocaleString()}</div>
+                <div>P75 (High): ${data.forecastP75?.toLocaleString()}</div>
               </div>
             </div>
           )}
@@ -363,7 +366,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     <>
                       <Area 
                         type="monotone" 
-                        dataKey="forecastHigh" 
+                        dataKey="forecastP75" 
                         stroke="none" 
                         fill="#06b6d4" 
                         fillOpacity={0.3}
@@ -371,7 +374,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                       />
                       <Area 
                         type="monotone" 
-                        dataKey="forecastLow" 
+                        dataKey="forecastP25" 
                         stroke="none" 
                         fill="hsl(var(--background))" 
                         fillOpacity={1}
@@ -379,7 +382,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                       />
                       <Line 
                         type="monotone" 
-                        dataKey="forecastMid" 
+                        dataKey="forecastP50" 
                         stroke="#06b6d4" 
                         strokeWidth={2} 
                         strokeDasharray="3 3"
@@ -415,7 +418,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     <>
                       <Area 
                         type="monotone" 
-                        dataKey="forecastHigh" 
+                        dataKey="forecastP75" 
                         stroke="none" 
                         fill="#06b6d4" 
                         fillOpacity={0.3}
@@ -423,7 +426,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                       />
                       <Area 
                         type="monotone" 
-                        dataKey="forecastLow" 
+                        dataKey="forecastP25" 
                         stroke="none" 
                         fill="hsl(var(--background))" 
                         fillOpacity={1}
@@ -431,7 +434,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                       />
                       <Line 
                         type="monotone" 
-                        dataKey="forecastMid" 
+                        dataKey="forecastP50" 
                         stroke="#06b6d4" 
                         strokeWidth={2} 
                         strokeDasharray="3 3"
