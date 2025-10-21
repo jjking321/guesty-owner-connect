@@ -142,9 +142,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
             const monthForecast = monthlyForecasts.find((mf: any) =>
               mf?.month === monthKey || mf?.month === month || mf?.month === month + 1
             );
-            forecastP10 += (monthForecast?.totalForecast?.p10 ?? 0);
+            forecastP10 += (monthForecast?.totalForecast?.p10 ?? monthForecast?.total_forecast_p10 ?? 0);
             forecastP50 += (monthForecast?.totalForecast?.p50 ?? monthForecast?.total_forecast_p50 ?? 0);
-            forecastP90 += (monthForecast?.totalForecast?.p90 ?? 0);
+            forecastP90 += (monthForecast?.totalForecast?.p90 ?? monthForecast?.total_forecast_p90 ?? 0);
           });
         }
 
