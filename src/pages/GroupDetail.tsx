@@ -186,6 +186,25 @@ export default function GroupDetail() {
     enabled: listingIds.length > 0,
   });
 
+  // Fetch reservation nights for accurate revenue calculation by date
+  const { data: reservationNights } = useQuery({
+    queryKey: ["group-reservation-nights", listingIds, dateRange.from, dateRange.to],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const { data, error } = await supabase
+        .from("reservation_nights")
+        .select("*")
+        .in("listing_id", listingIds)
+        .gte("night_date", format(dateRange.from, "yyyy-MM-dd"))
+        .lte("night_date", format(dateRange.to, "yyyy-MM-dd"));
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: listingIds.length > 0,
+  });
+
   const { data: goals } = useQuery({
     queryKey: ["group-goals", listingIds, dateRange.from, dateRange.to],
     queryFn: async () => {
@@ -242,9 +261,9 @@ export default function GroupDetail() {
   });
 
   // Calculate aggregated metrics
-  const totalRevenue = reservations?.reduce((sum, r) => sum + (Number(r.owner_revenue) || 0), 0) || 0;
+  const totalRevenue = reservationNights?.reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
   const totalReservations = reservations?.length || 0;
-  const totalNights = reservations?.reduce((sum, r) => sum + (r.nights_count || 0), 0) || 0;
+  const totalNights = reservationNights?.length || 0;
 
   const totalGoalRevenue = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
   const totalBudgetRevenue = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
