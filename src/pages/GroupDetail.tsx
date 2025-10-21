@@ -205,25 +205,6 @@ export default function GroupDetail() {
     enabled: listingIds.length > 0,
   });
 
-  // Fallback: get reservations that overlap with date range, then calculate only nights within range
-  const { data: reservationsForRevenue } = useQuery({
-    queryKey: ["group-reservations-revenue", listingIds, dateRange.from, dateRange.to],
-    queryFn: async () => {
-      if (listingIds.length === 0) return [];
-
-      const { data, error } = await supabase
-        .from("reservations")
-        .select("listing_id, check_in, check_out, fare_accommodation_adjusted, owner_revenue, nights_count, status")
-        .in("listing_id", listingIds)
-        .lte("check_in", format(dateRange.to, "yyyy-MM-dd"))
-        .gte("check_out", format(dateRange.from, "yyyy-MM-dd"))
-        .eq("status", "checked_out");
-
-      if (error) throw error;
-      return data;
-    },
-    enabled: listingIds.length > 0,
-  });
 
   const { data: goals } = useQuery({
     queryKey: ["group-goals", listingIds, dateRange.from, dateRange.to],
@@ -281,44 +262,10 @@ export default function GroupDetail() {
   });
 
   // Calculate aggregated metrics
-  const totalRevenueNights = reservationNights?.reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
-  
-  // Fallback: calculate revenue from reservations, prorating for nights within date range
-  const totalRevenueReservations = reservationsForRevenue?.reduce((sum, r) => {
-    const checkIn = new Date(r.check_in || "");
-    const checkOut = new Date(r.check_out || "");
-    const rangeStart = dateRange.from;
-    const rangeEnd = dateRange.to;
-    
-    // Find overlap between reservation and date range
-    const overlapStart = checkIn > rangeStart ? checkIn : rangeStart;
-    const overlapEnd = checkOut < rangeEnd ? checkOut : rangeEnd;
-    
-    // Calculate days in overlap
-    const daysInOverlap = Math.max(0, Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)));
-    const totalNights = r.nights_count || 1;
-    
-    // Prorate revenue based on nights in range
-    const revenue = Number(r.fare_accommodation_adjusted) || Number(r.owner_revenue) || 0;
-    const proratedRevenue = (revenue / totalNights) * daysInOverlap;
-    
-    return sum + proratedRevenue;
-  }, 0) || 0;
-  
-  const totalRevenue = totalRevenueNights > 0 ? totalRevenueNights : totalRevenueReservations;
+  const totalRevenue = reservationNights?.reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
 
   const totalReservations = reservations?.length || 0;
-  const totalNights = reservationNights?.length > 0
-    ? reservationNights.length
-    : (reservationsForRevenue?.reduce((sum, r) => {
-        const checkIn = new Date(r.check_in || "");
-        const checkOut = new Date(r.check_out || "");
-        const rangeStart = dateRange.from;
-        const rangeEnd = dateRange.to;
-        const overlapStart = checkIn > rangeStart ? checkIn : rangeStart;
-        const overlapEnd = checkOut < rangeEnd ? checkOut : rangeEnd;
-        return sum + Math.max(0, Math.ceil((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)));
-      }, 0) || 0);
+  const totalNights = reservationNights?.length || 0;
 
   const totalGoalRevenue = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
   const totalBudgetRevenue = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
