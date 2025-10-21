@@ -20,7 +20,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus, Info as InfoIcon } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
 import { TrendChart } from "@/components/TrendChart";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -176,7 +177,7 @@ export default function GroupDetail() {
         .from("reservations")
         .select("*")
         .in("listing_id", listingIds)
-        .gte("check_in", format(dateRange.from, "yyyy-MM-dd"))
+        .gte("check_out", format(dateRange.from, "yyyy-MM-dd"))
         .lte("check_in", format(dateRange.to, "yyyy-MM-dd"))
         .in("status", ["confirmed", "checked_in", "checked_out"]);
 
@@ -266,6 +267,11 @@ export default function GroupDetail() {
 
   const totalReservations = reservations?.length || 0;
   const totalNights = reservationNights?.length || 0;
+
+  // Check if data is incomplete (reservations exist but nights data is missing)
+  const hasReservations = totalReservations > 0;
+  const hasNights = totalNights > 0;
+  const isDataIncomplete = hasReservations && !hasNights;
 
   const totalGoalRevenue = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
   const totalBudgetRevenue = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
@@ -639,6 +645,20 @@ export default function GroupDetail() {
             )}
           </div>
         </div>
+
+        {isDataIncomplete && (
+          <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
+            <InfoIcon className="h-4 w-4 text-amber-600" />
+            <AlertTitle className="text-amber-900 dark:text-amber-100">
+              Nightly Revenue Data Being Prepared
+            </AlertTitle>
+            <AlertDescription className="text-amber-800 dark:text-amber-200">
+              Reservations have been synced for this period, but detailed nightly allocations 
+              are still being generated. Revenue and nights totals may be incomplete. 
+              This typically completes within a few minutes after a sync.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="grid gap-4 md:grid-cols-4">
           <MetricCard
