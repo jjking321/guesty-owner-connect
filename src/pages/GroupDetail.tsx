@@ -174,16 +174,21 @@ export default function GroupDetail() {
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
-      // Expand date range to include previous year for year-over-year comparison
+      // Fetch reservations for the full year to show "on the books" revenue
+      // in Goals Comparison, including confirmed future bookings through December
       const startDate = new Date(dateRange.from);
       startDate.setFullYear(startDate.getFullYear() - 1);
+
+      // Set end date to December 31st of the selected year to include future bookings
+      const endOfYear = new Date(dateRange.from);
+      endOfYear.setMonth(11, 31); // December 31
 
       const { data, error } = await supabase
         .from("reservations")
         .select("*")
         .in("listing_id", listingIds)
         .gte("check_out", format(startDate, "yyyy-MM-dd"))
-        .lte("check_in", format(dateRange.to, "yyyy-MM-dd"))
+        .lte("check_in", format(endOfYear, "yyyy-MM-dd"))
         .in("status", ["confirmed", "checked_in", "checked_out"]);
 
       if (error) throw error;
