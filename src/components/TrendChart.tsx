@@ -48,7 +48,15 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
                  checkIn.getMonth() === index &&
                  ["confirmed", "checked_in", "checked_out"].includes(r.status);
         })
-        .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+        .reduce((sum, r) => {
+          const revenue = parseFloat(r.fare_accommodation_adjusted || 0);
+          const nightsCount = r.nights_count || 0;
+          return sum + (nightsCount > 0 ? revenue / nightsCount : 0);
+        }, 0) * (reservations.filter(r => {
+          if (!r.check_in) return false;
+          const checkIn = new Date(r.check_in);
+          return checkIn.getFullYear() === currentYear && checkIn.getMonth() === index;
+        }).reduce((sum, r) => sum + (r.nights_count || 0), 0));
 
       // Get forecast data for this month if available
       // Handle both the raw DB format and the formatted format

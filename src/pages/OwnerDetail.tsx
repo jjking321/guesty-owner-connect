@@ -126,7 +126,7 @@ export default function OwnerDetail() {
     let behindCount = 0;
 
     listings.forEach(listing => {
-      // Calculate YTD revenue
+      // Calculate YTD revenue (check_out <= today)
       const listingReservations = reservations.filter(
         r => r.listing_id === listing.id && 
         r.status === 'confirmed' &&

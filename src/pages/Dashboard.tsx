@@ -55,7 +55,7 @@ export default function Dashboard() {
           .from("reservations")
           .select("id, listing_id, check_in, check_out, fare_accommodation_adjusted, nights_count, guests_count, status, source, confirmation_code")
           .in("status", ["confirmed", "checked_in", "checked_out"])
-          .gte("check_in", startDateStr)
+          .gte("check_out", startDateStr)
           .lte("check_in", endDateStr)
           .order("check_in", { ascending: false })
           .range(offset, offset + batchSize - 1);
@@ -105,56 +105,101 @@ export default function Dashboard() {
     });
   };
 
-  // Memoized metrics calculations
+  // Query reservation_nights for revenue calculations
+  const { data: reservationNights = [] } = useQuery({
+    queryKey: ['dashboard-nights', startDate.toISOString(), endDate.toISOString()],
+    queryFn: async () => {
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      const { data, error } = await supabase
+        .from("reservation_nights")
+        .select("revenue_allocation, night_date, listing_id")
+        .gte("night_date", startDateStr)
+        .lte("night_date", endDateStr);
+
+      if (error) throw error;
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Memoized metrics calculations (using reservation_nights for revenue)
   const metrics = useMemo(() => {
-    const totalRevenue = reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0)), 0);
+    const totalRevenue = reservationNights.reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0);
     const totalBookings = reservations.length;
     const activeListings = listings.filter(l => l.active).length;
-    const avgNightlyRate = reservations.length > 0
-      ? reservations.reduce((sum, r) => sum + (parseFloat(r.fare_accommodation_adjusted || 0) / (r.nights_count || 1)), 0) / reservations.length
-      : 0;
+    const totalNights = reservationNights.length;
+    const avgNightlyRate = totalNights > 0 ? totalRevenue / totalNights : 0;
 
     return { totalRevenue, totalBookings, activeListings, avgNightlyRate };
-  }, [reservations, listings]);
+  }, [reservations, listings, reservationNights]);
 
-  // Memoized chart data
+  // Memoized chart data (using reservation_nights for revenue by night date)
   const chartData = useMemo(() => {
-    const revenueByMonth = reservations.reduce((acc: any, r) => {
+    const revenueByMonth = reservationNights.reduce((acc: any, n) => {
+      if (!n.night_date) return acc;
+      const nightDate = new Date(n.night_date);
+      const yearMonth = `${nightDate.getFullYear()}-${String(nightDate.getMonth() + 1).padStart(2, '0')}`;
+      const monthLabel = nightDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
+      
+      if (!acc[yearMonth]) {
+        acc[yearMonth] = { month: monthLabel, revenue: 0, sortKey: yearMonth };
+      }
+      acc[yearMonth].revenue += Number(n.revenue_allocation) || 0;
+      return acc;
+    }, {});
+
+    // Count bookings by check-in month for bookings count
+    const bookingsByMonth = reservations.reduce((acc: any, r) => {
       if (!r.check_in) return acc;
       const checkInDate = new Date(r.check_in);
       const yearMonth = `${checkInDate.getFullYear()}-${String(checkInDate.getMonth() + 1).padStart(2, '0')}`;
-      const monthLabel = checkInDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
-      
-      if (!acc[yearMonth]) {
-        acc[yearMonth] = { month: monthLabel, revenue: 0, bookings: 0, sortKey: yearMonth };
-      }
-      acc[yearMonth].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
-      acc[yearMonth].bookings += 1;
+      acc[yearMonth] = (acc[yearMonth] || 0) + 1;
       return acc;
     }, {});
 
-    return Object.values(revenueByMonth)
+    const combined = Object.entries(revenueByMonth).map(([key, value]: [string, any]) => ({
+      ...value,
+      bookings: bookingsByMonth[key] || 0,
+    }));
+
+    return combined
       .sort((a: any, b: any) => a.sortKey.localeCompare(b.sortKey))
       .slice(-12);
-  }, [reservations]);
+  }, [reservations, reservationNights]);
 
-  // Memoized top properties
+  // Memoized top properties (using reservation_nights for revenue)
   const topProperties = useMemo(() => {
-    const propertyRevenue = reservations.reduce((acc: any, r) => {
-      const listing = listings.find(l => l.id === r.listing_id);
-      const propName = listing?.nickname || r.listing_id;
+    const propertyRevenue = reservationNights.reduce((acc: any, n) => {
+      const listing = listings.find(l => l.id === n.listing_id);
+      const propName = listing?.nickname || n.listing_id;
       if (!acc[propName]) {
         acc[propName] = { name: propName, revenue: 0, bookings: 0 };
       }
-      acc[propName].revenue += parseFloat(r.fare_accommodation_adjusted || 0);
-      acc[propName].bookings += 1;
+      acc[propName].revenue += Number(n.revenue_allocation) || 0;
       return acc;
     }, {});
 
-    return Object.values(propertyRevenue)
+    // Count bookings per property
+    const bookingsByProperty = reservations.reduce((acc: any, r) => {
+      const listing = listings.find(l => l.id === r.listing_id);
+      const propName = listing?.nickname || r.listing_id;
+      acc[propName] = (acc[propName] || 0) + 1;
+      return acc;
+    }, {});
+
+    const combined = Object.entries(propertyRevenue).map(([name, data]: [string, any]) => ({
+      name,
+      revenue: data.revenue,
+      bookings: bookingsByProperty[name] || 0,
+    }));
+
+    return combined
       .sort((a: any, b: any) => b.revenue - a.revenue)
       .slice(0, 5);
-  }, [reservations, listings]);
+  }, [reservations, listings, reservationNights]);
 
   // Memoized bedroom data
   const bedroomData = useMemo(() => {
@@ -198,8 +243,8 @@ export default function Dashboard() {
             <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
             <p className="text-muted-foreground">
               {showCustomDates 
-                ? `${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}`
-                : `${format(startDate, "yyyy")} Performance Overview`}
+                ? `Occupancy Period: ${format(startDate, "MMM d, yyyy")} - ${format(endDate, "MMM d, yyyy")}`
+                : `${format(startDate, "yyyy")} Performance Overview (Occupancy-Based)`}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -319,8 +364,8 @@ export default function Dashboard() {
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Revenue Over Time</CardTitle>
-                <CardDescription>Monthly accommodation revenue trends</CardDescription>
+            <CardTitle>Revenue Over Time</CardTitle>
+                <CardDescription>Monthly revenue by stay date</CardDescription>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>

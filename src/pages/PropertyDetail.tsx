@@ -49,7 +49,7 @@ export default function PropertyDetail() {
         .from("reservations")
         .select("*")
         .eq("listing_id", id)
-        .in("status", ["confirmed", "checked_out"])
+        .in("status", ["confirmed", "checked_out", "checked_in"])
         .order("check_in", { ascending: false });
 
       if (reservationsError) throw reservationsError;
@@ -199,19 +199,29 @@ export default function PropertyDetail() {
       lastYearData.set(lastKey, 0);
     }
 
-    // Process each reservation - assign revenue to check-in month
+    // Process each reservation
     reservations.forEach((reservation) => {
-      if (!reservation.check_in || !reservation.fare_accommodation_adjusted) return;
+      if (!reservation.check_in || !reservation.check_out || !reservation.fare_accommodation_adjusted) return;
 
       const checkIn = parseISO(reservation.check_in);
-      const monthKey = format(checkIn, 'yyyy-MM');
-      const year = checkIn.getFullYear();
-      const revenue = parseFloat(reservation.fare_accommodation_adjusted);
+      const checkOut = parseISO(reservation.check_out);
+      const totalRevenue = parseFloat(reservation.fare_accommodation_adjusted);
+      const nightsCount = reservation.nights_count || 0;
+      const revenuePerNight = nightsCount > 0 ? totalRevenue / nightsCount : 0;
       
-      if (year === currentYear && currentYearData.has(monthKey)) {
-        currentYearData.set(monthKey, currentYearData.get(monthKey)! + revenue);
-      } else if (year === lastYear && lastYearData.has(monthKey)) {
-        lastYearData.set(monthKey, lastYearData.get(monthKey)! + revenue);
+      // Iterate through each night and allocate revenue to the month
+      let currentNight = checkIn;
+      while (currentNight < checkOut) {
+        const monthKey = format(currentNight, 'yyyy-MM');
+        const year = currentNight.getFullYear();
+        
+        if (year === currentYear && currentYearData.has(monthKey)) {
+          currentYearData.set(monthKey, currentYearData.get(monthKey)! + revenuePerNight);
+        } else if (year === lastYear && lastYearData.has(monthKey)) {
+          lastYearData.set(monthKey, lastYearData.get(monthKey)! + revenuePerNight);
+        }
+        
+        currentNight = addDays(currentNight, 1);
       }
     });
 
@@ -262,27 +272,34 @@ export default function PropertyDetail() {
     reservations.forEach((reservation) => {
       if (!reservation.check_in || !reservation.check_out) return;
 
-      const checkIn = parseISO(reservation.check_in);
-      const checkOut = parseISO(reservation.check_out);
-      const revenue = parseFloat(reservation.fare_accommodation_adjusted || 0);
+      const resCheckIn = parseISO(reservation.check_in);
+      const resCheckOut = parseISO(reservation.check_out);
+      const resRevenue = parseFloat(reservation.fare_accommodation_adjusted || 0);
+      const resNightsCount = reservation.nights_count || 0;
+      const resRevenuePerNight = resNightsCount > 0 ? resRevenue / resNightsCount : 0;
       
-      // For revenue, assign to check-in month
-      const checkInMonthKey = format(checkIn, 'yyyy-MM');
-      const checkInYear = checkIn.getFullYear();
-      
-      if (checkInYear === currentYear && currentYearData.has(checkInMonthKey)) {
-        const data = currentYearData.get(checkInMonthKey)!;
-        data.revenue += revenue;
-      } else if (checkInYear === lastYear && lastYearData.has(checkInMonthKey)) {
-        const data = lastYearData.get(checkInMonthKey)!;
-        data.revenue += revenue;
+      // Allocate revenue to each night
+      let nightCursor = resCheckIn;
+      while (nightCursor < resCheckOut) {
+        const monthKey = format(nightCursor, 'yyyy-MM');
+        const year = nightCursor.getFullYear();
+        
+        if (year === currentYear && currentYearData.has(monthKey)) {
+          const data = currentYearData.get(monthKey)!;
+          data.revenue += resRevenuePerNight;
+        } else if (year === lastYear && lastYearData.has(monthKey)) {
+          const data = lastYearData.get(monthKey)!;
+          data.revenue += resRevenuePerNight;
+        }
+        
+        nightCursor = addDays(nightCursor, 1);
       }
       
       // For nights, iterate through each night of the reservation
-      let currentNight = checkIn;
-      while (currentNight < checkOut) {
-        const monthKey = format(currentNight, 'yyyy-MM');
-        const year = currentNight.getFullYear();
+      let nightCursor2 = resCheckIn;
+      while (nightCursor2 < resCheckOut) {
+        const monthKey = format(nightCursor2, 'yyyy-MM');
+        const year = nightCursor2.getFullYear();
         
         if (year === currentYear && currentYearData.has(monthKey)) {
           const data = currentYearData.get(monthKey)!;
@@ -292,7 +309,7 @@ export default function PropertyDetail() {
           data.nightsBooked++;
         }
         
-        currentNight = addDays(currentNight, 1);
+        nightCursor2 = addDays(nightCursor2, 1);
       }
     });
 
@@ -389,16 +406,27 @@ export default function PropertyDetail() {
       monthlyData.set(monthKey, 0);
     }
 
-    // Process each reservation - assign revenue to check-in month
+    // Process each reservation - allocate revenue to nights
     reservations.forEach((reservation) => {
       if (!reservation.check_in || !reservation.fare_accommodation_adjusted) return;
 
       const checkIn = parseISO(reservation.check_in);
-      const monthKey = format(checkIn, 'yyyy-MM');
+      const revenue = parseFloat(reservation.fare_accommodation_adjusted);
+      const nightsCount = reservation.nights_count || 0;
+      const revenuePerNight = nightsCount > 0 ? revenue / nightsCount : 0;
+      const checkOut = parseISO(reservation.check_out);
       
-      if (monthlyData.has(monthKey)) {
-        const currentRevenue = monthlyData.get(monthKey)!;
-        monthlyData.set(monthKey, currentRevenue + parseFloat(reservation.fare_accommodation_adjusted));
+      // Allocate revenue to each night's month
+      let currentNight = checkIn;
+      while (currentNight < checkOut) {
+        const monthKey = format(currentNight, 'yyyy-MM');
+        
+        if (monthlyData.has(monthKey)) {
+          const currentRevenue = monthlyData.get(monthKey)!;
+          monthlyData.set(monthKey, currentRevenue + revenuePerNight);
+        }
+        
+        currentNight = addDays(currentNight, 1);
       }
     });
 

@@ -37,7 +37,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
     // Filter reservations for current year YTD (check-out YTD up to today)
     const currentYearReservations = reservations.filter((r) => {
       if (!r.check_out) return false;
-      if (!["confirmed", "checked_out"].includes(r.status)) return false;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
       const checkOut = parseISO(r.check_out);
       const todayThisYear = new Date(currentYear, today.getMonth(), today.getDate());
       return (
@@ -49,7 +49,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
     // Filter reservations for last year same period (check-out YTD up to same date last year)
     const lastYearReservations = reservations.filter((r) => {
       if (!r.check_out) return false;
-      if (!["confirmed", "checked_out"].includes(r.status)) return false;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
       const checkOut = parseISO(r.check_out);
       const todayLastYear = new Date(lastYear, today.getMonth(), today.getDate());
       return (
@@ -58,7 +58,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       );
     });
 
-    // Calculate basic metrics
+    // Calculate revenue from all nights
     const currentRevenue = currentYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
     const lastRevenue = lastYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
     const revenueChange = lastRevenue > 0 ? ((currentRevenue - lastRevenue) / lastRevenue) * 100 : 0;

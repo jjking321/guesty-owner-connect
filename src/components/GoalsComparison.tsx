@@ -63,7 +63,27 @@ export function GoalsComparison({ listingId, reservations }: GoalsComparisonProp
                    checkIn.getMonth() === month &&
                    ["confirmed", "checked_in", "checked_out"].includes(r.status);
           })
-          .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+          .reduce((sum, r) => {
+            const revenue = parseFloat(r.fare_accommodation_adjusted || 0);
+            const nightsCount = r.nights_count || 0;
+            const revenuePerNight = nightsCount > 0 ? revenue / nightsCount : 0;
+            
+            // Calculate how many nights fall in this month
+            const checkIn = new Date(r.check_in);
+            const checkOut = new Date(r.check_out);
+            let nightsInMonth = 0;
+            let currentDate = checkIn;
+            
+            while (currentDate < checkOut) {
+              if (currentDate.getFullYear() === year && currentDate.getMonth() === month) {
+                nightsInMonth++;
+              }
+              currentDate = new Date(currentDate);
+              currentDate.setDate(currentDate.getDate() + 1);
+            }
+            
+            return sum + (revenuePerNight * nightsInMonth);
+          }, 0);
 
         const budget = monthGoal?.budget_revenue || 0;
         const projection = monthGoal?.projection_revenue || 0;
