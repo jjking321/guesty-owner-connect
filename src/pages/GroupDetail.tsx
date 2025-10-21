@@ -310,7 +310,7 @@ export default function GroupDetail() {
       monthlyForecasts.forEach((mf: any) => {
         const month = mf.month;
         if (monthlyData[month]) {
-          monthlyData[month].p50 += mf.total_forecast?.p50 || 0;
+          monthlyData[month].p50 += mf.total_forecast_p50 || 0;
           monthlyData[month].onBooks += mf.revenue_on_books || 0;
         }
       });
