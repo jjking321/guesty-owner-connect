@@ -183,16 +183,30 @@ export default function GroupDetail() {
       const endOfYear = new Date(dateRange.from);
       endOfYear.setMonth(11, 31); // December 31
 
-      const { data, error } = await supabase
-        .from("reservations")
-        .select("*")
-        .in("listing_id", listingIds)
-        .gte("check_out", format(startDate, "yyyy-MM-dd"))
-        .lte("check_in", format(endOfYear, "yyyy-MM-dd"))
-        .in("status", ["confirmed", "checked_in", "checked_out"]);
+      // PostgREST caps responses at 1,000 rows per request. Paginate to fetch all rows.
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
 
-      if (error) throw error;
-      return data;
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservations")
+          .select("*")
+          .in("listing_id", listingIds)
+          .gte("check_out", format(startDate, "yyyy-MM-dd"))
+          .lte("check_in", format(endOfYear, "yyyy-MM-dd"))
+          .in("status", ["confirmed", "checked_in", "checked_out"]) 
+          .order("check_in", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
     },
     enabled: listingIds.length > 0,
   });
@@ -203,16 +217,29 @@ export default function GroupDetail() {
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
-      const { data, error } = await supabase
-        .from("reservation_nights")
-        .select("listing_id, night_date, revenue_allocation")
-        .in("listing_id", listingIds)
-        .gte("night_date", format(dateRange.from, "yyyy-MM-dd"))
-        .lte("night_date", format(dateRange.to, "yyyy-MM-dd"))
-        .limit(10000);
+      // PostgREST caps responses at 1,000 rows per request. Paginate to fetch all rows.
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
 
-      if (error) throw error;
-      return data;
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(dateRange.from, "yyyy-MM-dd"))
+          .lte("night_date", format(dateRange.to, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
     },
     enabled: listingIds.length > 0,
   });
