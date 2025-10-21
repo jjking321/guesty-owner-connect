@@ -9,6 +9,9 @@ verify_jwt = false
 [functions.sync-new-reservations]
 verify_jwt = false
 
+[functions.explode-reservation-nights]
+verify_jwt = false
+
 [functions.suggest-property-goals]
 verify_jwt = true
 
