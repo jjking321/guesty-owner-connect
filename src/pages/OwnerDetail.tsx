@@ -37,6 +37,8 @@ export default function OwnerDetail() {
   const [forecasts, setForecasts] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("actual");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   useEffect(() => {
     if (id) {
@@ -174,6 +176,15 @@ export default function OwnerDetail() {
   };
 
   const metrics = calculateMetrics();
+
+  const handleSort = (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => {
+    if (sortBy === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortDirection("desc");
+    }
+  };
 
   if (loading) {
     return (
@@ -337,11 +348,34 @@ export default function OwnerDetail() {
                     hasLockedGoals: lockedGoals.length > 0,
                     goalsLockedCount: lockedGoals.length,
                   };
+                }).sort((a, b) => {
+                  let comparison = 0;
+                  
+                  switch (sortBy) {
+                    case "name":
+                      comparison = a.nickname.localeCompare(b.nickname);
+                      break;
+                    case "actual":
+                      comparison = a.actualRevenue - b.actualRevenue;
+                      break;
+                    case "forecast":
+                      comparison = a.forecastedRevenue - b.forecastedRevenue;
+                      break;
+                    case "goalProgress":
+                      comparison = a.forecastProjectionAchievement - b.forecastProjectionAchievement;
+                      break;
+                    case "status":
+                      const statusOrder = { "on-track": 3, "at-risk": 2, "behind": 1 };
+                      comparison = statusOrder[a.status] - statusOrder[b.status];
+                      break;
+                  }
+                  
+                  return sortDirection === "asc" ? comparison : -comparison;
                 })}
                 isLoading={false}
-                sortBy="actual"
-                sortDirection="desc"
-                onSort={() => {}}
+                sortBy={sortBy}
+                sortDirection={sortDirection}
+                onSort={handleSort}
               />
             )}
           </CardContent>
