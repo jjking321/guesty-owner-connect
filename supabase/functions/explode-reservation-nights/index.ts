@@ -15,10 +15,19 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log('Starting reservation nights explosion process...');
+    // Parse query parameters for targeted processing
+    const url = new URL(req.url);
+    const fromDate = url.searchParams.get('from');
+    const toDate = url.searchParams.get('to');
+    const listingIdsParam = url.searchParams.getAll('listing_ids[]');
 
-    // Get all confirmed and checked-out reservations
-    const { data: reservations, error: fetchError } = await supabase
+    console.log('Starting reservation nights explosion process...');
+    if (fromDate || toDate || listingIdsParam.length > 0) {
+      console.log(`Targeted processing: from=${fromDate}, to=${toDate}, listings=${listingIdsParam.length}`);
+    }
+
+    // Build query for reservations
+    let query = supabase
       .from('reservations')
       .select('id, listing_id, check_in, check_out, fare_accommodation_adjusted, nights_count')
       .in('status', ['confirmed', 'checked_in', 'checked_out'])
@@ -26,6 +35,18 @@ Deno.serve(async (req) => {
       .not('check_out', 'is', null)
       .not('nights_count', 'is', null)
       .gt('nights_count', 0);
+
+    // Apply date filters (overlapping reservations)
+    if (fromDate && toDate) {
+      query = query.lt('check_in', toDate).gt('check_out', fromDate);
+    }
+
+    // Apply listing filter
+    if (listingIdsParam.length > 0) {
+      query = query.in('listing_id', listingIdsParam);
+    }
+
+    const { data: reservations, error: fetchError } = await query;
 
     if (fetchError) {
       console.error('Error fetching reservations:', fetchError);

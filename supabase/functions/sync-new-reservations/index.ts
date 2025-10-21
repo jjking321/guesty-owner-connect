@@ -226,6 +226,39 @@ Deno.serve(async (req) => {
       }
 
       console.log('Upsert successful');
+
+      // Trigger nightly allocation explosion for synced reservations
+      try {
+        console.log('Triggering nightly allocation explosion...');
+        const sevenDaysAgo = new Date(cutoffDate);
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        
+        const explodeUrl = new URL(`${supabaseUrl}/functions/v1/explode-reservation-nights`);
+        explodeUrl.searchParams.set('from', sevenDaysAgo.toISOString().split('T')[0]);
+        explodeUrl.searchParams.set('to', new Date().toISOString().split('T')[0]);
+        
+        // Get unique listing IDs from synced reservations
+        const uniqueListingIds = [...new Set(allReservations.map(r => r.listingId))];
+        uniqueListingIds.forEach(id => explodeUrl.searchParams.append('listing_ids[]', id));
+
+        const explodeResponse = await fetch(explodeUrl.toString(), {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (explodeResponse.ok) {
+          const explodeResult = await explodeResponse.json();
+          console.log('Nightly allocation explosion completed:', explodeResult);
+        } else {
+          console.error('Failed to trigger nightly explosion:', await explodeResponse.text());
+        }
+      } catch (explodeError) {
+        console.error('Error triggering nightly explosion:', explodeError);
+        // Don't fail the sync if explosion fails
+      }
     }
 
     // Update last_reservations_sync timestamp
