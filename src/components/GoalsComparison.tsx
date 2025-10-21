@@ -166,7 +166,8 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
           goal: Math.round(cumulativeGoal),
-          forecast: Math.round(cumulativeForecast),
+          // Forecast should never be less than actuals in cumulative view
+          forecast: Math.round(Math.max(cumulativeForecast, cumulativeActual)),
         });
       }
 
