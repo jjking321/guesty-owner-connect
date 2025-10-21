@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { LineChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Target, TrendingUp, TrendingDown } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -22,7 +22,9 @@ interface GoalData {
   budget: number;
   projection: number;
   goal: number;
-  forecast?: number;
+  forecastLow?: number;
+  forecastMid?: number;
+  forecastHigh?: number;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -88,7 +90,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       let cumulativeBudget = 0;
       let cumulativeProjection = 0;
       let cumulativeGoal = 0;
-      let cumulativeForecast = 0;
+      let cumulativeForecastP10 = 0;
+      let cumulativeForecastP50 = 0;
+      let cumulativeForecastP90 = 0;
 
       for (let month = 0; month < 12; month++) {
         // For group-level, aggregate goals for this month
@@ -129,18 +133,19 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         const projection = monthGoals.reduce((sum, g) => sum + (Number(g?.projection_revenue) || 0), 0);
         const goal = monthGoals.reduce((sum, g) => sum + (Number(g?.goal_revenue) || 0), 0);
 
-        // Aggregate forecast for this month
-        let forecastRevenue = 0;
+        // Aggregate forecast for this month with confidence intervals
+        let forecastP10 = 0, forecastP50 = 0, forecastP90 = 0;
         if (forecastData && forecastData.length > 0) {
           const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-          forecastRevenue = forecastData.reduce((sum, f) => {
+          forecastData.forEach(f => {
             const monthlyForecasts = Array.isArray(f.monthly_forecasts) ? f.monthly_forecasts : [];
             const monthForecast = monthlyForecasts.find((mf: any) =>
               mf?.month === monthKey || mf?.month === month || mf?.month === month + 1
             );
-            const p50 = (monthForecast?.totalForecast?.p50 ?? monthForecast?.total_forecast_p50 ?? 0);
-            return sum + p50;
-          }, 0);
+            forecastP10 += (monthForecast?.totalForecast?.p10 ?? 0);
+            forecastP50 += (monthForecast?.totalForecast?.p50 ?? monthForecast?.total_forecast_p50 ?? 0);
+            forecastP90 += (monthForecast?.totalForecast?.p90 ?? 0);
+          });
         }
 
         // Monthly data
@@ -150,7 +155,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(budget),
           projection: Math.round(projection),
           goal: Math.round(goal),
-          forecast: Math.round(forecastRevenue),
+          forecastLow: Math.round(forecastP10),
+          forecastMid: Math.round(forecastP50),
+          forecastHigh: Math.round(forecastP90),
         });
 
         // Cumulative data
@@ -158,7 +165,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         cumulativeBudget += budget;
         cumulativeProjection += projection;
         cumulativeGoal += goal;
-        cumulativeForecast += forecastRevenue;
+        cumulativeForecastP10 += forecastP10;
+        cumulativeForecastP50 += forecastP50;
+        cumulativeForecastP90 += forecastP90;
 
         cumulative.push({
           month: monthNames[month],
@@ -166,8 +175,10 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
           goal: Math.round(cumulativeGoal),
-          // Forecast should never be less than actuals in cumulative view
-          forecast: Math.round(Math.max(cumulativeForecast, cumulativeActual)),
+          // For cumulative, ensure forecast never goes below actuals
+          forecastLow: Math.round(Math.max(cumulativeForecastP10, cumulativeActual)),
+          forecastMid: Math.round(Math.max(cumulativeForecastP50, cumulativeActual)),
+          forecastHigh: Math.round(Math.max(cumulativeForecastP90, cumulativeActual)),
         });
       }
 
@@ -185,17 +196,32 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload || !payload.length) return null;
 
+    const data = payload[0].payload;
+    const hasForecast = data.forecastLow !== undefined;
+
     return (
       <div className="bg-popover border border-border rounded-lg shadow-lg p-3">
-        <p className="font-medium text-sm mb-2">{payload[0].payload.month}</p>
+        <p className="font-medium text-sm mb-2">{data.month}</p>
         <div className="space-y-1">
-          {payload.map((entry: any, index: number) => (
-            <div key={index} className="flex items-center gap-2 text-sm">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
-              <span className="text-muted-foreground capitalize">{entry.name}:</span>
-              <span className="font-medium">${entry.value.toLocaleString()}</span>
+          {payload
+            .filter((entry: any) => entry.name && !entry.name.includes('Range'))
+            .map((entry: any, index: number) => (
+              <div key={index} className="flex items-center gap-2 text-sm">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="text-muted-foreground capitalize">{entry.name}:</span>
+                <span className="font-medium">${entry.value.toLocaleString()}</span>
+              </div>
+            ))}
+          {hasForecast && showForecast && (
+            <div className="mt-2 pt-2 border-t border-border">
+              <div className="text-xs text-muted-foreground mb-1">Forecast Range:</div>
+              <div className="text-xs space-y-0.5">
+                <div>Low (P10): ${data.forecastLow?.toLocaleString()}</div>
+                <div>Mid (P50): ${data.forecastMid?.toLocaleString()}</div>
+                <div>High (P90): ${data.forecastHigh?.toLocaleString()}</div>
+              </div>
             </div>
-          ))}
+          )}
         </div>
       </div>
     );
@@ -308,7 +334,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   onCheckedChange={(checked) => setShowForecast(checked as boolean)}
                 />
                 <Label htmlFor="show-forecast" className="text-sm cursor-pointer">
-                  Show Forecast
+                  Show Forecast Range
                 </Label>
               </div>
             </div>
@@ -333,7 +359,34 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
                   <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
                   <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
-                  {showForecast && <Line type="monotone" dataKey="forecast" stroke="#06b6d4" strokeWidth={2} name="Forecast" />}
+                  {showForecast && (
+                    <>
+                      <Area 
+                        type="monotone" 
+                        dataKey="forecastHigh" 
+                        stroke="none" 
+                        fill="#06b6d4" 
+                        fillOpacity={0.3}
+                        name="Forecast Range"
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="forecastLow" 
+                        stroke="none" 
+                        fill="hsl(var(--background))" 
+                        fillOpacity={1}
+                        name=""
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="forecastMid" 
+                        stroke="#06b6d4" 
+                        strokeWidth={2} 
+                        strokeDasharray="3 3"
+                        name="Forecast (P50)"
+                      />
+                    </>
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </TabsContent>
@@ -358,7 +411,34 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
                   <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
                   <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
-                  {showForecast && <Line type="monotone" dataKey="forecast" stroke="#06b6d4" strokeWidth={2} name="Forecast" />}
+                  {showForecast && (
+                    <>
+                      <Area 
+                        type="monotone" 
+                        dataKey="forecastHigh" 
+                        stroke="none" 
+                        fill="#06b6d4" 
+                        fillOpacity={0.3}
+                        name="Forecast Range"
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="forecastLow" 
+                        stroke="none" 
+                        fill="hsl(var(--background))" 
+                        fillOpacity={1}
+                        name=""
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="forecastMid" 
+                        stroke="#06b6d4" 
+                        strokeWidth={2} 
+                        strokeDasharray="3 3"
+                        name="Forecast (P50)"
+                      />
+                    </>
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </TabsContent>
