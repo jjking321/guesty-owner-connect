@@ -332,9 +332,11 @@ export default function GroupDetail() {
   const totalNights = reservationNights?.length || 0;
 
   // Calculate overall occupancy
-  const totalAvailableNights = capacityData?.filter(c => c.is_available).length || 0;
-  const overallOccupancy = totalAvailableNights > 0 
-    ? (totalNights / totalAvailableNights) * 100 
+  // Total possible nights = number of properties × number of days in date range
+  const daysInRange = Math.ceil((dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  const totalPossibleNights = listingIds.length * daysInRange;
+  const overallOccupancy = totalPossibleNights > 0 
+    ? (totalNights / totalPossibleNights) * 100 
     : 0;
 
   // Check if data is incomplete (reservations exist but nights data is missing)
@@ -887,7 +889,7 @@ export default function GroupDetail() {
             title="Overall Occupancy"
             value={`${overallOccupancy.toFixed(1)}%`}
             icon={TrendingUp}
-            description={`${totalNights.toLocaleString()} / ${totalAvailableNights.toLocaleString()} nights`}
+            description={`${totalNights.toLocaleString()} / ${totalPossibleNights.toLocaleString()} nights`}
           />
           <MetricCard
             title="Properties"
