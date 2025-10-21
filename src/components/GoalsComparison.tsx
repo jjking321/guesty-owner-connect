@@ -212,7 +212,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                 <span className="font-medium">${entry.value.toLocaleString()}</span>
               </div>
             ))}
-          {hasForecast && showForecast && (
+          {hasForecast && showForecast && activeTab === 'monthly' && (
             <div className="mt-2 pt-2 border-t border-border">
               <div className="text-xs text-muted-foreground mb-1">Forecast Range:</div>
               <div className="text-xs space-y-0.5">
@@ -411,34 +411,6 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
                   <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
                   <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
-                  {showForecast && (
-                    <>
-                      <Area 
-                        type="monotone" 
-                        dataKey="forecastP75" 
-                        stroke="none" 
-                        fill="#06b6d4" 
-                        fillOpacity={0.3}
-                        name="Forecast Range"
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="forecastP25" 
-                        stroke="none" 
-                        fill="hsl(var(--background))" 
-                        fillOpacity={1}
-                        name=""
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="forecastP50" 
-                        stroke="#06b6d4" 
-                        strokeWidth={2} 
-                        strokeDasharray="3 3"
-                        name="Forecast (P50)"
-                      />
-                    </>
-                  )}
                 </LineChart>
               </ResponsiveContainer>
             </TabsContent>
