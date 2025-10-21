@@ -16,6 +16,8 @@ import { RevenueForecast } from "@/components/RevenueForecast";
 import { ReviewsSummary } from "@/components/ReviewsSummary";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -779,93 +781,104 @@ export default function PropertyDetail() {
           </Card>
         </div>
 
-        {/* Charts */}
-        <TrendChart 
-          occupancyData={yearOverYearOccupancy}
-          revenueData={yearOverYearRevenue}
-          revparData={yearOverYearRevPAR}
-          goalsData={goalsData}
-          reservations={reservations}
-          revenueForecast={revenueForecast}
-        />
+        {/* Tabs for different sections */}
+        <Tabs defaultValue="overview" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="reservations">Reservations</TabsTrigger>
+            <TabsTrigger value="reviews">Reviews</TabsTrigger>
+          </TabsList>
 
-        {/* Pacing Report */}
-        <PacingReport reservations={reservations} />
+          <TabsContent value="overview" className="space-y-6">
+            {/* Charts */}
+            <TrendChart 
+              occupancyData={yearOverYearOccupancy}
+              revenueData={yearOverYearRevenue}
+              revparData={yearOverYearRevPAR}
+              goalsData={goalsData}
+              reservations={reservations}
+              revenueForecast={revenueForecast}
+            />
 
-        {/* Revenue Forecast */}
-        <RevenueForecast listingId={id!} />
+            {/* Pacing Report */}
+            <PacingReport reservations={reservations} />
 
-        {/* Goals Comparison */}
-        <GoalsComparison listingId={id!} reservations={reservations} />
+            {/* Revenue Forecast */}
+            <RevenueForecast listingId={id!} />
 
-        {/* Recent Reservations */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Confirmed Reservations</CardTitle>
-            <CardDescription>
-              Showing the most recent confirmed bookings for this property
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {reservations.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
-                No confirmed reservations found for this property
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {reservations.slice(0, 5).map((reservation) => {
-                  const adr = reservation.nights_count > 0
-                    ? parseFloat(reservation.fare_accommodation_adjusted || 0) / reservation.nights_count
-                    : 0;
-                  
-                  return (
-                    <div
-                      key={reservation.id}
-                      className="flex items-center justify-between p-4 border rounded-lg"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">
-                            {new Date(reservation.check_in).toLocaleDateString()} -{" "}
-                            {new Date(reservation.check_out).toLocaleDateString()}
-                          </span>
-                          {reservation.source && (
-                            <Badge variant="outline" className="text-xs">
-                              {reservation.source}
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                          <span>{reservation.nights_count} nights</span>
-                          <span>{reservation.guests_count} guests</span>
-                          <span>ADR: ${adr.toFixed(0)}</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-lg font-semibold">
-                          ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                        </div>
-                        <div className="text-xs text-muted-foreground">Total</div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {reservations.length > 5 && (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => navigate("/reservations")}
-                  >
-                    View All Reservations
-                  </Button>
+            {/* Goals Comparison */}
+            <GoalsComparison listingId={id!} reservations={reservations} />
+          </TabsContent>
+
+          <TabsContent value="reservations" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Reservations</CardTitle>
+                <CardDescription>
+                  All confirmed reservations for this property
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {reservations.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8">
+                    No confirmed reservations found for this property
+                  </p>
+                ) : (
+                  <div className="border rounded-lg">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Check In</TableHead>
+                          <TableHead>Check Out</TableHead>
+                          <TableHead>Nights</TableHead>
+                          <TableHead>Guests</TableHead>
+                          <TableHead>Source</TableHead>
+                          <TableHead>ADR</TableHead>
+                          <TableHead className="text-right">Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {reservations.map((reservation) => {
+                          const adr = reservation.nights_count > 0
+                            ? parseFloat(reservation.fare_accommodation_adjusted || 0) / reservation.nights_count
+                            : 0;
+                          
+                          return (
+                            <TableRow key={reservation.id}>
+                              <TableCell className="whitespace-nowrap">
+                                {new Date(reservation.check_in).toLocaleDateString()}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {new Date(reservation.check_out).toLocaleDateString()}
+                              </TableCell>
+                              <TableCell>{reservation.nights_count}</TableCell>
+                              <TableCell>{reservation.guests_count}</TableCell>
+                              <TableCell>
+                                {reservation.source && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {reservation.source}
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell>${adr.toFixed(0)}</TableCell>
+                              <TableCell className="text-right font-semibold">
+                                ${parseFloat(reservation.fare_accommodation_adjusted || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        {/* Reviews Section */}
-        <ReviewsSection listingId={id!} />
+          <TabsContent value="reviews" className="space-y-6">
+            <ReviewsSection listingId={id!} />
+          </TabsContent>
+        </Tabs>
       </div>
     </DashboardLayout>
   );
