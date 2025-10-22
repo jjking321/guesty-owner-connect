@@ -500,6 +500,7 @@ export default function Settings() {
                     {/* Real-time sync progress cards */}
                     <SyncProgressCard accountId={account.id} syncType="listings" />
                     <SyncProgressCard accountId={account.id} syncType="reservations" />
+                    <SyncProgressCard accountId={account.id} syncType="reviews" />
                   </div>
                 ))}
               </div>

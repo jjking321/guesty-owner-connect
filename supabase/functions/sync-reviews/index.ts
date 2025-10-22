@@ -215,6 +215,15 @@ for (let i = 0; i < listingsToSync.length; i++) {
       } else {
         listingSynced += results.length;
         totalSynced += results.length;
+        
+        // Update progress immediately after each batch
+        await supabaseClient
+          .from('sync_jobs')
+          .update({
+            items_synced: totalSynced,
+            progress_message: `Synced ${totalSynced} reviews from ${i + 1}/${listingsToSync.length} listings (current: ${currentListingId})...`,
+          })
+          .eq('id', syncJob.id);
       }
 
       skip += limit;
