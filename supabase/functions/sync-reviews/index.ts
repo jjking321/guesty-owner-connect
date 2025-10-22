@@ -23,7 +23,7 @@ async function fetchReviewsPage(
 ): Promise<any> {
   let attempt = 0;
   while (true) {
-    const url = `https://open-api.guesty.com/v1/reviews?listingId=${listingId}&limit=${limit}&skip=${skip}&sort=createdAt`;
+    const url = `https://open-api.guesty.com/v1/reviews?listingId=${listingId}&limit=${limit}&skip=${skip}`;
     const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
