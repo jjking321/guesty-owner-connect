@@ -154,9 +154,9 @@ export default function Dashboard() {
     const avgNightlyRate = totalNights > 0 ? totalRevenue / totalNights : 0;
 
     // Calculate occupancy
-    const availableNights = capacityCalendar.filter(c => c.is_available).length;
+    const totalCapacityNights = capacityCalendar.length;
     const occupiedNights = reservationNights.length;
-    const occupancyRate = availableNights > 0 ? (occupiedNights / availableNights) * 100 : 0;
+    const occupancyRate = totalCapacityNights > 0 ? (occupiedNights / totalCapacityNights) * 100 : 0;
 
     return { totalRevenue, totalBookings, activeListings, avgNightlyRate, occupancyRate };
   }, [reservations, listings, reservationNights, capacityCalendar]);
