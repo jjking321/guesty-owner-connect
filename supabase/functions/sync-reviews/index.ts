@@ -230,6 +230,7 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Client for user authentication check
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -249,6 +250,12 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Service role client for database operations (bypasses RLS)
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
+
     const { guestyAccountId } = await req.json();
 
     if (!guestyAccountId) {
@@ -259,7 +266,7 @@ Deno.serve(async (req) => {
     }
 
     // Check for existing running sync job
-    const { data: existingJob } = await supabaseClient
+    const { data: existingJob } = await supabaseAdmin
       .from('sync_jobs')
       .select('*')
       .eq('guesty_account_id', guestyAccountId)
@@ -278,8 +285,8 @@ Deno.serve(async (req) => {
       resumeFromOffset = existingJob.last_synced_offset || 0;
       console.log(`Resuming existing sync job: ${syncJob.id} from offset ${resumeFromOffset}`);
     } else {
-      // Create new sync job
-      const { data: newJob, error: jobError } = await supabaseClient
+      // Create new sync job using service role
+      const { data: newJob, error: jobError } = await supabaseAdmin
         .from('sync_jobs')
         .insert({
           guesty_account_id: guestyAccountId,
@@ -293,7 +300,8 @@ Deno.serve(async (req) => {
         .single();
 
       if (jobError || !newJob) {
-        throw new Error('Failed to create sync job');
+        console.error('Failed to create sync job:', jobError);
+        throw new Error(`Failed to create sync job: ${jobError?.message || 'Unknown error'}`);
       }
 
       syncJob = newJob;
