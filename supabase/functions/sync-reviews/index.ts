@@ -14,6 +14,98 @@ function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function getGuestyAccessToken(clientId: string, clientSecret: string, retries = 5): Promise<string> {
+  let lastError: Error | null = null;
+  const MAX_WAIT_TIME = 45000; // 45 seconds max wait (edge functions timeout at 60s)
+  
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const backoffDelay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+        console.log(`Token retry attempt ${attempt}/${retries}, waiting ${backoffDelay}ms...`);
+        await delay(backoffDelay);
+      } else {
+        console.log('Exchanging client credentials for access token...');
+      }
+      
+      const response = await fetch('https://open-api.guesty.com/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+        },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: 'open-api',
+        }).toString(),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        
+        // Check if it's a rate limit error (429) and we have retries left
+        if (response.status === 429 && attempt < retries) {
+          const retryAfter = response.headers.get('Retry-After');
+          let waitTime: number;
+          
+          if (retryAfter) {
+            const retryAfterNum = parseInt(retryAfter);
+            if (!isNaN(retryAfterNum)) {
+              waitTime = retryAfterNum * 1000;
+              
+              // Check if wait time is too long
+              if (waitTime > MAX_WAIT_TIME) {
+                const hoursToWait = Math.round(waitTime / 3600000);
+                console.error(`Rate limit requires waiting ${retryAfterNum}s (~${hoursToWait}h). Too long - failing.`);
+                throw new Error(`Guesty API rate limit: Please try again in ${hoursToWait} hour(s). Guesty has temporarily limited access to their API.`);
+              }
+              
+              console.log(`Token endpoint rate limited. Retry-After header: ${retryAfterNum}s (${waitTime}ms)`);
+            } else {
+              const retryDate = new Date(retryAfter);
+              waitTime = retryDate.getTime() - Date.now();
+              
+              if (waitTime > MAX_WAIT_TIME) {
+                const hoursToWait = Math.round(waitTime / 3600000);
+                console.error(`Rate limit until ${retryAfter}. Too long - failing.`);
+                throw new Error(`Guesty API rate limit: Please try again in ${hoursToWait} hour(s). Guesty has temporarily limited access to their API.`);
+              }
+              
+              console.log(`Token endpoint rate limited. Retry-After date: ${retryAfter} (${waitTime}ms)`);
+            }
+          } else {
+            waitTime = Math.min(2000 * Math.pow(2, attempt), 30000);
+            console.log(`Token endpoint rate limited (no Retry-After header). Using backoff: ${waitTime}ms`);
+          }
+          
+          console.error(`Rate limit error (${response.status}):`, error);
+          lastError = new Error(`Authentication failed: ${response.status} - ${error}`);
+          
+          await delay(Math.max(waitTime, 0));
+          continue;
+        }
+        
+        console.error(`Failed to get access token (${response.status}):`, error);
+        throw new Error(`Authentication failed: ${response.status} - ${error}`);
+      }
+
+      const data = await response.json();
+      console.log('Successfully obtained access token');
+      return data.access_token;
+      
+    } catch (error) {
+      if (attempt === retries) {
+        throw lastError || error;
+      }
+      lastError = error as Error;
+    }
+  }
+  
+  throw lastError || new Error('Failed to obtain access token from Guesty');
+}
+
 async function fetchReviewsPage(
   accessToken: string,
   limit: number,
@@ -38,6 +130,15 @@ async function fetchReviewsPage(
           'Accept': 'application/json',
         },
       });
+
+      // Log rate limit headers for monitoring
+      const rateLimitSecond = response.headers.get('X-ratelimit-remaining-second');
+      const rateLimitMinute = response.headers.get('X-ratelimit-remaining-minute');
+      const rateLimitHour = response.headers.get('X-ratelimit-remaining-hour');
+      
+      if (rateLimitSecond || rateLimitMinute || rateLimitHour) {
+        console.log(`Rate limits - Second: ${rateLimitSecond}/15, Minute: ${rateLimitMinute}/120, Hour: ${rateLimitHour}/5000`);
+      }
 
       if (response.status === 429) {
         const backoffMs = RETRY_BACKOFF_BASE_MS * Math.pow(2, attempt);
@@ -91,30 +192,11 @@ async function performSync(
       throw new Error('Guesty account not found');
     }
 
-    // Get access token
-    const tokenResponse = await fetch('https://open-api.guesty.com/oauth2/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: guestyAccount.client_id,
-        client_secret: guestyAccount.client_secret,
-        scope: 'open-api',
-      }),
-    });
-
-    if (!tokenResponse.ok) {
-      const errorBody = await tokenResponse.text().catch(() => '');
-      console.error('Guesty OAuth failed:', {
-        status: tokenResponse.status,
-        statusText: tokenResponse.statusText,
-        body: errorBody,
-        client_id: guestyAccount.client_id
-      });
-      throw new Error(`Failed to authenticate with Guesty API: ${tokenResponse.status} ${tokenResponse.statusText} - ${errorBody}`);
-    }
-
-    const { access_token: accessToken } = await tokenResponse.json();
+    // Get access token with retry logic
+    const accessToken = await getGuestyAccessToken(
+      guestyAccount.client_id,
+      guestyAccount.client_secret
+    );
 
     // Determine if this is an incremental sync
     const lastSyncDate = guestyAccount.last_reviews_sync;
