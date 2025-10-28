@@ -890,8 +890,8 @@ export default function PropertiesBulkEdit() {
           sortDirection={sortDirection}
           onSort={handleSort}
           referrer={{
-            path: '/properties',
-            label: 'Bulk Edit',
+            path: '/properties/bulk-edit',
+            label: 'Portfolio View',
             state: {
               searchQuery,
               filters: { propertyFilters, statusFilters, goalsFilters },
