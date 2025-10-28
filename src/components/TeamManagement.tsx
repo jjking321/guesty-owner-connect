@@ -35,7 +35,7 @@ import { Badge } from "@/components/ui/badge";
 interface Member {
   id: string;
   user_id: string;
-  role: 'owner' | 'admin' | 'member';
+  role: 'super_admin' | 'admin' | 'member';
   created_at: string;
   profiles: {
     email: string;
@@ -46,10 +46,19 @@ interface Member {
 interface PendingInvitation {
   id: string;
   email: string;
-  role: 'owner' | 'admin' | 'member';
+  role: 'super_admin' | 'admin' | 'member';
   expires_at: string;
   token: string;
 }
+
+const formatRole = (role: string) => {
+  switch(role) {
+    case 'super_admin': return 'Super Admin';
+    case 'admin': return 'Admin';
+    case 'member': return 'Member';
+    default: return role;
+  }
+};
 
 export function TeamManagement() {
   const { toast } = useToast();
@@ -139,7 +148,7 @@ export function TeamManagement() {
 
     const formData = new FormData(e.currentTarget);
     const email = formData.get("email") as string;
-    const role = formData.get("role") as 'owner' | 'admin' | 'member';
+    const role = formData.get("role") as 'super_admin' | 'admin' | 'member';
 
     try {
       setInviting(true);
@@ -233,7 +242,7 @@ export function TeamManagement() {
     }
   };
 
-  const handleUpdateRole = async (memberId: string, newRole: 'owner' | 'admin' | 'member') => {
+  const handleUpdateRole = async (memberId: string, newRole: 'super_admin' | 'admin' | 'member') => {
     try {
       const { error } = await supabase
         .from("organization_members")
@@ -291,7 +300,7 @@ export function TeamManagement() {
     });
   };
 
-  const canManageMembers = currentUserRole === 'owner' || currentUserRole === 'admin';
+  const canManageMembers = currentUserRole === 'super_admin' || currentUserRole === 'admin';
 
   if (loading) {
     return (
@@ -357,7 +366,7 @@ export function TeamManagement() {
                 <SelectContent>
                   <SelectItem value="member">Member</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="owner">Owner</SelectItem>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-sm text-muted-foreground">
@@ -406,7 +415,7 @@ export function TeamManagement() {
                       Pending
                     </Badge>
                     <Badge variant="secondary">
-                      {invitation.role}
+                      {formatRole(invitation.role)}
                     </Badge>
                     {canManageMembers && (
                       <>
@@ -467,7 +476,7 @@ export function TeamManagement() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {canManageMembers && member.role !== 'owner' ? (
+                  {canManageMembers && member.role !== 'super_admin' ? (
                     <Select
                       value={member.role}
                       onValueChange={(value) => handleUpdateRole(member.id, value as any)}
@@ -478,15 +487,15 @@ export function TeamManagement() {
                       <SelectContent>
                         <SelectItem value="member">Member</SelectItem>
                         <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="owner">Owner</SelectItem>
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Badge variant={member.role === 'owner' ? 'default' : 'secondary'}>
-                      {member.role}
+                    <Badge variant={member.role === 'super_admin' ? 'default' : 'secondary'}>
+                      {formatRole(member.role)}
                     </Badge>
                   )}
-                  {canManageMembers && member.role !== 'owner' && (
+                  {canManageMembers && member.role !== 'super_admin' && (
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="ghost" size="icon">

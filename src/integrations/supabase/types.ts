@@ -987,10 +987,7 @@ export type Database = {
         Args: { _token: string; _user_id: string }
         Returns: Json
       }
-      cancel_sync_job: {
-        Args: { job_id: string }
-        Returns: undefined
-      }
+      cancel_sync_job: { Args: { job_id: string }; Returns: undefined }
       get_ytd_revenue_by_listing: {
         Args: { end_date: string; target_year: number }
         Returns: {
@@ -1020,7 +1017,7 @@ export type Database = {
       }
     }
     Enums: {
-      member_role: "owner" | "admin" | "member"
+      member_role: "super_admin" | "admin" | "member"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1148,7 +1145,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      member_role: ["owner", "admin", "member"],
+      member_role: ["super_admin", "admin", "member"],
     },
   },
 } as const
