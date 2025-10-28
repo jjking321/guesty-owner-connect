@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, TrendingDown, Minus, Lock, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSmartNavigation, type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
 interface PropertyMetrics {
   id: string;
@@ -43,10 +44,12 @@ interface PropertiesTableProps {
   sortBy?: "name" | "actual" | "forecast" | "goalProgress" | "status";
   sortDirection?: "asc" | "desc";
   onSort?: (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => void;
+  referrer?: NavigationReferrer;
 }
 
-export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, onSort }: PropertiesTableProps) {
+export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, onSort, referrer }: PropertiesTableProps) {
   const navigate = useNavigate();
+  const { navigateToProperty } = useSmartNavigation();
 
   const SortableHeader = ({ field, children, align = "left" }: { 
     field: "name" | "actual" | "forecast" | "goalProgress" | "status"; 
@@ -143,11 +146,17 @@ export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, 
             </TableHeader>
             <TableBody>
               {properties.map((property) => (
-                <TableRow
-                  key={property.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/listings/${property.id}`)}
-                >
+              <TableRow
+                key={property.id}
+                className="cursor-pointer hover:bg-muted/50"
+                onClick={() => {
+                  if (referrer) {
+                    navigateToProperty(property.id, referrer);
+                  } else {
+                    navigate(`/listings/${property.id}`);
+                  }
+                }}
+              >
                   <TableCell>
                     <div className="flex items-center gap-3">
                       {property.thumbnail && (

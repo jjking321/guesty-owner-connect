@@ -32,6 +32,7 @@ import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
 import { PropertiesTable } from "@/components/PropertiesTable";
 import { format, startOfYear } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
 export default function GroupDetail() {
   const { id } = useParams();
@@ -1311,10 +1312,15 @@ export default function GroupDetail() {
                   
                   return sortDirection === "asc" ? comparison : -comparison;
                 })}
-                isLoading={false}
+                 isLoading={false}
                 sortBy={sortBy}
                 sortDirection={sortDirection}
                 onSort={handleSort}
+                referrer={{
+                  path: `/groups/${id}`,
+                  label: group?.name || 'Group',
+                  state: { dateRange, searchQuery, sortBy, sortDirection, scrollPosition: window.scrollY }
+                }}
               />
             )}
           </CardContent>

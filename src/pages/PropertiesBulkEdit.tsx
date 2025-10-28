@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, Download, Search, Sparkles, Filter, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
+import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
 interface PropertyMetrics {
   id: string;
@@ -888,6 +889,17 @@ export default function PropertiesBulkEdit() {
           sortBy={sortBy}
           sortDirection={sortDirection}
           onSort={handleSort}
+          referrer={{
+            path: '/properties',
+            label: 'Bulk Edit',
+            state: {
+              searchQuery,
+              filters: { propertyFilters, statusFilters, goalsFilters },
+              sortBy,
+              sortDirection,
+              scrollPosition: window.scrollY
+            }
+          }}
         />
       </div>
     </DashboardLayout>

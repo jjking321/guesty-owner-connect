@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,11 +18,22 @@ import { ReviewsTable } from "@/components/ReviewsTable";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useSmartNavigation } from "@/hooks/useSmartNavigation";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { navigateBack, getReferrer } = useSmartNavigation();
+  const referrer = getReferrer();
   const [listing, setListing] = useState<any>(null);
   const [reservations, setReservations] = useState<any[]>([]);
   const [goalsData, setGoalsData] = useState<any[]>([]);
@@ -594,11 +605,30 @@ export default function PropertyDetail() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {/* Breadcrumb Navigation */}
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link to={referrer?.path || "/listings"}>
+                  {referrer?.label || "Properties"}
+                </Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{listing?.nickname || "Property Details"}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+
+        {/* Back Button */}
+        <Button variant="outline" onClick={navigateBack}>
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to {referrer?.label || "Properties"}
+        </Button>
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate("/listings")}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
             <div>
               <h2 className="text-3xl font-bold tracking-tight">{listing.nickname || "Unnamed Property"}</h2>
               <p className="text-muted-foreground flex items-center gap-1 mt-1">

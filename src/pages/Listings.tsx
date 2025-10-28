@@ -10,10 +10,12 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Home, MapPin, Users, Bed, RefreshCw, Search, Filter } from "lucide-react";
+import { useSmartNavigation } from "@/hooks/useSmartNavigation";
 
 export default function Listings() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { navigateToProperty } = useSmartNavigation();
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -273,10 +275,18 @@ export default function Listings() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filteredListings.map((listing) => (
-              <Card 
-                key={listing.id} 
+              <Card
+                key={listing.id}
                 className="overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
-                onClick={() => navigate(`/listings/${listing.id}`)}
+                onClick={() => navigateToProperty(listing.id, {
+                  path: '/listings',
+                  label: 'Properties',
+                  state: {
+                    searchQuery,
+                    filters: statusFilters,
+                    scrollPosition: window.scrollY
+                  }
+                })}
               >
                 <div className="aspect-video w-full overflow-hidden bg-muted">
                   <img

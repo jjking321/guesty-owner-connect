@@ -23,6 +23,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
 interface Owner {
   id: string;
@@ -799,10 +800,15 @@ export default function OwnerDetail() {
                   
                   return sortDirection === "asc" ? comparison : -comparison;
                 })}
-                isLoading={false}
+                 isLoading={false}
                 sortBy={sortBy}
                 sortDirection={sortDirection}
                 onSort={handleSort}
+                referrer={{
+                  path: `/owners/${id}`,
+                  label: owner ? getOwnerName(owner) : 'Owner',
+                  state: { dateRange, sortBy, sortDirection, scrollPosition: window.scrollY }
+                }}
               />
             )}
           </CardContent>

@@ -13,10 +13,12 @@ import { useNavigate } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useSmartNavigation } from "@/hooks/useSmartNavigation";
 
 export default function Dashboard() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { navigateToProperty } = useSmartNavigation();
   
   // Date range filters - default to current year
   const currentYear = new Date().getFullYear();
@@ -491,9 +493,20 @@ export default function Dashboard() {
                 {reservations.slice(0, 5).map((reservation) => {
                   const listing = listings.find(l => l.id === reservation.listing_id);
                   return (
-                    <div key={reservation.id} className="flex items-center justify-between p-4 border rounded-lg">
+                     <div key={reservation.id} className="flex items-center justify-between p-4 border rounded-lg">
                       <div className="space-y-1">
-                        <p className="font-medium">{listing?.nickname || reservation.listing_id}</p>
+                        <p 
+                          className="font-medium hover:underline cursor-pointer"
+                          onClick={() => navigateToProperty(reservation.listing_id, {
+                            path: '/dashboard',
+                            label: 'Dashboard',
+                            state: {
+                              scrollPosition: window.scrollY
+                            }
+                          })}
+                        >
+                          {listing?.nickname || reservation.listing_id}
+                        </p>
                         <p className="text-sm text-muted-foreground">
                           {new Date(reservation.check_in).toLocaleDateString()} - {new Date(reservation.check_out).toLocaleDateString()}
                         </p>
