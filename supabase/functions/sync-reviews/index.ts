@@ -23,19 +23,16 @@ async function fetchReviewsPage(
   const url = new URL('https://open-api.guesty.com/v1/reviews');
   url.searchParams.append('limit', limit.toString());
   url.searchParams.append('skip', skip.toString());
-  url.searchParams.append('fields', 'id listingId reservationId guestName rating review publicReply createdAt source categories');
-  
-  if (lastSyncDate) {
-    url.searchParams.append('filters', JSON.stringify([
-      { field: 'lastUpdatedAt', operator: '$gte', value: lastSyncDate }
-    ]));
-  }
+  // NOTE: Some Guesty deployments reject 'fields' and JSON-encoded 'filters' on this endpoint.
+  // We'll avoid both to prevent 400s. Incremental sync can be added later with a safe filter shape.
 
   let lastError: Error | null = null;
   
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const response = await fetch(url.toString(), {
+      const urlStr = url.toString();
+      console.log(`Fetching reviews from: ${urlStr}`);
+      const response = await fetch(urlStr, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Accept': 'application/json',
@@ -50,7 +47,8 @@ async function fetchReviewsPage(
       }
 
       if (!response.ok) {
-        throw new Error(`Guesty API error: ${response.status} ${response.statusText}`);
+        const bodyText = await response.text().catch(() => '');
+        throw new Error(`Guesty API error: ${response.status} ${response.statusText} - ${bodyText}`);
       }
 
       const data = await response.json();
@@ -140,12 +138,12 @@ async function performSync(
 
       // Map and upsert reviews
       const reviewsToInsert = results.map((review: any) => ({
-        id: review.id,
+        id: review._id || review.id,
         guesty_account_id: guestyAccountId,
         listing_id: review.listingId,
         reservation_id: review.reservationId || null,
         guest_name: review.guestName || null,
-        rating: review.rating ? parseFloat(review.rating) : null,
+        rating: typeof review.rating === 'number' ? review.rating : (review.rating ? parseFloat(review.rating) : null),
         review_text: review.review || null,
         response_text: review.publicReply || null,
         review_date: review.createdAt || null,
