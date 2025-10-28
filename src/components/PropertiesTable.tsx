@@ -10,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
 import { TrendingUp, TrendingDown, Minus, Lock, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSmartNavigation, type NavigationReferrer } from "@/hooks/useSmartNavigation";
@@ -36,6 +37,7 @@ interface PropertyMetrics {
   hasGoals: boolean;
   hasLockedGoals: boolean;
   goalsLockedCount: number;
+  archived?: boolean;
 }
 
 interface PropertiesTableProps {
@@ -45,9 +47,24 @@ interface PropertiesTableProps {
   sortDirection?: "asc" | "desc";
   onSort?: (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => void;
   referrer?: NavigationReferrer;
+  selectable?: boolean;
+  selectedIds?: Set<string>;
+  onSelectProperty?: (id: string) => void;
+  onSelectAll?: () => void;
 }
 
-export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, onSort, referrer }: PropertiesTableProps) {
+export function PropertiesTable({ 
+  properties, 
+  isLoading, 
+  sortBy, 
+  sortDirection, 
+  onSort, 
+  referrer,
+  selectable = false,
+  selectedIds = new Set(),
+  onSelectProperty,
+  onSelectAll,
+}: PropertiesTableProps) {
   const navigate = useNavigate();
   const { navigateToProperty } = useSmartNavigation();
 
@@ -134,6 +151,16 @@ export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, 
           <Table>
             <TableHeader>
               <TableRow>
+                {selectable && (
+                  <TableHead className="w-12">
+                    <Checkbox
+                      checked={selectedIds.size > 0 && selectedIds.size === properties.length}
+                      onCheckedChange={onSelectAll}
+                      aria-label="Select all"
+                      className={selectedIds.size > 0 && selectedIds.size < properties.length ? "data-[state=checked]:bg-primary" : ""}
+                    />
+                  </TableHead>
+                )}
                 <SortableHeader field="name">Property</SortableHeader>
                 <SortableHeader field="actual" align="right">Actual YTD</SortableHeader>
                 <TableHead className="text-right">Budget</TableHead>
@@ -148,8 +175,12 @@ export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, 
               {properties.map((property) => (
               <TableRow
                 key={property.id}
-                className="cursor-pointer hover:bg-muted/50"
-                onClick={() => {
+                className={`cursor-pointer hover:bg-muted/50 ${property.archived ? 'opacity-60' : ''}`}
+                onClick={(e) => {
+                  // Don't navigate if clicking checkbox
+                  if ((e.target as HTMLElement).closest('[role="checkbox"]')) {
+                    return;
+                  }
                   if (referrer) {
                     navigateToProperty(property.id, referrer);
                   } else {
@@ -157,18 +188,34 @@ export function PropertiesTable({ properties, isLoading, sortBy, sortDirection, 
                   }
                 }}
               >
+                  {selectable && (
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.has(property.id)}
+                        onCheckedChange={() => onSelectProperty?.(property.id)}
+                        aria-label={`Select ${property.nickname}`}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell>
                     <div className="flex items-center gap-3">
                       {property.thumbnail && (
                         <img
                           src={property.thumbnail}
                           alt={property.nickname}
-                          className="w-12 h-12 rounded object-cover"
+                          className={`w-12 h-12 rounded object-cover ${property.archived ? 'opacity-40 grayscale' : ''}`}
                         />
                       )}
                       <div className="flex items-center gap-2">
                         <div>
-                          <p className="font-medium">{property.nickname}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium">{property.nickname}</p>
+                            {property.archived && (
+                              <Badge variant="outline" className="bg-muted text-muted-foreground">
+                                Archived
+                              </Badge>
+                            )}
+                          </div>
                           <p className="text-sm text-muted-foreground">
                             {property.address?.city || "No location"}
                           </p>

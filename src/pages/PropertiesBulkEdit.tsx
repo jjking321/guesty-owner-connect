@@ -36,6 +36,7 @@ interface PropertyMetrics {
   hasGoals: boolean;
   hasLockedGoals: boolean;
   goalsLockedCount: number;
+  archived: boolean;
 }
 
 export default function PropertiesBulkEdit() {
@@ -63,9 +64,10 @@ export default function PropertiesBulkEdit() {
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Fetch all data in parallel
-  const { data: listings = [], isLoading: listingsLoading } = useQuery({
+  const { data: listings = [], isLoading: listingsLoading, refetch: refetchListings } = useQuery({
     queryKey: ["listings"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -265,6 +267,7 @@ export default function PropertiesBulkEdit() {
         hasGoals,
         hasLockedGoals,
         goalsLockedCount,
+        archived: listing.archived || false,
       };
     });
   }, [listings, ytdRevenueData, goals, forecasts]);
@@ -443,6 +446,50 @@ export default function PropertiesBulkEdit() {
     } finally {
       setIsGeneratingBulk(false);
     }
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === filteredProperties.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredProperties.map(p => p.id)));
+    }
+  };
+
+  const handleSelectProperty = (id: string) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const handleBulkArchive = async (archive: boolean) => {
+    const idsArray = Array.from(selectedIds);
+    
+    const { error } = await supabase
+      .from("listings")
+      .update({ archived: archive })
+      .in("id", idsArray);
+
+    if (error) {
+      toast.error("Failed to update properties", {
+        description: error.message,
+      });
+      return;
+    }
+
+    toast.success(
+      archive ? "Properties archived" : "Properties restored",
+      {
+        description: `${idsArray.length} ${idsArray.length === 1 ? 'property' : 'properties'} ${archive ? 'archived' : 'restored'} successfully.`,
+      }
+    );
+
+    setSelectedIds(new Set());
+    refetchListings();
   };
 
   const handleExportCSV = () => {
@@ -883,12 +930,60 @@ export default function PropertiesBulkEdit() {
           </p>
         </div>
 
+        {/* Bulk Actions Toolbar */}
+        {selectedIds.size > 0 && (
+          <div className="sticky top-0 z-10 bg-card border rounded-lg p-4 shadow-md">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary" className="text-base px-3 py-1">
+                  {selectedIds.size} {selectedIds.size === 1 ? 'property' : 'properties'} selected
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear Selection
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkArchive(false)}
+                  disabled={Array.from(selectedIds).every(id => {
+                    const prop = propertyMetrics.find(p => p.id === id);
+                    return !prop?.archived;
+                  })}
+                >
+                  Restore Selected
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleBulkArchive(true)}
+                  disabled={Array.from(selectedIds).every(id => {
+                    const prop = propertyMetrics.find(p => p.id === id);
+                    return prop?.archived;
+                  })}
+                >
+                  Archive Selected
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <PropertiesTable 
           properties={filteredProperties} 
           isLoading={isLoading}
           sortBy={sortBy}
           sortDirection={sortDirection}
           onSort={handleSort}
+          selectable={true}
+          selectedIds={selectedIds}
+          onSelectProperty={handleSelectProperty}
+          onSelectAll={handleSelectAll}
           referrer={{
             path: '/properties/bulk-edit',
             label: 'Portfolio View',
