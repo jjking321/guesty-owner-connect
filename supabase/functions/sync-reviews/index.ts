@@ -1,101 +1,91 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Configuration
-const REVIEWS_REQUEST_DELAY_MS = 1000; // 1s between page requests
-const LISTING_DELAY_MS = 1500; // 1.5s between listings
-const MAX_RETRIES = 5; // Retries on 429 or network failures
-const RETRY_BACKOFF_BASE_MS = 2000; // 2s base for exponential backoff
+const REVIEWS_BATCH_SIZE = 100;
+const REQUEST_DELAY_MS = 500; // Delay between API calls to avoid rate limits
+const MAX_RETRIES = 5;
+const RETRY_BACKOFF_BASE_MS = 2000;
 
-// Helper function to delay execution
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+function delay(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-// Helper to fetch a page with simple 429 retry handling (mirrors reservations pattern)
 async function fetchReviewsPage(
   accessToken: string,
-  listingId: string,
   limit: number,
-  skip: number
-): Promise<any> {
-  let attempt = 0;
-  while (true) {
-    const url = `https://open-api.guesty.com/v1/reviews?listingId=${listingId}&limit=${limit}&skip=${skip}`;
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'accept': 'application/json',
-      },
-    });
-
-    if (response.status === 429 && attempt < MAX_RETRIES) {
-      const wait = RETRY_BACKOFF_BASE_MS * Math.pow(2, attempt); // 2s, 4s, 8s, ...
-      console.log(`Rate limited (429) for listing ${listingId} skip=${skip}. Waiting ${wait}ms before retry ${attempt + 1}/${MAX_RETRIES}`);
-      await delay(wait);
-      attempt++;
-      continue;
-    }
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Failed to fetch reviews (${response.status} ${response.statusText}): ${body}`);
-    }
-
-    return await response.json();
+  skip: number,
+  lastSyncDate?: string
+) {
+  const url = new URL('https://open-api.guesty.com/v1/reviews');
+  url.searchParams.append('limit', limit.toString());
+  url.searchParams.append('skip', skip.toString());
+  url.searchParams.append('fields', 'id listingId reservationId guestName rating review publicReply createdAt source categories');
+  
+  if (lastSyncDate) {
+    url.searchParams.append('filters', JSON.stringify([
+      { field: 'lastUpdatedAt', operator: '$gte', value: lastSyncDate }
+    ]));
   }
+
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url.toString(), {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (response.status === 429) {
+        const backoffMs = RETRY_BACKOFF_BASE_MS * Math.pow(2, attempt);
+        console.log(`Rate limited (429), retrying after ${backoffMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await delay(backoffMs);
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error(`Guesty API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      lastError = error as Error;
+      console.error(`Attempt ${attempt + 1}/${MAX_RETRIES} failed:`, error);
+      
+      if (attempt < MAX_RETRIES - 1) {
+        const backoffMs = RETRY_BACKOFF_BASE_MS * Math.pow(2, attempt);
+        await delay(backoffMs);
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to fetch reviews after retries');
 }
 
-interface GuestyReview {
-  _id: string;
-  listingId: string;
-  reservationId?: string;
-  guestName: string;
-  rating: number;
-  review?: string;
-  publicReply?: string;
-  createdAt: string;
-  source: string;
-  categories?: Record<string, number>;
-}
-
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+async function performSync(
+  guestyAccountId: string,
+  syncJobId: string,
+  resumeFromOffset: number
+) {
+  const supabaseClient = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  );
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
-
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('No authorization header');
-    }
-
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
-    
-    if (userError || !user) {
-      throw new Error('Unauthorized');
-    }
-
-    const { guestyAccountId, listingId } = await req.json();
-
-    if (!guestyAccountId) {
-      throw new Error('Guesty account ID is required');
-    }
-
-    console.log('Starting review sync for account:', guestyAccountId);
+    console.log(`Starting review sync for account: ${guestyAccountId}, resuming from offset: ${resumeFromOffset}`);
 
     // Get Guesty account credentials
     const { data: guestyAccount, error: accountError } = await supabaseClient
       .from('guesty_accounts')
-      .select('*')
+      .select('client_id, client_secret, last_reviews_sync')
       .eq('id', guestyAccountId)
       .single();
 
@@ -103,31 +93,10 @@ Deno.serve(async (req) => {
       throw new Error('Guesty account not found');
     }
 
-    // Create sync job
-    const { data: syncJob, error: syncJobError } = await supabaseClient
-      .from('sync_jobs')
-      .insert({
-        guesty_account_id: guestyAccountId,
-        sync_type: 'reviews',
-        status: 'running',
-        progress_message: 'Starting review sync...',
-      })
-      .select()
-      .single();
-
-    if (syncJobError) {
-      throw new Error('Failed to create sync job');
-    }
-
-    console.log('Sync job created:', syncJob.id);
-
-    // Get Guesty OAuth token
+    // Get access token
     const tokenResponse = await fetch('https://open-api.guesty.com/oauth2/token', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'accept': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'client_credentials',
         client_id: guestyAccount.client_id,
@@ -137,71 +106,50 @@ Deno.serve(async (req) => {
     });
 
     if (!tokenResponse.ok) {
-      throw new Error(`Failed to get Guesty token: ${tokenResponse.statusText}`);
+      throw new Error('Failed to authenticate with Guesty API');
     }
 
-    const { access_token } = await tokenResponse.json();
+    const { access_token: accessToken } = await tokenResponse.json();
 
-    // Get listings to sync reviews for
-    let listingsToSync: string[] = [];
-    if (listingId) {
-      listingsToSync = [listingId];
-    } else {
-      const { data: listings } = await supabaseClient
-        .from('listings')
-        .select('id')
-        .eq('guesty_account_id', guestyAccountId);
-      
-      listingsToSync = listings?.map(l => l.id) || [];
-    }
-
-    console.log(`Syncing reviews for ${listingsToSync.length} listings`);
+    // Determine if this is an incremental sync
+    const lastSyncDate = guestyAccount.last_reviews_sync;
 
     let totalSynced = 0;
-    let totalFailed = 0;
-    const failedListings: string[] = [];
+    let currentOffset = resumeFromOffset;
+    let hasMorePages = true;
+    let pageNumber = Math.floor(resumeFromOffset / REVIEWS_BATCH_SIZE) + 1;
 
-// Process listings serially to align with reservations sync pattern
-for (let i = 0; i < listingsToSync.length; i++) {
-  const currentListingId = listingsToSync[i];
-  try {
-    let skip = 0;
-    const limit = 100;
-    let hasMore = true;
-    let listingSynced = 0;
+    while (hasMorePages) {
+      console.log(`Fetching reviews page ${pageNumber} (offset: ${currentOffset})`);
 
-    while (hasMore) {
-      // Small delay between page requests
-      await delay(REVIEWS_REQUEST_DELAY_MS);
+      // Fetch reviews page
+      const reviewsData = await fetchReviewsPage(
+        accessToken,
+        REVIEWS_BATCH_SIZE,
+        currentOffset,
+        lastSyncDate
+      );
 
-      let data: any;
-      try {
-        data = await fetchReviewsPage(access_token, currentListingId, limit, skip);
-      } catch (err) {
-        console.error(`Error fetching reviews for listing ${currentListingId} (skip=${skip}):`, err);
-        failedListings.push(currentListingId);
-        totalFailed++;
-        break; // move to next listing
-      }
+      const results = reviewsData.results || [];
+      console.log(`Received ${results.length} reviews from page ${pageNumber}`);
 
-      const results = data?.results ?? [];
       if (results.length === 0) {
-        hasMore = false;
+        hasMorePages = false;
         break;
       }
 
-      // Upsert reviews
-      const reviewsToInsert = results.map((review: GuestyReview) => ({
-        id: review._id,
+      // Map and upsert reviews
+      const reviewsToInsert = results.map((review: any) => ({
+        id: review.id,
         guesty_account_id: guestyAccountId,
         listing_id: review.listingId,
         reservation_id: review.reservationId || null,
-        guest_name: review.guestName || 'Anonymous',
-        rating: review.rating,
+        guest_name: review.guestName || null,
+        rating: review.rating ? parseFloat(review.rating) : null,
         review_text: review.review || null,
         response_text: review.publicReply || null,
-        review_date: review.createdAt,
-        source: review.source || 'unknown',
+        review_date: review.createdAt || null,
+        source: review.source || null,
         category_ratings: review.categories || null,
       }));
 
@@ -211,95 +159,177 @@ for (let i = 0; i < listingsToSync.length; i++) {
 
       if (upsertError) {
         console.error('Error upserting reviews:', upsertError);
-        totalFailed += results.length;
-      } else {
-        listingSynced += results.length;
-        totalSynced += results.length;
-        
-        // Update progress immediately after each batch
-        await supabaseClient
-          .from('sync_jobs')
-          .update({
-            items_synced: totalSynced,
-            progress_message: `Synced ${totalSynced} reviews from ${i + 1}/${listingsToSync.length} listings (current: ${currentListingId})...`,
-          })
-          .eq('id', syncJob.id);
+        throw upsertError;
       }
 
-      skip += limit;
-      if (results.length < limit) {
-        hasMore = false;
+      totalSynced += results.length;
+      currentOffset += results.length;
+
+      // Update sync job progress immediately after each batch
+      await supabaseClient
+        .from('sync_jobs')
+        .update({
+          items_synced: totalSynced,
+          last_synced_offset: currentOffset,
+          progress_message: `Synced ${totalSynced} reviews (page ${pageNumber})`,
+        })
+        .eq('id', syncJobId);
+
+      console.log(`Progress: ${totalSynced} reviews synced (page ${pageNumber})`);
+
+      // Check if we've reached the end
+      if (results.length < REVIEWS_BATCH_SIZE) {
+        hasMorePages = false;
       }
+
+      // Delay between pages to avoid rate limits
+      if (hasMorePages) {
+        await delay(REQUEST_DELAY_MS);
+      }
+
+      pageNumber++;
     }
 
-    if (listingSynced > 0) {
-      console.log(`Synced ${listingSynced} reviews for listing ${currentListingId}`);
-    }
-
-    // Update progress after each listing
-    await supabaseClient
-      .from('sync_jobs')
-      .update({
-        items_synced: totalSynced,
-        progress_message: `Synced ${totalSynced} reviews from ${i + 1}/${listingsToSync.length} listings...`,
-      })
-      .eq('id', syncJob.id);
-
-  } catch (error) {
-    console.error(`Error syncing reviews for listing ${currentListingId}:`, error);
-    if (!failedListings.includes(currentListingId)) {
-      failedListings.push(currentListingId);
-      totalFailed++;
-    }
-  }
-
-  // Wait a bit between listings to avoid global rate limiting
-  if (i < listingsToSync.length - 1) {
-    await delay(LISTING_DELAY_MS);
-  }
-}
-
-    // Update sync job completion
-    const statusMessage = failedListings.length > 0
-      ? `Synced ${totalSynced} reviews successfully. ${failedListings.length} listings failed.`
-      : `Synced ${totalSynced} reviews successfully`;
-
+    // Mark sync as completed
     await supabaseClient
       .from('sync_jobs')
       .update({
         status: 'completed',
         completed_at: new Date().toISOString(),
         items_synced: totalSynced,
-        progress_message: statusMessage,
+        progress_message: `Successfully synced ${totalSynced} reviews`,
       })
-      .eq('id', syncJob.id);
+      .eq('id', syncJobId);
 
-    // Update last sync timestamp
+    // Update last_reviews_sync timestamp
     await supabaseClient
       .from('guesty_accounts')
       .update({ last_reviews_sync: new Date().toISOString() })
       .eq('id', guestyAccountId);
 
-    console.log(`Review sync completed. Synced: ${totalSynced}, Failed: ${totalFailed}`);
-    if (failedListings.length > 0) {
-      console.log(`Failed listings: ${failedListings.join(', ')}`);
+    console.log(`Review sync completed successfully: ${totalSynced} reviews synced`);
+  } catch (error) {
+    console.error('Review sync failed:', error);
+    
+    // Update sync job with error
+    await supabaseClient
+      .from('sync_jobs')
+      .update({
+        status: 'failed',
+        error_message: error instanceof Error ? error.message : 'Unknown error',
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', syncJobId);
+
+    throw error;
+  }
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      {
+        global: {
+          headers: { Authorization: req.headers.get('Authorization')! },
+        },
+      }
+    );
+
+    // Verify authentication
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
+    const { guestyAccountId } = await req.json();
+
+    if (!guestyAccountId) {
+      return new Response(
+        JSON.stringify({ error: 'guestyAccountId is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Check for existing running sync job
+    const { data: existingJob } = await supabaseClient
+      .from('sync_jobs')
+      .select('*')
+      .eq('guesty_account_id', guestyAccountId)
+      .eq('sync_type', 'reviews')
+      .eq('status', 'running')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let syncJob;
+    let resumeFromOffset = 0;
+
+    if (existingJob) {
+      // Resume existing job
+      syncJob = existingJob;
+      resumeFromOffset = existingJob.last_synced_offset || 0;
+      console.log(`Resuming existing sync job: ${syncJob.id} from offset ${resumeFromOffset}`);
+    } else {
+      // Create new sync job
+      const { data: newJob, error: jobError } = await supabaseClient
+        .from('sync_jobs')
+        .insert({
+          guesty_account_id: guestyAccountId,
+          sync_type: 'reviews',
+          status: 'running',
+          items_synced: 0,
+          last_synced_offset: 0,
+          progress_message: 'Starting review sync...',
+        })
+        .select()
+        .single();
+
+      if (jobError || !newJob) {
+        throw new Error('Failed to create sync job');
+      }
+
+      syncJob = newJob;
+      console.log(`Created new sync job: ${syncJob.id}`);
+    }
+
+    // Start background sync using waitUntil
+    EdgeRuntime.waitUntil(
+      performSync(guestyAccountId, syncJob.id, resumeFromOffset)
+    );
+
+    // Return immediately
     return new Response(
       JSON.stringify({
-        success: true,
-        synced: totalSynced,
-        failed: totalFailed,
-        message: `Successfully synced ${totalSynced} reviews`,
+        started: true,
+        jobId: syncJob.id,
+        resumed: !!existingJob,
+        message: existingJob 
+          ? `Resuming review sync from ${resumeFromOffset} reviews`
+          : 'Review sync started in background',
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
     );
   } catch (error) {
     console.error('Error in sync-reviews function:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     return new Response(
-      JSON.stringify({ error: errorMessage }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
     );
   }
 });

@@ -237,6 +237,9 @@ export default function Settings() {
   const handleSyncReviews = async (accountId: string) => {
     setSyncingReviews(accountId);
     try {
+      const incompleteKey = `${accountId}-reviews`;
+      const incompleteJob = incompleteSyncJobs[incompleteKey];
+      
       const { data, error } = await supabase.functions.invoke("sync-reviews", {
         body: { guestyAccountId: accountId },
       });
@@ -244,14 +247,16 @@ export default function Settings() {
       if (error) throw error;
 
       toast({
-        title: "Reviews synced successfully",
-        description: data.message || `Synced ${data.synced} reviews`,
+        title: incompleteJob ? "Resuming reviews sync" : "Reviews sync started",
+        description: incompleteJob 
+          ? `Continuing from ${incompleteJob.items_synced || 0} reviews. Watch progress below.`
+          : "Watch the progress below in real-time.",
       });
 
       loadAccounts();
     } catch (error: any) {
       toast({
-        title: "Failed to sync reviews",
+        title: "Sync failed",
         description: error.message,
         variant: "destructive",
       });
@@ -486,12 +491,21 @@ export default function Settings() {
                                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                                 Syncing...
                               </>
-                            ) : (
-                              <>
-                                <Star className="mr-2 h-4 w-4" />
-                                Sync Reviews
-                              </>
-                            )}
+                            ) : (() => {
+                              const incompleteKey = `${account.id}-reviews`;
+                              const incompleteJob = incompleteSyncJobs[incompleteKey];
+                              return incompleteJob ? (
+                                <>
+                                  <Star className="mr-2 h-4 w-4" />
+                                  Resume ({incompleteJob.items_synced || 0} synced)
+                                </>
+                              ) : (
+                                <>
+                                  <Star className="mr-2 h-4 w-4" />
+                                  Sync Reviews
+                                </>
+                              );
+                            })()}
                           </Button>
                         </div>
                       </CardContent>
