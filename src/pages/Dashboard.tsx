@@ -8,7 +8,7 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { DollarSign, Home, Calendar, TrendingUp, Plus, RefreshCw, CalendarIcon, X, Percent } from "lucide-react";
+import { DollarSign, Home, Calendar, TrendingUp, Plus, RefreshCw, CalendarIcon, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
 import { format } from "date-fns";
@@ -363,12 +363,6 @@ export default function Dashboard() {
             title="Total Revenue"
             value={`$${metrics.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             icon={DollarSign}
-            description={showCustomDates ? "Selected period" : `Year ${currentYear}`}
-          />
-          <MetricCard
-            title="Occupancy Rate"
-            value={`${metrics.occupancyRate.toFixed(1)}%`}
-            icon={Percent}
             description={showCustomDates ? "Selected period" : `Year ${currentYear}`}
           />
           <MetricCard
