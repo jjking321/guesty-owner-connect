@@ -8,7 +8,7 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { DollarSign, Home, Calendar, TrendingUp, Plus, RefreshCw, CalendarIcon, X } from "lucide-react";
+import { DollarSign, Home, Calendar, TrendingUp, Plus, RefreshCw, CalendarIcon, X, Percent } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
 import { format } from "date-fns";
@@ -125,6 +125,26 @@ export default function Dashboard() {
     gcTime: 30 * 60 * 1000,
   });
 
+  // Query capacity_calendar for occupancy calculations
+  const { data: capacityCalendar = [] } = useQuery({
+    queryKey: ['dashboard-capacity', startDate.toISOString(), endDate.toISOString()],
+    queryFn: async () => {
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      const { data, error } = await supabase
+        .from("capacity_calendar")
+        .select("listing_id, date, is_available")
+        .gte("date", startDateStr)
+        .lte("date", endDateStr);
+
+      if (error) throw error;
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
   // Memoized metrics calculations (using reservation_nights for revenue)
   const metrics = useMemo(() => {
     const totalRevenue = reservationNights.reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0);
@@ -133,8 +153,13 @@ export default function Dashboard() {
     const totalNights = reservationNights.length;
     const avgNightlyRate = totalNights > 0 ? totalRevenue / totalNights : 0;
 
-    return { totalRevenue, totalBookings, activeListings, avgNightlyRate };
-  }, [reservations, listings, reservationNights]);
+    // Calculate occupancy
+    const availableNights = capacityCalendar.filter(c => c.is_available).length;
+    const occupiedNights = reservationNights.length;
+    const occupancyRate = availableNights > 0 ? (occupiedNights / availableNights) * 100 : 0;
+
+    return { totalRevenue, totalBookings, activeListings, avgNightlyRate, occupancyRate };
+  }, [reservations, listings, reservationNights, capacityCalendar]);
 
   // Memoized chart data (using reservation_nights for revenue by night date)
   const chartData = useMemo(() => {
@@ -340,6 +365,12 @@ export default function Dashboard() {
             description={showCustomDates ? "Selected period" : `Year ${currentYear}`}
           />
           <MetricCard
+            title="Occupancy Rate"
+            value={`${metrics.occupancyRate.toFixed(1)}%`}
+            icon={Percent}
+            description={showCustomDates ? "Selected period" : `Year ${currentYear}`}
+          />
+          <MetricCard
             title="Total Bookings"
             value={metrics.totalBookings}
             icon={Calendar}
@@ -350,12 +381,6 @@ export default function Dashboard() {
             value={metrics.activeListings}
             icon={Home}
             description="Currently active properties"
-          />
-          <MetricCard
-            title="Avg Nightly Rate"
-            value={`$${metrics.avgNightlyRate.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-            icon={TrendingUp}
-            description="Across all properties"
           />
         </div>
 
