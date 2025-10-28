@@ -153,8 +153,9 @@ export default function Dashboard() {
     const totalNights = reservationNights.length;
     const avgNightlyRate = totalNights > 0 ? totalRevenue / totalNights : 0;
 
-    // Calculate occupancy
-    const totalCapacityNights = capacityCalendar.length;
+    // Calculate occupancy using active listings and date range
+    const daysInPeriod = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const totalCapacityNights = activeListings * daysInPeriod;
     const occupiedNights = reservationNights.length;
     const occupancyRate = totalCapacityNights > 0 ? (occupiedNights / totalCapacityNights) * 100 : 0;
 
