@@ -31,13 +31,16 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     // Reset dismissed state when account or sync type changes
     setDismissed(false);
     
-    // Load existing active job on mount
+    // Load existing active job on mount - only show recent jobs (within last 5 minutes)
     const loadActiveJob = async () => {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      
       const { data } = await supabase
         .from('sync_jobs')
         .select('*')
         .eq('guesty_account_id', accountId)
         .eq('sync_type', syncType)
+        .gte('started_at', fiveMinutesAgo)
         .order('started_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -48,7 +51,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
         
         // Auto-clear completed/failed jobs after delay
         if (data.status === 'completed' || data.status === 'failed') {
-          setTimeout(() => setSyncJob(null), 30000); // 30 seconds
+          setTimeout(() => setSyncJob(null), 10000); // 10 seconds
         }
       }
     };
