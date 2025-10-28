@@ -104,7 +104,14 @@ async function performSync(
     });
 
     if (!tokenResponse.ok) {
-      throw new Error('Failed to authenticate with Guesty API');
+      const errorBody = await tokenResponse.text().catch(() => '');
+      console.error('Guesty OAuth failed:', {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        body: errorBody,
+        client_id: guestyAccount.client_id
+      });
+      throw new Error(`Failed to authenticate with Guesty API: ${tokenResponse.status} ${tokenResponse.statusText} - ${errorBody}`);
     }
 
     const { access_token: accessToken } = await tokenResponse.json();
