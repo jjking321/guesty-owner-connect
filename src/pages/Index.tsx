@@ -11,7 +11,7 @@ const Index = () => {
     // Check if user is already logged in
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate("/dashboard");
+        navigate("/properties/bulk-edit");
       }
     });
   }, [navigate]);
