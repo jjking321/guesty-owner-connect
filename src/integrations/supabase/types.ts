@@ -466,6 +466,81 @@ export type Database = {
         }
         Relationships: []
       }
+      owner_groups: {
+        Row: {
+          created_at: string
+          group_id: string
+          id: string
+          owner_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_id: string
+          id?: string
+          owner_id: string
+        }
+        Update: {
+          created_at?: string
+          group_id?: string
+          id?: string
+          owner_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "owner_groups_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "property_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "owner_groups_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      owner_users: {
+        Row: {
+          created_at: string
+          id: string
+          organization_id: string
+          owner_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          organization_id: string
+          owner_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          organization_id?: string
+          owner_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "owner_users_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "owner_users_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: true
+            referencedRelation: "owners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       owners: {
         Row: {
           email: string | null
@@ -988,6 +1063,7 @@ export type Database = {
         Returns: Json
       }
       cancel_sync_job: { Args: { job_id: string }; Returns: undefined }
+      get_user_owner_id: { Args: { _user_id: string }; Returns: string }
       get_ytd_revenue_by_listing: {
         Args: { end_date: string; target_year: number }
         Returns: {
@@ -1007,8 +1083,16 @@ export type Database = {
         Args: { _group_id: string; _user_id: string }
         Returns: boolean
       }
+      is_listing_in_owner_groups: {
+        Args: { _listing_id: string; _owner_id: string }
+        Returns: boolean
+      }
       is_organization_member: {
         Args: { _organization_id: string; _user_id: string }
+        Returns: boolean
+      }
+      is_owner_listing: {
+        Args: { _listing_id: string; _owner_id: string }
         Returns: boolean
       }
       is_parent_group_owner: {
@@ -1017,7 +1101,7 @@ export type Database = {
       }
     }
     Enums: {
-      member_role: "super_admin" | "admin" | "member"
+      member_role: "super_admin" | "admin" | "member" | "owner"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1145,7 +1229,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      member_role: ["super_admin", "admin", "member"],
+      member_role: ["super_admin", "admin", "member", "owner"],
     },
   },
 } as const

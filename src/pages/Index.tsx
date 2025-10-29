@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -6,15 +6,40 @@ import { Building2, BarChart3, TrendingUp, Users } from "lucide-react";
 
 const Index = () => {
   const navigate = useNavigate();
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // Check if user is already logged in
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        navigate("/properties/bulk-edit");
+    const checkAuthAndRedirect = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session) {
+          // Check if user is an owner
+          const { data: ownerUser } = await supabase
+            .from('owner_users')
+            .select('owner_id')
+            .eq('user_id', session.user.id)
+            .single();
+
+          if (ownerUser) {
+            // Redirect owner to their dashboard
+            navigate(`/owners/${ownerUser.owner_id}`);
+          } else {
+            // Redirect other users to bulk edit
+            navigate("/properties/bulk-edit");
+          }
+        }
+      } finally {
+        setChecking(false);
       }
-    });
+    };
+
+    checkAuthAndRedirect();
   }, [navigate]);
+
+  if (checking) {
+    return null; // Or a loading spinner
+  }
 
   return (
     <div className="min-h-screen" style={{ background: "var(--gradient-subtle)" }}>

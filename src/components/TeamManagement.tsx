@@ -46,7 +46,7 @@ interface Member {
 interface PendingInvitation {
   id: string;
   email: string;
-  role: 'super_admin' | 'admin' | 'member';
+  role: 'super_admin' | 'admin' | 'member' | 'owner';
   expires_at: string;
   token: string;
 }

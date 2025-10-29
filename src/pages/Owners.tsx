@@ -4,9 +4,12 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { Building2, Phone, Mail, RefreshCw, Loader2 } from "lucide-react";
+import { Building2, Phone, Mail, RefreshCw, Loader2, UserPlus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { InviteOwnerDialog } from "@/components/InviteOwnerDialog";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface Owner {
   id: string;
@@ -16,14 +19,18 @@ interface Owner {
   email: string | null;
   phone: string | null;
   property_count: number;
+  has_portal_access: boolean;
 }
 
 export default function Owners() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { role } = useUserRole();
   const [owners, setOwners] = useState<Owner[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [selectedOwner, setSelectedOwner] = useState<Owner | null>(null);
 
   useEffect(() => {
     loadOwners();
@@ -48,7 +55,7 @@ export default function Owners() {
 
       if (error) throw error;
 
-      // Get property counts separately
+      // Get property counts and portal access separately
       const ownersWithCounts = await Promise.all(
         (ownersData || []).map(async (owner) => {
           const { count } = await supabase
@@ -56,9 +63,17 @@ export default function Owners() {
             .select('*', { count: 'exact', head: true })
             .eq('owner_id', owner.id);
 
+          // Check if owner has portal access
+          const { data: ownerUser } = await supabase
+            .from('owner_users')
+            .select('id')
+            .eq('owner_id', owner.id)
+            .single();
+
           return {
             ...owner,
             property_count: count || 0,
+            has_portal_access: !!ownerUser,
           };
         })
       );
@@ -95,6 +110,14 @@ export default function Owners() {
     if (owner.last_name) return owner.last_name;
     return 'Unknown Owner';
   };
+
+  const handleInviteClick = (owner: Owner, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedOwner(owner);
+    setInviteDialogOpen(true);
+  };
+
+  const canInviteOwners = role === 'super_admin' || role === 'admin';
 
   return (
     <DashboardLayout>
@@ -155,7 +178,12 @@ export default function Owners() {
                 onClick={() => navigate(`/owners/${owner.id}`)}
               >
                 <CardHeader>
-                  <CardTitle className="text-lg">{getOwnerName(owner)}</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">{getOwnerName(owner)}</CardTitle>
+                    {owner.has_portal_access && (
+                      <Badge variant="secondary">Portal Access</Badge>
+                    )}
+                  </div>
                   {owner.email && (
                     <CardDescription className="flex items-center gap-1">
                       <Mail className="h-3 w-3" />
@@ -176,6 +204,17 @@ export default function Owners() {
                         <span>{owner.phone}</span>
                       </div>
                     )}
+                    {canInviteOwners && !owner.has_portal_access && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full mt-2"
+                        onClick={(e) => handleInviteClick(owner, e)}
+                      >
+                        <UserPlus className="h-3 w-3 mr-2" />
+                        Invite to Portal
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -183,6 +222,16 @@ export default function Owners() {
           </div>
         )}
       </div>
+
+      {selectedOwner && (
+        <InviteOwnerDialog
+          open={inviteDialogOpen}
+          onOpenChange={setInviteDialogOpen}
+          ownerId={selectedOwner.id}
+          ownerEmail={selectedOwner.email}
+          onSuccess={loadOwners}
+        />
+      )}
     </DashboardLayout>
   );
 }

@@ -24,6 +24,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
+import { useUserRole } from "@/hooks/useUserRole";
 
 interface Owner {
   id: string;
@@ -39,6 +40,7 @@ export default function OwnerDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { role, ownerId: userOwnerId } = useUserRole();
   const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("actual");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [dateRange, setDateRange] = useState<DateRange>({
@@ -46,6 +48,18 @@ export default function OwnerDetail() {
     to: new Date(),
     preset: "ytd",
   });
+
+  // Redirect owners to their own page if they try to access another owner's page
+  useEffect(() => {
+    if (role === 'owner' && userOwnerId && id !== userOwnerId) {
+      navigate(`/owners/${userOwnerId}`, { replace: true });
+      toast({
+        title: "Access Restricted",
+        description: "You can only view your own dashboard",
+        variant: "destructive",
+      });
+    }
+  }, [role, userOwnerId, id, navigate, toast]);
 
   // Fetch owner data
   const { data: owner, isLoading: isOwnerLoading } = useQuery({
