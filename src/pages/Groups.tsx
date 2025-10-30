@@ -31,9 +31,12 @@ export default function Groups() {
     },
   });
 
-  const { data: groups, refetch: refetchGroups } = useQuery({
+  const { data: groups, refetch: refetchGroups, isLoading: groupsLoading, error: groupsError } = useQuery({
     queryKey: ["property-groups"],
     queryFn: async () => {
+      console.log("🔍 Fetching groups for user:", session?.user?.id);
+      console.log("📧 User email:", session?.user?.email);
+      
       const { data, error } = await supabase
         .from("property_groups")
         .select(`
@@ -50,7 +53,13 @@ export default function Groups() {
         .is("parent_group_id", null)
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error("❌ Error fetching groups:", error);
+        throw error;
+      }
+      
+      console.log("✅ Groups fetched successfully:", data?.length, "groups");
+      console.log("📊 Groups data:", data);
       return data;
     },
     enabled: !!session,
@@ -155,21 +164,37 @@ export default function Groups() {
     <DashboardLayout>
       <div className="space-y-6">
         <div className="flex justify-between items-center">
-          <div>
+          <div className="flex-1">
             <h1 className="text-3xl font-bold">Property Groups</h1>
             <p className="text-muted-foreground mt-1">
               Organize properties by owner, building, or any other criteria
             </p>
+            {groupsError && (
+              <div className="mt-2 p-3 bg-destructive/10 border border-destructive/20 rounded-md">
+                <p className="text-sm text-destructive font-medium">Error loading groups:</p>
+                <p className="text-sm text-destructive">{groupsError.message}</p>
+              </div>
+            )}
+            {session && (
+              <p className="text-xs text-muted-foreground mt-2">
+                Logged in as: {session.user.email}
+              </p>
+            )}
           </div>
 
-          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Group
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => refetchGroups()} disabled={groupsLoading}>
+              {groupsLoading ? "Loading..." : "Refresh"}
+            </Button>
+
+            <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create Group
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Create Property Group</DialogTitle>
               </DialogHeader>
@@ -259,9 +284,17 @@ export default function Groups() {
               </div>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
-        {groups && groups.length === 0 ? (
+        {groupsLoading ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4" />
+              <p className="text-muted-foreground">Loading groups...</p>
+            </CardContent>
+          </Card>
+        ) : groups && groups.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center justify-center py-12">
               <FolderOpen className="h-12 w-12 text-muted-foreground mb-4" />
