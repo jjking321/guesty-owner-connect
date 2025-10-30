@@ -31,28 +31,44 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     // Reset dismissed state when account or sync type changes
     setDismissed(false);
     
-    // Load existing active job on mount - only show recent jobs (within last 5 minutes)
+    // Load existing active job on mount - prioritize running jobs, then recent jobs
     const loadActiveJob = async () => {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      // First try to find any running job (no time limit for running jobs)
+      const { data: runningJob } = await supabase
+        .from('sync_jobs')
+        .select('*')
+        .eq('guesty_account_id', accountId)
+        .eq('sync_type', syncType)
+        .eq('status', 'running')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
       
-      const { data } = await supabase
+      if (runningJob) {
+        setSyncJob(runningJob as SyncJob);
+        setDismissed(false);
+        return;
+      }
+      
+      // If no running job, look for recent completed/failed jobs (last 5 minutes)
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const { data: recentJob } = await supabase
         .from('sync_jobs')
         .select('*')
         .eq('guesty_account_id', accountId)
         .eq('sync_type', syncType)
         .gte('started_at', fiveMinutesAgo)
+        .in('status', ['completed', 'failed'])
         .order('started_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       
-      if (data) {
-        setSyncJob(data as SyncJob);
-        setDismissed(false); // Show new job
+      if (recentJob) {
+        setSyncJob(recentJob as SyncJob);
+        setDismissed(false);
         
         // Auto-clear completed/failed jobs after delay
-        if (data.status === 'completed' || data.status === 'failed') {
-          setTimeout(() => setSyncJob(null), 10000); // 10 seconds
-        }
+        setTimeout(() => setSyncJob(null), 10000); // 10 seconds
       }
     };
     
