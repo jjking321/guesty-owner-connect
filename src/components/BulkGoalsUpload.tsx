@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Papa from "papaparse";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
@@ -38,12 +39,16 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
   const { toast } = useToast();
 
   const parseCSV = (csvText: string): ParsedGoal[] => {
-    const lines = csvText.split('\n');
+    const parsed = Papa.parse(csvText, {
+      skipEmptyLines: true,
+    });
+    
+    const rows = parsed.data as string[][];
     const results: ParsedGoal[] = [];
     
-    // Skip header (row 0) and process data rows
-    for (let i = 1; i < lines.length; i++) {
-      const row = lines[i].split(',');
+    // Skip header (row 0)
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
       const unitAlias = row[0]?.trim();
       
       // Skip empty rows or total row
