@@ -108,11 +108,13 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string, retr
 
 async function fetchReviewsPage(
   accessToken: string,
+  listingId: string,
   limit: number,
   skip: number,
   lastSyncDate?: string
 ) {
   const url = new URL('https://open-api.guesty.com/v1/reviews');
+  url.searchParams.append('listingId', listingId);
   url.searchParams.append('limit', limit.toString());
   url.searchParams.append('skip', skip.toString());
   // NOTE: Some Guesty deployments reject 'fields' and JSON-encoded 'filters' on this endpoint.
@@ -198,83 +200,136 @@ async function performSync(
       guestyAccount.client_secret
     );
 
-    // Determine if this is an incremental sync
-    const lastSyncDate = guestyAccount.last_reviews_sync;
+    // Get all active listings for this account from database
+    const { data: listings, error: listingsError } = await supabaseClient
+      .from('listings')
+      .select('id')
+      .eq('guesty_account_id', guestyAccountId)
+      .eq('archived', false)
+      .eq('active', true);
 
-    let totalSynced = 0;
-    let currentOffset = resumeFromOffset;
-    let hasMorePages = true;
-    let pageNumber = Math.floor(resumeFromOffset / REVIEWS_BATCH_SIZE) + 1;
+    if (listingsError) {
+      throw new Error(`Failed to fetch listings: ${listingsError.message}`);
+    }
 
-    while (hasMorePages) {
-      console.log(`Fetching reviews page ${pageNumber} (offset: ${currentOffset})`);
-
-      // Fetch reviews page
-      const reviewsData = await fetchReviewsPage(
-        accessToken,
-        REVIEWS_BATCH_SIZE,
-        currentOffset,
-        lastSyncDate
-      );
-
-      const results = reviewsData.results || [];
-      console.log(`Received ${results.length} reviews from page ${pageNumber}`);
-
-      if (results.length === 0) {
-        hasMorePages = false;
-        break;
-      }
-
-      // Map and upsert reviews
-      const reviewsToInsert = results.map((review: any) => ({
-        id: review._id || review.id,
-        guesty_account_id: guestyAccountId,
-        listing_id: review.listingId,
-        reservation_id: review.reservationId || null,
-        guest_name: review.guestName || null,
-        rating: typeof review.rating === 'number' ? review.rating : (review.rating ? parseFloat(review.rating) : null),
-        review_text: review.review || null,
-        response_text: review.publicReply || null,
-        review_date: review.createdAt || null,
-        source: review.source || null,
-        category_ratings: review.categories || null,
-      }));
-
-      const { error: upsertError } = await supabaseClient
-        .from('reviews')
-        .upsert(reviewsToInsert, { onConflict: 'id' });
-
-      if (upsertError) {
-        console.error('Error upserting reviews:', upsertError);
-        throw upsertError;
-      }
-
-      totalSynced += results.length;
-      currentOffset += results.length;
-
-      // Update sync job progress immediately after each batch
+    if (!listings || listings.length === 0) {
+      console.log('No active listings found for this account');
       await supabaseClient
         .from('sync_jobs')
         .update({
-          items_synced: totalSynced,
-          last_synced_offset: currentOffset,
-          progress_message: `Synced ${totalSynced} reviews (page ${pageNumber})`,
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          items_synced: 0,
+          progress_message: 'No active listings to sync reviews for',
+        })
+        .eq('id', syncJobId);
+      return;
+    }
+
+    const totalListings = listings.length;
+    console.log(`Found ${totalListings} active listings to sync reviews for`);
+
+    // Update total items to track
+    await supabaseClient
+      .from('sync_jobs')
+      .update({
+        total_items: totalListings,
+        progress_message: `Starting sync for ${totalListings} listings...`,
+      })
+      .eq('id', syncJobId);
+
+    // Determine if this is an incremental sync
+    const lastSyncDate = guestyAccount.last_reviews_sync;
+
+    let totalReviewsSynced = 0;
+    let listingsProcessed = 0;
+
+    // Loop through each listing
+    for (const listing of listings) {
+      listingsProcessed++;
+      const listingId = listing.id;
+      
+      console.log(`Processing listing ${listingsProcessed}/${totalListings}: ${listingId}`);
+
+      let listingReviewsCount = 0;
+      let currentOffset = 0;
+      let hasMorePages = true;
+
+      // Fetch all reviews for this listing
+      while (hasMorePages) {
+        console.log(`Fetching reviews for listing ${listingId} (offset: ${currentOffset})`);
+
+        // Fetch reviews page
+        const reviewsData = await fetchReviewsPage(
+          accessToken,
+          listingId,
+          REVIEWS_BATCH_SIZE,
+          currentOffset,
+          lastSyncDate
+        );
+
+        const results = reviewsData.results || [];
+        console.log(`Received ${results.length} reviews for listing ${listingId}`);
+
+        if (results.length === 0) {
+          hasMorePages = false;
+          break;
+        }
+
+        // Map and upsert reviews
+        const reviewsToInsert = results.map((review: any) => ({
+          id: review._id || review.id,
+          guesty_account_id: guestyAccountId,
+          listing_id: review.listingId,
+          reservation_id: review.reservationId || null,
+          guest_name: review.guestName || null,
+          rating: typeof review.rating === 'number' ? review.rating : (review.rating ? parseFloat(review.rating) : null),
+          review_text: review.review || null,
+          response_text: review.publicReply || null,
+          review_date: review.createdAt || null,
+          source: review.source || null,
+          category_ratings: review.categories || null,
+        }));
+
+        const { error: upsertError } = await supabaseClient
+          .from('reviews')
+          .upsert(reviewsToInsert, { onConflict: 'id' });
+
+        if (upsertError) {
+          console.error('Error upserting reviews:', upsertError);
+          throw upsertError;
+        }
+
+        listingReviewsCount += results.length;
+        totalReviewsSynced += results.length;
+        currentOffset += results.length;
+
+        // Check if we've reached the end for this listing
+        if (results.length < REVIEWS_BATCH_SIZE) {
+          hasMorePages = false;
+        }
+
+        // Delay between pages to avoid rate limits
+        if (hasMorePages) {
+          await delay(REQUEST_DELAY_MS);
+        }
+      }
+
+      console.log(`Completed listing ${listingId}: ${listingReviewsCount} reviews`);
+
+      // Update sync job progress after each listing
+      await supabaseClient
+        .from('sync_jobs')
+        .update({
+          items_synced: listingsProcessed,
+          progress_message: `Syncing reviews for listing ${listingsProcessed} of ${totalListings} (${totalReviewsSynced} reviews total)`,
         })
         .eq('id', syncJobId);
 
-      console.log(`Progress: ${totalSynced} reviews synced (page ${pageNumber})`);
-
-      // Check if we've reached the end
-      if (results.length < REVIEWS_BATCH_SIZE) {
-        hasMorePages = false;
-      }
-
-      // Delay between pages to avoid rate limits
-      if (hasMorePages) {
+      // Delay between listings to avoid rate limits
+      if (listingsProcessed < totalListings) {
         await delay(REQUEST_DELAY_MS);
       }
-
-      pageNumber++;
     }
 
     // Mark sync as completed
@@ -283,8 +338,8 @@ async function performSync(
       .update({
         status: 'completed',
         completed_at: new Date().toISOString(),
-        items_synced: totalSynced,
-        progress_message: `Successfully synced ${totalSynced} reviews`,
+        items_synced: totalListings,
+        progress_message: `Successfully synced ${totalReviewsSynced} reviews from ${totalListings} listings`,
       })
       .eq('id', syncJobId);
 
@@ -294,7 +349,7 @@ async function performSync(
       .update({ last_reviews_sync: new Date().toISOString() })
       .eq('id', guestyAccountId);
 
-    console.log(`Review sync completed successfully: ${totalSynced} reviews synced`);
+    console.log(`Review sync completed successfully: ${totalReviewsSynced} reviews synced from ${totalListings} listings`);
   } catch (error) {
     console.error('Review sync failed:', error);
     
