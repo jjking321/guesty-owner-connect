@@ -4,13 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { PropertiesTable } from "@/components/PropertiesTable";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
+import { BulkGoalsUpload } from "@/components/BulkGoalsUpload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw, Download, Search, Sparkles, Filter, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { RefreshCw, Download, Search, Sparkles, Filter, ArrowUpDown, ArrowUp, ArrowDown, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
@@ -65,6 +66,7 @@ export default function PropertiesBulkEdit() {
   const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
 
   // Fetch all data in parallel
   const { data: listings = [], isLoading: listingsLoading, refetch: refetchListings } = useQuery({
@@ -586,8 +588,16 @@ export default function PropertiesBulkEdit() {
           </div>
           <div className="flex gap-2">
             <Button 
-              onClick={handleGenerateMissingGoals} 
+              onClick={() => setIsBulkUploadOpen(true)}
               variant="default"
+              size="sm"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Upload Projections from CSV
+            </Button>
+            <Button 
+              onClick={handleGenerateMissingGoals} 
+              variant="outline"
               size="sm"
               disabled={isGeneratingBulk}
             >
@@ -994,6 +1004,15 @@ export default function PropertiesBulkEdit() {
               sortDirection,
               scrollPosition: window.scrollY
             }
+          }}
+        />
+
+        <BulkGoalsUpload 
+          open={isBulkUploadOpen} 
+          onOpenChange={setIsBulkUploadOpen}
+          onSuccess={() => {
+            refetchGoals();
+            refetchListings();
           }}
         />
       </div>
