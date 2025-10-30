@@ -53,70 +53,81 @@ Deno.serve(async (req) => {
 
     console.log(`Processing bulk upload for year ${year}, ${updates.length} properties`);
 
-    let goalsUpdated = 0;
-    let goalsSkipped = 0;
-    const errors: string[] = [];
+    // Build array of all goals to upsert
+    const goalsToUpsert = [];
+    const listingIds: string[] = [];
 
-    // Process each listing
     for (const update of updates) {
       const { listingId, monthlyProjections } = update;
+      listingIds.push(listingId);
 
-      // Process each month for this listing
       for (const [monthStr, projection] of Object.entries(monthlyProjections)) {
         const month = parseInt(monthStr);
+        const budget = Math.round(projection * 0.8 * 100) / 100;
+        const goal = Math.round(projection * 1.1 * 100) / 100;
 
-        try {
-          // Check if goal exists and is locked
-          const { data: existingGoal } = await supabaseClient
-            .from('property_goals')
-            .select('id, locked')
-            .eq('listing_id', listingId)
-            .eq('year', year)
-            .eq('month', month)
-            .single();
+        goalsToUpsert.push({
+          listing_id: listingId,
+          year,
+          month,
+          projection_revenue: projection,
+          budget_revenue: budget,
+          goal_revenue: goal,
+          locked: true,
+          locked_by: user.id,
+          locked_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
 
-          // Skip if already locked (preserve user locks)
-          if (existingGoal?.locked) {
-            console.log(`Skipping locked goal: ${listingId}, month ${month}`);
-            goalsSkipped++;
-            continue;
-          }
+    console.log(`Prepared ${goalsToUpsert.length} goals for upsert`);
 
-          // Calculate budget and goal from projection
-          const budget = Math.round(projection * 0.8 * 100) / 100;
-          const goal = Math.round(projection * 1.1 * 100) / 100;
+    // Fetch all existing locked goals in one query
+    const { data: lockedGoals } = await supabaseClient
+      .from('property_goals')
+      .select('listing_id, month')
+      .eq('year', year)
+      .in('listing_id', listingIds)
+      .eq('locked', true);
 
-          // Upsert the goal
-          const { error: upsertError } = await supabaseClient
-            .from('property_goals')
-            .upsert(
-              {
-                listing_id: listingId,
-                year,
-                month,
-                projection_revenue: projection,
-                budget_revenue: budget,
-                goal_revenue: goal,
-                locked: true,
-                locked_by: user.id,
-                locked_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              },
-              {
-                onConflict: 'listing_id,year,month',
-              }
-            );
+    const lockedSet = new Set(
+      lockedGoals?.map(g => `${g.listing_id}-${g.month}`) || []
+    );
 
-          if (upsertError) {
-            console.error(`Error upserting goal for ${listingId}, month ${month}:`, upsertError);
-            errors.push(`${listingId} month ${month}: ${upsertError.message}`);
-          } else {
-            goalsUpdated++;
-          }
-        } catch (error) {
-          console.error(`Error processing ${listingId}, month ${month}:`, error);
-          errors.push(`${listingId} month ${month}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    // Filter out locked goals
+    const goalsToInsert = goalsToUpsert.filter(
+      g => !lockedSet.has(`${g.listing_id}-${g.month}`)
+    );
+
+    const goalsSkipped = goalsToUpsert.length - goalsToInsert.length;
+    console.log(`Skipping ${goalsSkipped} locked goals, upserting ${goalsToInsert.length} goals`);
+
+    // Batch upsert in chunks of 500 to avoid payload limits
+    const BATCH_SIZE = 500;
+    let goalsUpdated = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < goalsToInsert.length; i += BATCH_SIZE) {
+      const batch = goalsToInsert.slice(i, i + BATCH_SIZE);
+      
+      try {
+        const { error: upsertError } = await supabaseClient
+          .from('property_goals')
+          .upsert(batch, {
+            onConflict: 'listing_id,year,month',
+          });
+
+        if (upsertError) {
+          console.error(`Batch upsert error:`, upsertError);
+          errors.push(`Batch ${i / BATCH_SIZE + 1}: ${upsertError.message}`);
+        } else {
+          goalsUpdated += batch.length;
+          console.log(`Upserted batch ${i / BATCH_SIZE + 1}: ${batch.length} goals`);
         }
+      } catch (error) {
+        console.error(`Batch processing error:`, error);
+        errors.push(`Batch ${i / BATCH_SIZE + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
 
