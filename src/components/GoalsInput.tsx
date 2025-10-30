@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy, Sparkles, Lock, Unlock, LockOpen } from "lucide-react";
+import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Calculator } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface GoalsInputProps {
@@ -257,6 +257,42 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     setGoals(prev => prev.map(g => ({ ...g, locked: false })));
   };
 
+  const autoCalculateFromProjections = () => {
+    let calculatedCount = 0;
+    let skippedLocked = 0;
+    let skippedMissing = 0;
+
+    const updatedGoals = goals.map(g => {
+      if (g.locked) {
+        skippedLocked++;
+        return g;
+      }
+      if (!g.projection || g.projection <= 0) {
+        skippedMissing++;
+        return g;
+      }
+      calculatedCount++;
+      return {
+        ...g,
+        budget: Math.round(g.projection * 0.8 * 100) / 100,
+        goal: Math.round(g.projection * 1.1 * 100) / 100,
+      };
+    });
+
+    setGoals(updatedGoals);
+
+    const skipMessages = [];
+    if (skippedLocked > 0) skipMessages.push(`${skippedLocked} locked`);
+    if (skippedMissing > 0) skipMessages.push(`${skippedMissing} missing projection`);
+    
+    toast({
+      title: "Goals Auto-Calculated",
+      description: `Calculated goals for ${calculatedCount} month${calculatedCount !== 1 ? 's' : ''}${
+        skipMessages.length > 0 ? `. Skipped ${skipMessages.join(', ')}.` : '.'
+      }`,
+    });
+  };
+
   if (isLoading) {
     return <div>Loading goals...</div>;
   }
@@ -285,6 +321,15 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             <Button onClick={copyFromPreviousYear} variant="outline" size="sm">
               <Copy className="h-4 w-4 mr-2" />
               Copy from {year - 1}
+            </Button>
+            <Button 
+              onClick={autoCalculateFromProjections} 
+              variant="outline" 
+              size="sm"
+              disabled={!goals.some(g => !g.locked && g.projection > 0)}
+            >
+              <Calculator className="h-4 w-4 mr-2" />
+              Auto Calculate from Projection
             </Button>
           </div>
         </div>
