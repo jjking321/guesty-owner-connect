@@ -134,28 +134,33 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
 
       // Log rate limit headers for monitoring
       const rls = {
-        sec: response.headers.get('x-ratelimit-remaining-second'),
-        min: response.headers.get('x-ratelimit-remaining-minute'),
-        hr: response.headers.get('x-ratelimit-remaining-hour'),
+        sec: parseInt(response.headers.get('x-ratelimit-remaining-second') || '999'),
+        min: parseInt(response.headers.get('x-ratelimit-remaining-minute') || '999'),
+        hr: parseInt(response.headers.get('x-ratelimit-remaining-hour') || '999'),
       };
       console.log(`Guesty rate limits remaining - s:${rls.sec} m:${rls.min} h:${rls.hr}`);
 
       if (response.ok) {
-        return await response.json();
+        return { data: await response.json(), rateLimits: rls };
       }
 
       const status = response.status;
       const text = await response.text();
       console.warn(`Guesty API error (${status}) on attempt ${attempt}: ${text}`);
 
-      if (status === 429 || status >= 500) {
+      // Retry on 429, 502, 503, 504
+      if (status === 429 || status === 502 || status === 503 || status === 504) {
         const retryAfterHeader = response.headers.get('retry-after');
         const retryAfterMs = parseRetryAfter(retryAfterHeader);
         const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
         const waitMs = Math.max(backoff, retryAfterMs || 0);
 
         if (Date.now() - start + waitMs > MAX_WAIT_TIME_MS) {
-          throw new Error('Guesty API is rate-limited or temporarily unavailable. Please try again shortly.');
+          const waitMinutes = Math.ceil(retryAfterMs / 60000);
+          if (status === 429) {
+            throw new Error(`Guesty API rate limit reached. Please wait ${waitMinutes || 1} minute(s) before trying again.`);
+          }
+          throw new Error(`Guesty API temporarily unavailable (${status}). Please try again in a few moments.`);
         }
 
         console.log(`Retrying Guesty request in ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`);
@@ -177,6 +182,14 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
   }
 
   throw new Error('Guesty API request failed after multiple attempts');
+}
+
+function getAdaptiveDelay(rateLimits: { sec: number; min: number; hr: number }): number {
+  // If we're low on any rate limit, add protective delay
+  if (rateLimits.sec < 3) return 1500;
+  if (rateLimits.sec < 5) return 1000;
+  if (rateLimits.min < 10) return 750;
+  return 500; // Default delay
 }
 
 Deno.serve(async (req) => {
@@ -255,20 +268,40 @@ Deno.serve(async (req) => {
     let allReservations: GuestyReservation[] = [];
     let skip = 0;
     const limit = 100;
+    let lastRateLimits = { sec: 999, min: 999, hr: 999 };
 
     console.log('Fetching new/updated reservations from Guesty...');
 
     while (true) {
       console.log(`Fetching: skip=${skip}, limit=${limit}`);
       
-      const data = await fetchGuestyData(apiToken, 'reservations', {
-        limit,
-        skip,
-        filters,
-        fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue',
-      });
+      // Retry logic for this specific page
+      let pageData;
+      const MAX_PAGE_RETRIES = 3;
+      
+      for (let pageAttempt = 1; pageAttempt <= MAX_PAGE_RETRIES; pageAttempt++) {
+        try {
+          const result = await fetchGuestyData(apiToken, 'reservations', {
+            limit,
+            skip,
+            filters,
+            fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue',
+          });
+          
+          pageData = result.data;
+          lastRateLimits = result.rateLimits;
+          break; // Success
+        } catch (err: any) {
+          if (pageAttempt >= MAX_PAGE_RETRIES) {
+            console.error(`Failed to fetch page at skip=${skip} after ${MAX_PAGE_RETRIES} attempts`);
+            throw err;
+          }
+          console.warn(`Page fetch failed, retrying (${pageAttempt}/${MAX_PAGE_RETRIES}): ${err.message}`);
+          await sleep(2000 * pageAttempt);
+        }
+      }
 
-      const reservations = data.results || [];
+      const reservations = pageData.results || [];
       allReservations.push(...reservations);
       
       console.log(`Fetched ${reservations.length} reservations (total: ${allReservations.length})`);
@@ -278,7 +311,11 @@ Deno.serve(async (req) => {
       }
 
       skip += limit;
-      await sleep(500); // Rate limiting
+      
+      // Adaptive delay based on rate limits
+      const delay = getAdaptiveDelay(lastRateLimits);
+      console.log(`Waiting ${delay}ms before next page (rate limits: s:${lastRateLimits.sec} m:${lastRateLimits.min})`);
+      await sleep(delay);
     }
 
     console.log(`Found ${allReservations.length} new/updated reservations`);

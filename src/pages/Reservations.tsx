@@ -26,6 +26,8 @@ export default function Reservations() {
   const [filteredCount, setFilteredCount] = useState(0);
   const [mostRecentReservation, setMostRecentReservation] = useState<Date | null>(null);
   const [isSyncingNew, setIsSyncingNew] = useState(false);
+  const [lastSyncAttempt, setLastSyncAttempt] = useState<number | null>(null);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -65,7 +67,31 @@ export default function Reservations() {
   useEffect(() => {
     loadData();
     loadDefaultView();
+    
+    // Load last sync attempt from localStorage
+    const lastSync = localStorage.getItem('last_reservation_sync_attempt');
+    if (lastSync) {
+      setLastSyncAttempt(parseInt(lastSync));
+    }
   }, []);
+
+  // Cooldown timer
+  useEffect(() => {
+    if (!lastSyncAttempt) return;
+    
+    const COOLDOWN_MS = 60000; // 60 seconds
+    const updateCooldown = () => {
+      const elapsed = Date.now() - lastSyncAttempt;
+      const remaining = Math.max(0, COOLDOWN_MS - elapsed);
+      setCooldownRemaining(Math.ceil(remaining / 1000));
+      
+      if (remaining > 0) {
+        setTimeout(updateCooldown, 1000);
+      }
+    };
+    
+    updateCooldown();
+  }, [lastSyncAttempt]);
 
   useEffect(() => {
     loadData();
@@ -285,6 +311,11 @@ export default function Reservations() {
   };
 
   const handleSyncNewReservations = async () => {
+    // Update last sync attempt
+    const now = Date.now();
+    setLastSyncAttempt(now);
+    localStorage.setItem('last_reservation_sync_attempt', now.toString());
+    
     try {
       setIsSyncingNew(true);
       
@@ -332,9 +363,19 @@ export default function Reservations() {
       
     } catch (error: any) {
       console.error('Sync error:', error);
+      
+      // Parse error message for better display
+      let errorMessage = error.message || "An error occurred during sync";
+      if (error.message?.includes("Edge function returned 500")) {
+        const match = error.message.match(/"error":"([^"]+)"/);
+        if (match) {
+          errorMessage = match[1];
+        }
+      }
+      
       toast({
         title: "Sync failed",
-        description: error.message || "An error occurred during sync",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -419,13 +460,19 @@ export default function Reservations() {
             </Button>
             <Button 
               onClick={handleSyncNewReservations} 
-              disabled={isSyncingNew || loading}
+              disabled={isSyncingNew || loading || cooldownRemaining > 0}
               variant="default"
+              title={cooldownRemaining > 0 ? `Please wait ${cooldownRemaining}s before syncing again` : ''}
             >
               {isSyncingNew ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Syncing...
+                </>
+              ) : cooldownRemaining > 0 ? (
+                <>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Wait {cooldownRemaining}s
                 </>
               ) : (
                 <>
