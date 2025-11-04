@@ -28,6 +28,7 @@ export default function Reservations() {
   const [isSyncingNew, setIsSyncingNew] = useState(false);
   const [lastSyncAttempt, setLastSyncAttempt] = useState<number | null>(null);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
+  const [cooldownReason, setCooldownReason] = useState<string>('');
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -70,16 +71,25 @@ export default function Reservations() {
     
     // Load last sync attempt from localStorage
     const lastSync = localStorage.getItem('last_reservation_sync_attempt');
+    const lastReason = localStorage.getItem('last_reservation_sync_reason');
     if (lastSync) {
       setLastSyncAttempt(parseInt(lastSync));
+      setCooldownReason(lastReason || '');
     }
   }, []);
 
-  // Cooldown timer
+  // Cooldown timer with tiered durations
   useEffect(() => {
     if (!lastSyncAttempt) return;
     
-    const COOLDOWN_MS = 60000; // 60 seconds
+    // Tiered cooldown based on error type
+    const getCooldownDuration = () => {
+      if (cooldownReason.includes('OAUTH_RATE_LIMIT')) return 180000; // 3 minutes for OAuth rate limits
+      if (cooldownReason.includes('SERVER_ERROR')) return 120000; // 2 minutes for server errors
+      return 60000; // 1 minute for normal sync or other errors
+    };
+    
+    const COOLDOWN_MS = getCooldownDuration();
     const updateCooldown = () => {
       const elapsed = Date.now() - lastSyncAttempt;
       const remaining = Math.max(0, COOLDOWN_MS - elapsed);
@@ -91,7 +101,7 @@ export default function Reservations() {
     };
     
     updateCooldown();
-  }, [lastSyncAttempt]);
+  }, [lastSyncAttempt, cooldownReason]);
 
   useEffect(() => {
     loadData();
@@ -311,11 +321,6 @@ export default function Reservations() {
   };
 
   const handleSyncNewReservations = async () => {
-    // Update last sync attempt
-    const now = Date.now();
-    setLastSyncAttempt(now);
-    localStorage.setItem('last_reservation_sync_attempt', now.toString());
-    
     try {
       setIsSyncingNew(true);
       
@@ -353,6 +358,13 @@ export default function Reservations() {
         return;
       }
       
+      // Success - set normal cooldown
+      const now = Date.now();
+      setLastSyncAttempt(now);
+      setCooldownReason('SUCCESS');
+      localStorage.setItem('last_reservation_sync_attempt', now.toString());
+      localStorage.setItem('last_reservation_sync_reason', 'SUCCESS');
+      
       toast({
         title: "Sync completed",
         description: `${data.newOrUpdatedCount} reservations updated since ${new Date(data.cutoffDate).toLocaleDateString()}`,
@@ -364,8 +376,10 @@ export default function Reservations() {
     } catch (error: any) {
       console.error('Sync error:', error);
       
-      // Parse error message for better display
+      // Parse error message for error type and user-friendly display
       let errorMessage = error.message || "An error occurred during sync";
+      let errorType = 'UNKNOWN';
+      
       if (error.message?.includes("Edge function returned 500")) {
         const match = error.message.match(/"error":"([^"]+)"/);
         if (match) {
@@ -373,9 +387,31 @@ export default function Reservations() {
         }
       }
       
+      // Extract error type prefix if present
+      if (errorMessage.includes(':')) {
+        const [type, ...messageParts] = errorMessage.split(':');
+        errorType = type;
+        errorMessage = messageParts.join(':').trim();
+      }
+      
+      // Set cooldown with error type
+      const now = Date.now();
+      setLastSyncAttempt(now);
+      setCooldownReason(errorType);
+      localStorage.setItem('last_reservation_sync_attempt', now.toString());
+      localStorage.setItem('last_reservation_sync_reason', errorType);
+      
+      // Provide specific guidance based on error type
+      let toastDescription = errorMessage;
+      if (errorType === 'OAUTH_RATE_LIMIT') {
+        toastDescription = `${errorMessage}\n\nCooldown: 3 minutes`;
+      } else if (errorType === 'SERVER_ERROR') {
+        toastDescription = `${errorMessage}\n\nCooldown: 2 minutes`;
+      }
+      
       toast({
         title: "Sync failed",
-        description: errorMessage,
+        description: toastDescription,
         variant: "destructive",
       });
     } finally {
@@ -462,7 +498,17 @@ export default function Reservations() {
               onClick={handleSyncNewReservations} 
               disabled={isSyncingNew || loading || cooldownRemaining > 0}
               variant="default"
-              title={cooldownRemaining > 0 ? `Please wait ${cooldownRemaining}s before syncing again` : ''}
+              title={
+                cooldownRemaining > 0 
+                  ? `${
+                      cooldownReason === 'OAUTH_RATE_LIMIT' 
+                        ? 'OAuth rate limit - wait 3 minutes' 
+                        : cooldownReason === 'SERVER_ERROR'
+                        ? 'Server error - wait 2 minutes'
+                        : 'Cooldown active'
+                    } (${cooldownRemaining}s remaining)`
+                  : 'Sync new reservations from Guesty'
+              }
             >
               {isSyncingNew ? (
                 <>
@@ -472,6 +518,7 @@ export default function Reservations() {
               ) : cooldownRemaining > 0 ? (
                 <>
                   <RefreshCw className="mr-2 h-4 w-4" />
+                  {cooldownReason === 'OAUTH_RATE_LIMIT' ? '⏳ ' : ''}
                   Wait {cooldownRemaining}s
                 </>
               ) : (

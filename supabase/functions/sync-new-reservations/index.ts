@@ -26,10 +26,10 @@ interface GuestyReservation {
 }
 
 async function getGuestyAccessToken(clientId: string, clientSecret: string): Promise<string> {
-  const MAX_RETRIES = 5;
+  const MAX_RETRIES = 10; // Increased from 5 to 10 for better resilience
   const BASE_DELAY_MS = 2000; // 2s
   const MAX_BACKOFF_MS = 30000; // 30s
-  const MAX_WAIT_TIME_MS = 45000; // 45s to avoid 60s edge timeout
+  const MAX_WAIT_TIME_MS = 55000; // 55s to stay under 60s edge timeout
 
   console.log('Exchanging client credentials for access token...');
   const start = Date.now();
@@ -58,7 +58,7 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string): Pro
 
       const text = await response.text();
       const status = response.status;
-      console.warn(`Token fetch failed (status ${status}) on attempt ${attempt}: ${text}`);
+      console.warn(`Token fetch failed (status ${status}) on attempt ${attempt}/${MAX_RETRIES}: ${text}`);
 
       // Retry on 429 or 5xx
       if (status === 429 || status >= 500) {
@@ -68,7 +68,12 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string): Pro
         const waitMs = Math.max(backoff, retryAfterMs || 0);
 
         if (Date.now() - start + waitMs > MAX_WAIT_TIME_MS) {
-          throw new Error('Guesty authentication is rate-limited. Please try again in a minute.');
+          // OAuth rate limit specifically - needs longer cooldown
+          if (status === 429) {
+            const estimatedWaitMinutes = Math.ceil(retryAfterMs / 60000) || 3;
+            throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${estimatedWaitMinutes}-5 minutes before trying again. This is a protective measure by Guesty's OAuth service.`);
+          }
+          throw new Error(`SERVER_ERROR:Guesty API temporarily unavailable (${status}). Please try again in 2 minutes.`);
         }
 
         console.log(`Retrying token fetch in ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`);
@@ -77,19 +82,23 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string): Pro
       }
 
       // Non-retryable error
-      throw new Error(`Authentication failed: ${status} - ${text}`);
+      throw new Error(`AUTH_FAILED:Authentication failed: ${status} - ${text}`);
     } catch (err: any) {
       if (attempt >= MAX_RETRIES || Date.now() - start > MAX_WAIT_TIME_MS) {
         console.error('Token fetch failed after retries:', err?.message || err);
-        throw new Error('Authentication failed due to temporary service issues. Please try again later.');
+        // Preserve error prefix if it exists
+        if (err?.message?.includes(':')) {
+          throw err;
+        }
+        throw new Error('OAUTH_RATE_LIMIT:Authentication failed due to rate limiting. Please wait 3-5 minutes before trying again.');
       }
       const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
-      console.log(`Network error getting token. Retrying in ${backoff}ms`);
+      console.log(`Network error getting token. Retrying in ${backoff}ms (attempt ${attempt}/${MAX_RETRIES})`);
       await sleep(backoff);
     }
   }
 
-  throw new Error('Unable to authenticate with Guesty after multiple attempts.');
+  throw new Error('OAUTH_RATE_LIMIT:Unable to authenticate with Guesty after multiple attempts. Please wait 3-5 minutes.');
 }
 
 async function sleep(ms: number) {
