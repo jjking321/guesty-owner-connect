@@ -209,9 +209,35 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       }));
 
+      // Get all valid listing IDs from database
+      console.log('Fetching valid listing IDs...');
+      const { data: validListings, error: listingsError } = await supabase
+        .from('listings')
+        .select('id')
+        .eq('guesty_account_id', accountId);
+
+      if (listingsError) {
+        console.error('Error fetching valid listings:', listingsError);
+        throw listingsError;
+      }
+
+      const validListingIds = new Set(validListings?.map(l => l.id) || []);
+      console.log(`Found ${validListingIds.size} valid listings in database`);
+
+      // Filter reservations to only include those with valid listings
+      const validReservations = reservationsToUpsert.filter(r => {
+        const isValid = validListingIds.has(r.listing_id);
+        if (!isValid) {
+          console.warn(`Skipping reservation ${r.id} - listing ${r.listing_id} not found in database`);
+        }
+        return isValid;
+      });
+
+      console.log(`Filtered to ${validReservations.length} reservations with valid listings (${reservationsToUpsert.length - validReservations.length} skipped)`);
+
       // Deduplicate by ID
       const uniqueReservations = Array.from(
-        new Map(reservationsToUpsert.map(item => [item.id, item])).values()
+        new Map(validReservations.map(item => [item.id, item])).values()
       );
 
       console.log(`Upserting ${uniqueReservations.length} unique reservations...`);
