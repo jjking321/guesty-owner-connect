@@ -206,6 +206,10 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Declare these outside try block so they're accessible in catch
+  let supabase: any;
+  let syncJobId: string | undefined;
+
   try {
     const { accountId } = await req.json();
 
@@ -215,9 +219,28 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    supabase = createClient(supabaseUrl, supabaseKey);
 
     console.log(`Starting incremental reservation sync for account ${accountId}`);
+
+    // Create a sync job for progress tracking
+    const { data: syncJobData, error: jobCreateError } = await supabase
+      .from('sync_jobs')
+      .insert({
+        guesty_account_id: accountId,
+        sync_type: 'new_reservations',
+        status: 'running',
+        progress_message: 'Initializing incremental sync...',
+        items_synced: 0,
+      })
+      .select()
+      .single();
+
+    if (jobCreateError) {
+      console.error('Error creating sync job:', jobCreateError);
+    }
+
+    syncJobId = syncJobData?.id;
 
     // Get Guesty account credentials
     const { data: account, error: accountError } = await supabase
@@ -247,6 +270,19 @@ Deno.serve(async (req) => {
     // If no reservations exist, direct user to do initial sync
     if (!mostRecentReservation) {
       console.log('No existing reservations found. Initial sync required.');
+      
+      // Mark sync job as failed
+      if (syncJobId) {
+        await supabase
+          .from('sync_jobs')
+          .update({
+            status: 'failed',
+            error_message: 'No existing reservations. Please run initial sync from Settings first.',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', syncJobId);
+      }
+      
       return new Response(
         JSON.stringify({
           error: 'No reservations found. Please perform an initial sync from the Settings page first.',
@@ -261,6 +297,16 @@ Deno.serve(async (req) => {
 
     const cutoffDate = new Date(mostRecentReservation.imported_at);
     console.log(`Cutoff date: ${cutoffDate.toISOString()}`);
+
+    // Update sync job with cutoff date
+    if (syncJobId) {
+      await supabase
+        .from('sync_jobs')
+        .update({
+          progress_message: `Fetching reservations updated since ${cutoffDate.toLocaleDateString()}...`,
+        })
+        .eq('id', syncJobId);
+    }
 
     // Get Guesty access token
     const apiToken = await getGuestyAccessToken(account.client_id, account.client_secret);
@@ -315,6 +361,17 @@ Deno.serve(async (req) => {
       
       console.log(`Fetched ${reservations.length} reservations (total: ${allReservations.length})`);
 
+      // Update sync job progress
+      if (syncJobId) {
+        await supabase
+          .from('sync_jobs')
+          .update({
+            items_synced: allReservations.length,
+            progress_message: `Fetching reservations... (${allReservations.length} found so far)`,
+          })
+          .eq('id', syncJobId);
+      }
+
       if (reservations.length < limit) {
         break;
       }
@@ -328,6 +385,17 @@ Deno.serve(async (req) => {
     }
 
     console.log(`Found ${allReservations.length} new/updated reservations`);
+
+    // Update sync job with total
+    if (syncJobId) {
+      await supabase
+        .from('sync_jobs')
+        .update({
+          total_items: allReservations.length,
+          progress_message: `Processing ${allReservations.length} reservations...`,
+        })
+        .eq('id', syncJobId);
+    }
 
     // Transform and upsert reservations
     if (allReservations.length > 0) {
@@ -363,7 +431,7 @@ Deno.serve(async (req) => {
         throw listingsError;
       }
 
-      const validListingIds = new Set(validListings?.map(l => l.id) || []);
+      const validListingIds = new Set(validListings?.map((l: any) => l.id) || []);
       console.log(`Found ${validListingIds.size} valid listings in database`);
 
       // Filter reservations to only include those with valid listings
@@ -395,6 +463,17 @@ Deno.serve(async (req) => {
 
       console.log('Upsert successful');
       console.log('Nightly allocations will be handled automatically by database trigger');
+      
+      // Update sync job progress
+      if (syncJobId) {
+        await supabase
+          .from('sync_jobs')
+          .update({
+            items_synced: uniqueReservations.length,
+            progress_message: `Successfully synced ${uniqueReservations.length} reservations`,
+          })
+          .eq('id', syncJobId);
+      }
     }
 
     // Update last_reservations_sync timestamp
@@ -410,6 +489,18 @@ Deno.serve(async (req) => {
 
     console.log(`Incremental sync completed. ${allReservations.length} reservations processed.`);
 
+    // Mark sync job as completed
+    if (syncJobId) {
+      await supabase
+        .from('sync_jobs')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          progress_message: `Successfully synced ${allReservations.length} new/updated reservations`,
+        })
+        .eq('id', syncJobId);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -424,6 +515,23 @@ Deno.serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in sync-new-reservations:', error);
+    
+    // Mark sync job as failed if we have a syncJobId
+    if (syncJobId) {
+      try {
+        await supabase
+          .from('sync_jobs')
+          .update({
+            status: 'failed',
+            error_message: error.message,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', syncJobId);
+      } catch (jobError) {
+        console.error('Error updating sync job:', jobError);
+      }
+    }
+    
     return new Response(
       JSON.stringify({ error: error.message }),
       {

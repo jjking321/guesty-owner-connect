@@ -18,7 +18,7 @@ interface SyncJob {
 
 interface SyncProgressCardProps {
   accountId: string;
-  syncType: 'listings' | 'reservations' | 'reviews';
+  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations';
 }
 
 export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps) {

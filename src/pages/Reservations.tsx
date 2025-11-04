@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 
 export default function Reservations() {
   const { toast } = useToast();
@@ -29,6 +30,7 @@ export default function Reservations() {
   const [lastSyncAttempt, setLastSyncAttempt] = useState<number | null>(null);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [cooldownReason, setCooldownReason] = useState<string>('');
+  const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -68,6 +70,7 @@ export default function Reservations() {
   useEffect(() => {
     loadData();
     loadDefaultView();
+    loadCurrentAccount();
     
     // Load last sync attempt from localStorage
     const lastSync = localStorage.getItem('last_reservation_sync_attempt');
@@ -77,6 +80,18 @@ export default function Reservations() {
       setCooldownReason(lastReason || '');
     }
   }, []);
+
+  const loadCurrentAccount = async () => {
+    const { data: accounts } = await supabase
+      .from('guesty_accounts')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+    
+    if (accounts) {
+      setCurrentAccountId(accounts.id);
+    }
+  };
 
   // Cooldown timer with tiered durations
   useEffect(() => {
@@ -427,6 +442,14 @@ export default function Reservations() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {/* Sync Progress Card */}
+        {currentAccountId && (
+          <SyncProgressCard 
+            accountId={currentAccountId} 
+            syncType="new_reservations" 
+          />
+        )}
+        
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Reservations</h2>
