@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
+import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -23,8 +23,13 @@ export default function Reservations() {
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
+  const [filteredCount, setFilteredCount] = useState(0);
   const [mostRecentReservation, setMostRecentReservation] = useState<Date | null>(null);
   const [isSyncingNew, setIsSyncingNew] = useState(false);
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(100);
   
   // Filter states
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
@@ -61,6 +66,10 @@ export default function Reservations() {
     loadData();
     loadDefaultView();
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [currentPage, selectedProperty, selectedSource, selectedStatus, checkInFrom, checkInTo, minNights, maxNights, minGuests, maxGuests, minAccommodation, maxAccommodation, sortColumn, sortDirection]);
 
   const loadDefaultView = () => {
     const savedView = localStorage.getItem('reservations_default_view');
@@ -115,49 +124,95 @@ export default function Reservations() {
     try {
       setLoading(true);
       
-      // First get the total count
-      const { count, error: countError } = await supabase
+      // Build the query with filters
+      let query = supabase
         .from("reservations")
-        .select("*", { count: 'exact', head: true });
+        .select("*", { count: 'exact' })
+        .in("status", ["confirmed", "checked_in", "checked_out"]);
 
-      if (countError) throw countError;
-      setTotalCount(count || 0);
-
-      // Load all reservations in batches
-      const allReservations: any[] = [];
-      const batchSize = 1000;
-      let offset = 0;
-      let hasMore = true;
-
-      while (hasMore) {
-        const { data: batch, error: batchError } = await supabase
-          .from("reservations")
-          .select("*")
-          .in("status", ["confirmed", "checked_in", "checked_out"])
-          .order("check_in", { ascending: false })
-          .range(offset, offset + batchSize - 1);
-
-        if (batchError) throw batchError;
-        
-        if (batch && batch.length > 0) {
-          allReservations.push(...batch);
-          offset += batchSize;
-          hasMore = batch.length === batchSize;
-        } else {
-          hasMore = false;
-        }
+      // Apply filters at database level where possible
+      if (selectedProperty !== "all") {
+        query = query.eq("listing_id", selectedProperty);
+      }
+      if (selectedSource !== "all") {
+        query = query.eq("source", selectedSource);
+      }
+      if (selectedStatus !== "all") {
+        query = query.eq("status", selectedStatus);
+      }
+      if (checkInFrom) {
+        query = query.gte("check_in", checkInFrom.toISOString().split('T')[0]);
+      }
+      if (checkInTo) {
+        query = query.lte("check_in", checkInTo.toISOString().split('T')[0]);
+      }
+      if (minNights) {
+        query = query.gte("nights_count", parseInt(minNights));
+      }
+      if (maxNights) {
+        query = query.lte("nights_count", parseInt(maxNights));
+      }
+      if (minGuests) {
+        query = query.gte("guests_count", parseInt(minGuests));
+      }
+      if (maxGuests) {
+        query = query.lte("guests_count", parseInt(maxGuests));
+      }
+      if (minAccommodation) {
+        query = query.gte("fare_accommodation_adjusted", parseFloat(minAccommodation));
+      }
+      if (maxAccommodation) {
+        query = query.lte("fare_accommodation_adjusted", parseFloat(maxAccommodation));
       }
 
-      setReservations(allReservations);
+      // Apply sorting
+      if (sortColumn) {
+        const columnMap: Record<string, string> = {
+          property: "listing_id",
+          checkIn: "check_in",
+          checkOut: "check_out",
+          nights: "nights_count",
+          guests: "guests_count",
+          source: "source",
+          status: "status",
+          accommodation: "fare_accommodation_adjusted",
+        };
+        const dbColumn = columnMap[sortColumn] || "check_in";
+        query = query.order(dbColumn, { ascending: sortDirection === "asc" });
+      } else {
+        query = query.order("check_in", { ascending: false });
+      }
 
-      // Calculate most recent reservation update
-      if (allReservations.length > 0) {
-        const mostRecent = allReservations.reduce((latest, r) => {
-          if (!r.last_updated_at_guesty) return latest;
-          const rDate = new Date(r.last_updated_at_guesty);
-          return rDate > latest ? rDate : latest;
-        }, new Date(0));
-        setMostRecentReservation(mostRecent);
+      // Apply pagination
+      const from = (currentPage - 1) * pageSize;
+      const to = from + pageSize - 1;
+      query = query.range(from, to);
+
+      const { data: reservationsData, error: reservationsError, count } = await query;
+
+      if (reservationsError) throw reservationsError;
+      
+      setReservations(reservationsData || []);
+      setFilteredCount(count || 0);
+
+      // Get total count (all reservations)
+      const { count: totalReservations } = await supabase
+        .from("reservations")
+        .select("*", { count: 'exact', head: true })
+        .in("status", ["confirmed", "checked_in", "checked_out"]);
+      
+      setTotalCount(totalReservations || 0);
+
+      // Get most recent reservation date
+      const { data: recentData } = await supabase
+        .from("reservations")
+        .select("last_updated_at_guesty")
+        .order("last_updated_at_guesty", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (recentData?.last_updated_at_guesty) {
+        setMostRecentReservation(new Date(recentData.last_updated_at_guesty));
       }
 
       // Load listings for display (exclude archived)
@@ -226,6 +281,7 @@ export default function Reservations() {
     setMaxGuests("");
     setMinAccommodation("");
     setMaxAccommodation("");
+    setCurrentPage(1);
   };
 
   const handleSyncNewReservations = async () => {
@@ -286,112 +342,10 @@ export default function Reservations() {
     }
   };
 
-  
-  const uniqueSources = Array.from(new Set(reservations.map(r => r.source).filter(Boolean)));
-  const uniqueStatuses = Array.from(new Set(reservations.map(r => r.status).filter(Boolean)));
-  
-  let filteredReservations = reservations.filter((reservation) => {
-    // Property filter
-    if (selectedProperty !== "all" && reservation.listing_id !== selectedProperty) {
-      return false;
-    }
-    
-    // Source filter
-    if (selectedSource !== "all" && reservation.source !== selectedSource) {
-      return false;
-    }
-    
-    // Status filter
-    if (selectedStatus !== "all" && reservation.status !== selectedStatus) {
-      return false;
-    }
-    
-    // Check-in date filter
-    if (checkInFrom && new Date(reservation.check_in) < checkInFrom) {
-      return false;
-    }
-    if (checkInTo && new Date(reservation.check_in) > checkInTo) {
-      return false;
-    }
-    
-    // Nights filter
-    if (minNights && reservation.nights_count < parseInt(minNights)) {
-      return false;
-    }
-    if (maxNights && reservation.nights_count > parseInt(maxNights)) {
-      return false;
-    }
-    
-    // Guests filter
-    if (minGuests && reservation.guests_count < parseInt(minGuests)) {
-      return false;
-    }
-    if (maxGuests && reservation.guests_count > parseInt(maxGuests)) {
-      return false;
-    }
-    
-    // Accommodation filter
-    if (minAccommodation && parseFloat(reservation.fare_accommodation_adjusted || 0) < parseFloat(minAccommodation)) {
-      return false;
-    }
-    if (maxAccommodation && parseFloat(reservation.fare_accommodation_adjusted || 0) > parseFloat(maxAccommodation)) {
-      return false;
-    }
-    
-    return true;
-  });
+  const uniqueSources = ["airbnb2", "VRBO", "Booking.com", "Expedia", "website", "manual", "BE-API"];
+  const uniqueStatuses = ["confirmed", "checked_in", "checked_out"];
 
-  // Apply sorting
-  if (sortColumn) {
-    filteredReservations = [...filteredReservations].sort((a, b) => {
-      let aValue, bValue;
-
-      switch (sortColumn) {
-        case "property":
-          aValue = getListingName(a.listing_id).toLowerCase();
-          bValue = getListingName(b.listing_id).toLowerCase();
-          break;
-        case "checkIn":
-          aValue = new Date(a.check_in).getTime();
-          bValue = new Date(b.check_in).getTime();
-          break;
-        case "checkOut":
-          aValue = new Date(a.check_out).getTime();
-          bValue = new Date(b.check_out).getTime();
-          break;
-        case "nights":
-          aValue = a.nights_count || 0;
-          bValue = b.nights_count || 0;
-          break;
-        case "guests":
-          aValue = a.guests_count || 0;
-          bValue = b.guests_count || 0;
-          break;
-        case "source":
-          aValue = (a.source || "").toLowerCase();
-          bValue = (b.source || "").toLowerCase();
-          break;
-        case "status":
-          aValue = (a.status || "").toLowerCase();
-          bValue = (b.status || "").toLowerCase();
-          break;
-        case "accommodation":
-          aValue = parseFloat(a.fare_accommodation_adjusted || 0);
-          bValue = parseFloat(b.fare_accommodation_adjusted || 0);
-          break;
-        case "adr":
-          aValue = a.nights_count > 0 ? parseFloat(a.fare_accommodation_adjusted || 0) / a.nights_count : 0;
-          bValue = b.nights_count > 0 ? parseFloat(b.fare_accommodation_adjusted || 0) / b.nights_count : 0;
-          break;
-        default:
-          return 0;
-      }
-
-      if (aValue < bValue) return sortDirection === "asc" ? -1 : 1;
-      if (aValue > bValue) return sortDirection === "asc" ? 1 : -1;
-      return 0;
-    });
-  }
+  const totalPages = Math.ceil(filteredCount / pageSize);
 
   return (
     <DashboardLayout>
@@ -680,9 +634,33 @@ export default function Reservations() {
         {!loading && reservations.length > 0 && (
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <span>
-              Showing <span className="font-semibold text-foreground">{filteredReservations.length}</span> of{" "}
-              <span className="font-semibold text-foreground">{totalCount}</span> reservations
+              Showing <span className="font-semibold text-foreground">{((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, filteredCount)}</span> of{" "}
+              <span className="font-semibold text-foreground">{filteredCount}</span> filtered reservations
+              {filteredCount !== totalCount && <span className="ml-1">({totalCount} total)</span>}
             </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1 || loading}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <span className="text-sm">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages || loading}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         )}
 
@@ -697,7 +675,7 @@ export default function Reservations() {
               </CardDescription>
             </CardHeader>
           </Card>
-        ) : filteredReservations.length === 0 ? (
+        ) : reservations.length === 0 ? (
           <Card>
             <CardHeader>
               <CardTitle>No Reservations Match Your Search</CardTitle>
@@ -829,7 +807,7 @@ export default function Reservations() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredReservations.map((reservation, index) => {
+                    {reservations.map((reservation, index) => {
                       const adr = reservation.nights_count > 0 
                         ? parseFloat(reservation.fare_accommodation_adjusted || 0) / reservation.nights_count 
                         : 0;
