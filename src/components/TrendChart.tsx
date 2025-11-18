@@ -42,7 +42,7 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
 
       return {
         ...dataPoint,
-        forecast: monthForecast?.totalForecast?.p50 ? Math.round(monthForecast.totalForecast.p50) : undefined,
+        forecast: monthForecast?.total_forecast_p50 ? Math.round(monthForecast.total_forecast_p50) : undefined,
       };
     });
   }, [revenueData, revenueForecast, showForecast, activeTab]);
