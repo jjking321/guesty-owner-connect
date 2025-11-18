@@ -32,12 +32,21 @@ export function TrendChart({ occupancyData, revenueData, revparData, goalsData, 
   const revenueWithForecast = useMemo(() => {
     if (activeTab !== "revenue" || !showForecast || !revenueForecast) return revenueData;
 
+    const currentMonth = new Date().getMonth() + 1; // 1-12
+
     return revenueData.map((dataPoint, index) => {
+      const monthNumber = index + 1; // 1-12
+      
+      // Only show forecast for months after the current month
+      if (monthNumber <= currentMonth) {
+        return dataPoint;
+      }
+
       // Get forecast data for this month if available
       const monthlyForecasts = revenueForecast?.monthly_forecasts;
       const monthForecast = monthlyForecasts?.find((f: any) => {
         const forecastMonth = f.month.split('-')[1]; // Extract month from "2025-01"
-        return parseInt(forecastMonth) === index + 1;
+        return parseInt(forecastMonth) === monthNumber;
       });
 
       return {
