@@ -55,14 +55,29 @@ serve(async (req) => {
     const baselineByMonth: Record<number, number> = {};
     const nightsByMonth: Record<number, number> = {};
 
+    // Build baseline using night-based allocation
     reservations?.forEach(r => {
-      const checkIn = new Date(r.check_in);
-      const checkInYear = checkIn.getFullYear();
-      const checkInMonth = checkIn.getMonth(); // 0-11
+      if (!r.check_in || !r.check_out || !r.fare_accommodation_adjusted) return;
       
-      if (checkInYear === year - 1) {
-        baselineByMonth[checkInMonth] = (baselineByMonth[checkInMonth] || 0) + (Number(r.fare_accommodation_adjusted) || 0);
-        nightsByMonth[checkInMonth] = (nightsByMonth[checkInMonth] || 0) + (Number(r.nights_count) || 0);
+      const totalRevenue = Number(r.fare_accommodation_adjusted) || 0;
+      const nightsCount = Number(r.nights_count) || 0;
+      if (nightsCount === 0) return;
+      
+      const revenuePerNight = totalRevenue / nightsCount;
+      
+      let currentNight = new Date(r.check_in);
+      const checkOut = new Date(r.check_out);
+      
+      while (currentNight < checkOut) {
+        const nightYear = currentNight.getFullYear();
+        const nightMonth = currentNight.getMonth(); // 0-11
+        
+        if (nightYear === year - 1) {
+          baselineByMonth[nightMonth] = (baselineByMonth[nightMonth] || 0) + revenuePerNight;
+          nightsByMonth[nightMonth] = (nightsByMonth[nightMonth] || 0) + 1;
+        }
+        
+        currentNight.setDate(currentNight.getDate() + 1);
       }
     });
 
@@ -77,27 +92,56 @@ serve(async (req) => {
     const currentMonth = today.getMonth();
     const isFutureYear = currentYear > today.getFullYear();
 
-    // Calculate revenue on books for the target year
-    const revenueOnBooks = reservations
-      ?.filter(r => {
-        const checkIn = new Date(r.check_in);
-        return checkIn.getFullYear() === currentYear && r.fare_accommodation_adjusted;
-      })
-      .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
+    // Calculate revenue on books for the target year (night-based allocation)
+    let revenueOnBooks = 0;
+    reservations?.forEach(r => {
+      if (!r.check_in || !r.check_out || !r.fare_accommodation_adjusted) return;
+      
+      const totalRevenue = Number(r.fare_accommodation_adjusted) || 0;
+      const nightsCount = Number(r.nights_count) || 0;
+      if (nightsCount === 0) return;
+      
+      const revenuePerNight = totalRevenue / nightsCount;
+      let currentNight = new Date(r.check_in);
+      const checkOut = new Date(r.check_out);
+      
+      while (currentNight < checkOut) {
+        if (currentNight.getFullYear() === currentYear) {
+          revenueOnBooks += revenuePerNight;
+        }
+        currentNight.setDate(currentNight.getDate() + 1);
+      }
+    });
 
-    // Calculate past revenue (actual completed)
-    const pastRevenue = isFutureYear ? 0 : reservations
-      ?.filter(r => {
-        const checkIn = new Date(r.check_in);
-        return checkIn.getFullYear() === currentYear && 
-               checkIn.getMonth() < currentMonth &&
-               r.fare_accommodation_adjusted;
-      })
-      .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0) || 0;
+    // Calculate past revenue (actual completed) using night-based allocation
+    let pastRevenue = 0;
+    if (!isFutureYear) {
+      reservations?.forEach(r => {
+        if (!r.check_in || !r.check_out || !r.fare_accommodation_adjusted) return;
+        
+        const totalRevenue = Number(r.fare_accommodation_adjusted) || 0;
+        const nightsCount = Number(r.nights_count) || 0;
+        if (nightsCount === 0) return;
+        
+        const revenuePerNight = totalRevenue / nightsCount;
+        let currentNight = new Date(r.check_in);
+        const checkOut = new Date(r.check_out);
+        
+        while (currentNight < checkOut) {
+          const nightYear = currentNight.getFullYear();
+          const nightMonth = currentNight.getMonth();
+          
+          if (nightYear === currentYear && nightMonth < currentMonth) {
+            pastRevenue += revenuePerNight;
+          }
+          currentNight.setDate(currentNight.getDate() + 1);
+        }
+      });
+    }
 
     const futureConfirmed = revenueOnBooks - pastRevenue;
 
-    // Helper: Calculate Monthly RevPAR
+    // Helper: Calculate Monthly RevPAR using night-based allocation
     function calculateMonthlyRevPAR(
       targetYear: number,
       targetMonth: number,
@@ -107,21 +151,39 @@ serve(async (req) => {
       
       const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
       
-      // Filter reservations with check-in in target month 
-      // that were CONFIRMED before asOfDate (same-store comparison)
-      const monthlyReservations = reservations.filter(r => {
-        const checkIn = new Date(r.check_in);
-        const created = new Date(r.created_at_guesty || r.check_in);
-        return checkIn.getFullYear() === targetYear &&
-               checkIn.getMonth() === targetMonth &&
-               created <= asOfDate &&
-               ['confirmed', 'checked_in', 'checked_out'].includes(r.status);
-      });
+      let totalRevenue = 0;
+      let totalNights = 0;
+      const bookingIds = new Set();
       
-      const totalRevenue = monthlyReservations.reduce((sum, r) => 
-        sum + (Number(r.fare_accommodation_adjusted) || 0), 0);
-      const totalNights = monthlyReservations.reduce((sum, r) => 
-        sum + (Number(r.nights_count) || 0), 0);
+      // Calculate revenue and nights for any night that falls in the target month
+      reservations.forEach(r => {
+        if (!r.check_in || !r.check_out || !r.fare_accommodation_adjusted) return;
+        
+        const created = new Date(r.created_at_guesty || r.check_in);
+        if (created > asOfDate) return; // Only count bookings confirmed before asOfDate
+        if (!['confirmed', 'checked_in', 'checked_out'].includes(r.status)) return;
+        
+        const totalResRevenue = Number(r.fare_accommodation_adjusted) || 0;
+        const nightsCount = Number(r.nights_count) || 0;
+        if (nightsCount === 0) return;
+        
+        const revenuePerNight = totalResRevenue / nightsCount;
+        let currentNight = new Date(r.check_in);
+        const checkOut = new Date(r.check_out);
+        
+        while (currentNight < checkOut) {
+          const nightYear = currentNight.getFullYear();
+          const nightMonth = currentNight.getMonth();
+          
+          if (nightYear === targetYear && nightMonth === targetMonth) {
+            totalRevenue += revenuePerNight;
+            totalNights += 1;
+            bookingIds.add(r.id);
+          }
+          
+          currentNight.setDate(currentNight.getDate() + 1);
+        }
+      });
       
       // RevPAR = Total Revenue / Calendar Days
       const revpar = totalRevenue / daysInMonth;
@@ -130,7 +192,7 @@ serve(async (req) => {
         revpar,
         revenue: totalRevenue,
         nights: totalNights,
-        bookingCount: monthlyReservations.length
+        bookingCount: bookingIds.size
       };
     }
 
