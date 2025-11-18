@@ -179,10 +179,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
           goal: Math.round(cumulativeGoal),
-          // For cumulative, ensure forecast is at least the actual revenue on books for future months
-          forecastP25: isFutureMonth ? Math.round(Math.max(cumulativeForecastP25, cumulativeActual)) : undefined,
-          forecastP50: isFutureMonth ? Math.round(Math.max(cumulativeForecastP50, cumulativeActual)) : undefined,
-          forecastP75: isFutureMonth ? Math.round(Math.max(cumulativeForecastP75, cumulativeActual)) : undefined,
+          forecastP25: isFutureMonth ? Math.round(cumulativeForecastP25) : undefined,
+          forecastP50: isFutureMonth ? Math.round(cumulativeForecastP50) : undefined,
+          forecastP75: isFutureMonth ? Math.round(cumulativeForecastP75) : undefined,
         });
       }
 
