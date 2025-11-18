@@ -212,7 +212,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                 <span className="font-medium">${entry.value.toLocaleString()}</span>
               </div>
             ))}
-          {hasForecast && showForecast && activeTab === 'monthly' && (
+          {hasForecast && showForecast && (
             <div className="mt-2 pt-2 border-t border-border">
               <div className="text-xs text-muted-foreground mb-1">Forecast Range:</div>
               <div className="text-xs space-y-0.5">
