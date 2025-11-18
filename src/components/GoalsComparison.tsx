@@ -149,6 +149,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           });
         }
 
+        // Only show forecast for future months
+        const isFutureMonth = month > currentMonth;
+        
         // Monthly data
         monthly.push({
           month: monthNames[month],
@@ -156,9 +159,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(budget),
           projection: Math.round(projection),
           goal: Math.round(goal),
-          forecastP25: Math.round(forecastP25),
-          forecastP50: Math.round(forecastP50),
-          forecastP75: Math.round(forecastP75),
+          forecastP25: isFutureMonth ? Math.round(forecastP25) : undefined,
+          forecastP50: isFutureMonth ? Math.round(forecastP50) : undefined,
+          forecastP75: isFutureMonth ? Math.round(forecastP75) : undefined,
         });
 
         // Cumulative data
@@ -176,9 +179,10 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
           goal: Math.round(cumulativeGoal),
-          forecastP25: Math.round(Math.max(cumulativeForecastP25, cumulativeActual)),
-          forecastP50: Math.round(Math.max(cumulativeForecastP50, cumulativeActual)),
-          forecastP75: Math.round(Math.max(cumulativeForecastP75, cumulativeActual)),
+          // For cumulative, ensure forecast is at least the actual revenue on books for future months
+          forecastP25: isFutureMonth ? Math.round(Math.max(cumulativeForecastP25, cumulativeActual)) : undefined,
+          forecastP50: isFutureMonth ? Math.round(Math.max(cumulativeForecastP50, cumulativeActual)) : undefined,
+          forecastP75: isFutureMonth ? Math.round(Math.max(cumulativeForecastP75, cumulativeActual)) : undefined,
         });
       }
 
