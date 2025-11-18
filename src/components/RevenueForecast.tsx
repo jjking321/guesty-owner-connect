@@ -81,11 +81,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
     try {
       const { data, error } = await supabase
         .from("reservations")
-        .select("check_in, fare_accommodation_adjusted")
+        .select("check_in, check_out, fare_accommodation_adjusted, nights_count")
         .eq("listing_id", listingId)
         .in("status", ["confirmed", "checked_in", "checked_out"])
         .gte("check_in", `${selectedYear}-01-01`)
-        .lt("check_in", `${selectedYear + 1}-01-01`);
+        .lt("check_out", `${selectedYear + 1}-01-01`);
 
       if (error) throw error;
 
@@ -94,10 +94,26 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
       if (data) {
         data.forEach((row) => {
-          if (row.check_in && row.fare_accommodation_adjusted) {
-            const monthKey = row.check_in.substring(0, 7);
-            monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + row.fare_accommodation_adjusted;
-            yearTotal += row.fare_accommodation_adjusted;
+          if (row.check_in && row.check_out && row.fare_accommodation_adjusted) {
+            const totalRevenue = parseFloat(row.fare_accommodation_adjusted.toString());
+            const nightsCount = row.nights_count || 0;
+            const revenuePerNight = nightsCount > 0 ? totalRevenue / nightsCount : 0;
+            
+            // Allocate revenue per night across all months the reservation spans
+            let currentNight = new Date(row.check_in);
+            const checkOut = new Date(row.check_out);
+            
+            while (currentNight < checkOut) {
+              const monthKey = currentNight.toISOString().substring(0, 7);
+              const year = currentNight.getFullYear();
+              
+              if (year === selectedYear) {
+                monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + revenuePerNight;
+                yearTotal += revenuePerNight;
+              }
+              
+              currentNight.setDate(currentNight.getDate() + 1);
+            }
           }
         });
       }
