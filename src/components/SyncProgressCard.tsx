@@ -14,11 +14,12 @@ interface SyncJob {
   items_synced: number | null;
   total_items: number | null;
   error_message: string | null;
+  last_synced_offset?: number | null;
 }
 
 interface SyncProgressCardProps {
   accountId: string;
-  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations';
+  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'goal_recalculation';
 }
 
 export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps) {
@@ -121,11 +122,42 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
       
       toast({
         title: "Sync stopped",
-        description: "The sync operation has been cancelled.",
+        description: "The synchronization has been cancelled",
       });
     } catch (error: any) {
       toast({
         title: "Failed to stop sync",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!syncJob) return;
+    
+    try {
+      setStopping(true);
+      const { data, error } = await supabase.functions.invoke('recalculate-goals', {
+        body: {
+          year: new Date().getFullYear(),
+          offset: syncJob.last_synced_offset || 0,
+          limit: 1000,
+          syncJobId: syncJob.id
+        }
+      });
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Recalculation resumed",
+        description: "Goal recalculation has been resumed from where it left off",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to resume recalculation",
         description: error.message,
         variant: "destructive",
       });
@@ -158,7 +190,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
                 <XCircle className="h-4 w-4 text-destructive" />
               )}
               <p className="font-medium text-sm capitalize">
-                {syncType} Sync - {syncJob.status}
+                {syncType === 'goal_recalculation' ? 'Goal Recalculation' : `${syncType} Sync`} - {syncJob.status}
               </p>
             </div>
             
@@ -182,6 +214,20 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
                 >
                   <StopCircle className="h-3 w-3 mr-1" />
                   Stop
+                </Button>
+              )}
+              
+              {/* Resume button - only show for failed goal_recalculation */}
+              {syncJob.status === 'failed' && syncType === 'goal_recalculation' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleResume}
+                  disabled={stopping}
+                >
+                  <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
+                  Resume
                 </Button>
               )}
               

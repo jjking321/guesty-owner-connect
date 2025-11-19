@@ -23,6 +23,7 @@ Deno.serve(async (req) => {
 
     // Verify the user
     const token = authHeader.replace('Bearer ', '');
+    const authToken = token; // Store for self-invocation
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     
     if (userError || !user) {
@@ -204,6 +205,18 @@ Deno.serve(async (req) => {
           } else {
             totalUpdated++;
           }
+
+          // Update progress every 100 goals for more granular updates
+          if (totalUpdated % 100 === 0) {
+            const currentItemsSynced = (syncJob.items_synced || 0) + totalUpdated;
+            await supabase
+              .from('sync_jobs')
+              .update({
+                items_synced: currentItemsSynced,
+                progress_message: `Processing batch ${Math.floor(offset/limit) + 1}... ${totalUpdated}/${goals.length} in current batch`,
+              })
+              .eq('id', syncJob.id);
+          }
         }
 
         // Update progress
@@ -212,6 +225,7 @@ Deno.serve(async (req) => {
           .from('sync_jobs')
           .update({
             items_synced: currentItemsSynced,
+            last_synced_offset: offset,
             progress_message: `Processed ${currentItemsSynced} of ${totalGoals} goals...`,
           })
           .eq('id', syncJob.id);
@@ -225,6 +239,9 @@ Deno.serve(async (req) => {
           
           // Self-invoke for next batch
           const { error: invokeError } = await supabase.functions.invoke('recalculate-goals', {
+            headers: {
+              Authorization: `Bearer ${authToken}`,
+            },
             body: {
               year,
               offset: nextOffset,
