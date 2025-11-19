@@ -450,6 +450,42 @@ export default function PropertiesBulkEdit() {
     }
   };
 
+  const handleRecalculateGoals = async () => {
+    const confirmed = window.confirm(
+      `⚠️ This will recalculate ALL goals for ${selectedYear}:\n\n` +
+      `• Goal = Current Projection\n` +
+      `• Projection = 85% of Current Projection\n` +
+      `• Budget = 75% of Current Projection\n\n` +
+      `This affects ${propertyMetrics.length} properties. Continue?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      toast.loading("Recalculating goals...", { id: "recalculate-goals" });
+
+      const { data, error } = await supabase.functions.invoke("recalculate-goals", {
+        body: { year: selectedYear },
+      });
+
+      if (error) throw error;
+
+      toast.success(data.message || "Goals recalculated successfully", { 
+        id: "recalculate-goals",
+        description: `Updated ${data.totalUpdated} goals`,
+      });
+
+      // Refetch goals to show updated data
+      await refetchGoals();
+    } catch (error) {
+      console.error("Error recalculating goals:", error);
+      toast.error("Failed to recalculate goals", { 
+        id: "recalculate-goals",
+        description: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  };
+
   const handleSelectAll = () => {
     if (selectedIds.size === filteredProperties.length) {
       setSelectedIds(new Set());
@@ -603,6 +639,14 @@ export default function PropertiesBulkEdit() {
             >
               <Sparkles className="h-4 w-4 mr-2" />
               {isGeneratingBulk ? "Generating..." : "Generate Missing Goals"}
+            </Button>
+            <Button 
+              onClick={handleRecalculateGoals} 
+              variant="outline"
+              size="sm"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Recalculate Goals
             </Button>
             <Button 
               onClick={handleGenerateBulkGoals} 
