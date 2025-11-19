@@ -29,9 +29,9 @@ Deno.serve(async (req) => {
       throw new Error('Unauthorized');
     }
 
-    const { year = 2025 } = await req.json();
+    const { year = 2025, offset = 0, limit = 1000, syncJobId = null } = await req.json();
 
-    console.log(`Starting goal recalculation for year ${year} by user ${user.id}`);
+    console.log(`Starting goal recalculation for year ${year} by user ${user.id}, offset: ${offset}, limit: ${limit}`);
 
     // Fetch user's organizations
     const { data: userOrgs, error: orgError } = await supabase
@@ -127,110 +127,131 @@ Deno.serve(async (req) => {
     }
 
     // Create sync job
-    const { data: syncJob, error: syncJobError } = await supabase
-      .from('sync_jobs')
-      .insert({
-        guesty_account_id: guestyAccountId,
-        sync_type: 'goal_recalculation',
-        status: 'running',
-        progress_message: 'Starting goal recalculation...',
-        total_items: totalGoals,
-        items_synced: 0,
-      })
-      .select()
-      .single();
+    // Reuse existing sync job or create new one
+    let syncJob;
+    if (syncJobId) {
+      const { data: existingJob, error: fetchError } = await supabase
+        .from('sync_jobs')
+        .select()
+        .eq('id', syncJobId)
+        .single();
+      
+      if (fetchError || !existingJob) {
+        throw new Error(`Failed to fetch sync job: ${fetchError?.message}`);
+      }
+      syncJob = existingJob;
+      console.log(`Continuing sync job ${syncJob.id}, processing offset ${offset}`);
+    } else {
+      const { data: newJob, error: syncJobError } = await supabase
+        .from('sync_jobs')
+        .insert({
+          guesty_account_id: guestyAccountId,
+          sync_type: 'goal_recalculation',
+          status: 'running',
+          progress_message: 'Starting goal recalculation...',
+          total_items: totalGoals,
+          items_synced: 0,
+        })
+        .select()
+        .single();
 
-    if (syncJobError || !syncJob) {
-      throw new Error(`Failed to create sync job: ${syncJobError?.message}`);
+      if (syncJobError || !newJob) {
+        throw new Error(`Failed to create sync job: ${syncJobError?.message}`);
+      }
+      syncJob = newJob;
+      console.log(`Created sync job ${syncJob.id} for ${totalGoals} goals`);
     }
-
-    console.log(`Created sync job ${syncJob.id} for ${totalGoals} goals`);
 
     // Start background task
     const backgroundTask = async () => {
       try {
-        // Fetch all property_goals for the year and user's listings
+        // Fetch paginated batch of property_goals for the year and user's listings
         const { data: goals, error: goalsError } = await supabase
           .from('property_goals')
           .select('*')
           .eq('year', year)
-          .in('listing_id', listingIds);
+          .in('listing_id', listingIds)
+          .order('listing_id', { ascending: true })
+          .range(offset, offset + limit - 1);
 
         if (goalsError || !goals) {
           throw new Error(`Failed to fetch goals: ${goalsError?.message}`);
         }
 
-        console.log(`Processing ${goals.length} goals in background`);
+        console.log(`Processing batch: ${goals.length} goals (offset ${offset} of ${totalGoals} total)`);
 
-        // Process in batches of 500
-        const BATCH_SIZE = 500;
+        // Process all fetched goals
         let totalUpdated = 0;
         let errors = 0;
 
-        for (let i = 0; i < goals.length; i += BATCH_SIZE) {
-          const batch = goals.slice(i, i + BATCH_SIZE);
-          const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-          const totalBatches = Math.ceil(goals.length / BATCH_SIZE);
+        // Recalculate values for all goals in this batch
+        for (const goal of goals) {
+          const currentProjection = goal.projection_revenue || 0;
           
-          console.log(`Processing batch ${batchNum}/${totalBatches}, goals ${i + 1} to ${Math.min(i + BATCH_SIZE, goals.length)}`);
-
-          // Update progress
-          await supabase
-            .from('sync_jobs')
+          const { error: updateError } = await supabase
+            .from('property_goals')
             .update({
-              progress_message: `Processing batch ${batchNum}/${totalBatches}...`,
-              items_synced: totalUpdated,
-            })
-            .eq('id', syncJob.id);
-
-          // Recalculate values for this batch
-          const updates = batch.map(goal => {
-            const currentProjection = goal.projection_revenue || 0;
-            
-            return {
-              id: goal.id,
               goal_revenue: currentProjection,
               projection_revenue: Math.round(currentProjection * 0.85),
               budget_revenue: Math.round(currentProjection * 0.75),
               updated_at: new Date().toISOString(),
-            };
-          });
+            })
+            .eq('id', goal.id);
 
-          // Update the batch
-          for (const update of updates) {
-            const { error: updateError } = await supabase
-              .from('property_goals')
-              .update({
-                goal_revenue: update.goal_revenue,
-                projection_revenue: update.projection_revenue,
-                budget_revenue: update.budget_revenue,
-                updated_at: update.updated_at,
-              })
-              .eq('id', update.id);
-
-            if (updateError) {
-              console.error(`Error updating goal ${update.id}:`, updateError);
-              errors++;
-            } else {
-              totalUpdated++;
-            }
+          if (updateError) {
+            console.error(`Error updating goal ${goal.id}:`, updateError);
+            errors++;
+          } else {
+            totalUpdated++;
           }
-
-          console.log(`Batch complete. Updated ${totalUpdated} goals so far, ${errors} errors`);
         }
 
-        // Mark job as completed
+        // Update progress
+        const currentItemsSynced = (syncJob.items_synced || 0) + totalUpdated;
         await supabase
           .from('sync_jobs')
           .update({
-            status: 'completed',
-            progress_message: `Successfully recalculated ${totalUpdated} goals`,
-            items_synced: totalUpdated,
-            completed_at: new Date().toISOString(),
+            items_synced: currentItemsSynced,
+            progress_message: `Processed ${currentItemsSynced} of ${totalGoals} goals...`,
           })
           .eq('id', syncJob.id);
 
-        console.log(`Recalculation complete. Total updated: ${totalUpdated}, Errors: ${errors}`);
+        console.log(`Batch complete. Updated ${totalUpdated} goals, ${currentItemsSynced}/${totalGoals} total`);
+
+        // Check if there are more goals to process
+        const nextOffset = offset + limit;
+        if (nextOffset < totalGoals) {
+          console.log(`Invoking next batch at offset ${nextOffset}`);
+          
+          // Self-invoke for next batch
+          const { error: invokeError } = await supabase.functions.invoke('recalculate-goals', {
+            body: {
+              year,
+              offset: nextOffset,
+              limit,
+              syncJobId: syncJob.id,
+            },
+          });
+
+          if (invokeError) {
+            throw new Error(`Failed to invoke next batch: ${invokeError.message}`);
+          }
+          
+          console.log(`Next batch triggered successfully`);
+        } else {
+          // This is the final batch - mark job as completed
+          await supabase
+            .from('sync_jobs')
+            .update({
+              status: 'completed',
+              progress_message: `Successfully recalculated ${currentItemsSynced} goals`,
+              items_synced: currentItemsSynced,
+              completed_at: new Date().toISOString(),
+            })
+            .eq('id', syncJob.id);
+
+          console.log(`Recalculation complete. Total updated: ${currentItemsSynced}, Errors: ${errors}`);
+        }
 
       } catch (error) {
         console.error('Background task error:', error);
