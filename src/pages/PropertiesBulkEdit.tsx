@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { PropertiesTable } from "@/components/PropertiesTable";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { BulkGoalsUpload } from "@/components/BulkGoalsUpload";
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -67,6 +68,30 @@ export default function PropertiesBulkEdit() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+  const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
+
+  // Fetch current guesty account ID for progress tracking
+  useEffect(() => {
+    const fetchAccountId = async () => {
+      const { data: userOrgs } = await supabase
+        .from('organization_members')
+        .select('organization_id')
+        .limit(1);
+      
+      if (userOrgs && userOrgs.length > 0) {
+        const { data: accounts } = await supabase
+          .from('guesty_accounts')
+          .select('id')
+          .eq('organization_id', userOrgs[0].organization_id)
+          .limit(1);
+        
+        if (accounts && accounts.length > 0) {
+          setCurrentAccountId(accounts[0].id);
+        }
+      }
+    };
+    fetchAccountId();
+  }, []);
 
   // Fetch all data in parallel
   const { data: listings = [], isLoading: listingsLoading, refetch: refetchListings } = useQuery({
@@ -462,8 +487,6 @@ export default function PropertiesBulkEdit() {
     if (!confirmed) return;
 
     try {
-      toast.loading("Starting goal recalculation...", { id: "recalculate-goals" });
-
       const { data, error } = await supabase.functions.invoke("recalculate-goals", {
         body: { year: selectedYear },
       });
@@ -471,57 +494,10 @@ export default function PropertiesBulkEdit() {
       if (error) throw error;
 
       toast.success("Goal recalculation started", { 
-        id: "recalculate-goals",
-        description: `Processing ${data.totalGoals} goals in the background. This may take a few minutes.`,
+        description: `Processing ${data.totalGoals} goals. Watch the progress card above.`,
       });
-
-      // Poll for completion
-      const jobId = data.jobId;
-      let completed = false;
-      let attempts = 0;
-      const maxAttempts = 60; // 5 minutes max
-
-      while (!completed && attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-        
-        const { data: job, error: jobError } = await supabase
-          .from('sync_jobs')
-          .select('*')
-          .eq('id', jobId)
-          .single();
-
-        if (jobError) {
-          console.error('Error fetching job status:', jobError);
-          break;
-        }
-
-        if (job.status === 'completed') {
-          completed = true;
-          toast.success("Goals recalculated successfully", {
-            description: job.progress_message || `Updated ${job.items_synced} goals`,
-          });
-          await refetchGoals();
-        } else if (job.status === 'failed') {
-          completed = true;
-          toast.error("Goal recalculation failed", {
-            description: job.error_message || "Unknown error",
-          });
-        }
-
-        attempts++;
-      }
-
-      if (!completed) {
-        toast.info("Goal recalculation is taking longer than expected", {
-          description: "The process is still running in the background. Refresh the page in a few minutes.",
-        });
-      }
-    } catch (error) {
-      console.error("Error recalculating goals:", error);
-      toast.error("Failed to start goal recalculation", { 
-        id: "recalculate-goals",
-        description: error instanceof Error ? error.message : "Unknown error"
-      });
+    } catch (error: any) {
+      toast.error(error.message || "Failed to start recalculation");
     }
   };
 
@@ -722,6 +698,13 @@ export default function PropertiesBulkEdit() {
           atRiskCount={propertyMetrics.filter((p) => p.status === "at-risk").length}
           behindCount={propertyMetrics.filter((p) => p.status === "behind").length}
         />
+
+        {currentAccountId && (
+          <SyncProgressCard 
+            accountId={currentAccountId} 
+            syncType="goal_recalculation" 
+          />
+        )}
 
         <div className="space-y-3">
           <div className="flex gap-3 items-center">
