@@ -462,7 +462,7 @@ export default function PropertiesBulkEdit() {
     if (!confirmed) return;
 
     try {
-      toast.loading("Recalculating goals...", { id: "recalculate-goals" });
+      toast.loading("Starting goal recalculation...", { id: "recalculate-goals" });
 
       const { data, error } = await supabase.functions.invoke("recalculate-goals", {
         body: { year: selectedYear },
@@ -470,16 +470,55 @@ export default function PropertiesBulkEdit() {
 
       if (error) throw error;
 
-      toast.success(data.message || "Goals recalculated successfully", { 
+      toast.success("Goal recalculation started", { 
         id: "recalculate-goals",
-        description: `Updated ${data.totalUpdated} goals`,
+        description: `Processing ${data.totalGoals} goals in the background. This may take a few minutes.`,
       });
 
-      // Refetch goals to show updated data
-      await refetchGoals();
+      // Poll for completion
+      const jobId = data.jobId;
+      let completed = false;
+      let attempts = 0;
+      const maxAttempts = 60; // 5 minutes max
+
+      while (!completed && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+        
+        const { data: job, error: jobError } = await supabase
+          .from('sync_jobs')
+          .select('*')
+          .eq('id', jobId)
+          .single();
+
+        if (jobError) {
+          console.error('Error fetching job status:', jobError);
+          break;
+        }
+
+        if (job.status === 'completed') {
+          completed = true;
+          toast.success("Goals recalculated successfully", {
+            description: job.progress_message || `Updated ${job.items_synced} goals`,
+          });
+          await refetchGoals();
+        } else if (job.status === 'failed') {
+          completed = true;
+          toast.error("Goal recalculation failed", {
+            description: job.error_message || "Unknown error",
+          });
+        }
+
+        attempts++;
+      }
+
+      if (!completed) {
+        toast.info("Goal recalculation is taking longer than expected", {
+          description: "The process is still running in the background. Refresh the page in a few minutes.",
+        });
+      }
     } catch (error) {
       console.error("Error recalculating goals:", error);
-      toast.error("Failed to recalculate goals", { 
+      toast.error("Failed to start goal recalculation", { 
         id: "recalculate-goals",
         description: error instanceof Error ? error.message : "Unknown error"
       });

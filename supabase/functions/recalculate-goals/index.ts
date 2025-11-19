@@ -33,8 +33,7 @@ Deno.serve(async (req) => {
 
     console.log(`Starting goal recalculation for year ${year} by user ${user.id}`);
 
-    // Fetch all property_goals for the specified year that the user has access to
-    // We'll use the service role key but filter by user's organization
+    // Fetch user's organizations
     const { data: userOrgs, error: orgError } = await supabase
       .from('organization_members')
       .select('organization_id')
@@ -65,14 +64,18 @@ Deno.serve(async (req) => {
     if (guestyAccountIds.length === 0) {
       return new Response(
         JSON.stringify({ 
-          success: true, 
-          message: 'No guesty accounts found for user',
-          totalProcessed: 0,
-          totalUpdated: 0,
+          success: false, 
+          error: 'No guesty accounts found for user'
         }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
       );
     }
+
+    // Get the first guesty account for tracking purposes
+    const guestyAccountId = guestyAccountIds[0];
 
     // Get all listings in user's organizations
     const { data: listings, error: listingsError } = await supabase
@@ -89,94 +92,169 @@ Deno.serve(async (req) => {
     if (listingIds.length === 0) {
       return new Response(
         JSON.stringify({ 
-          success: true, 
-          message: 'No listings found for user',
-          totalProcessed: 0,
-          totalUpdated: 0,
+          success: false, 
+          error: 'No listings found for user'
         }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
       );
     }
 
-    // Fetch all property_goals for the year and user's listings
-    const { data: goals, error: goalsError } = await supabase
+    // Count total goals to process
+    const { count: totalGoals, error: countError } = await supabase
       .from('property_goals')
-      .select('*')
+      .select('*', { count: 'exact', head: true })
       .eq('year', year)
       .in('listing_id', listingIds);
 
-    if (goalsError) {
-      throw new Error(`Failed to fetch goals: ${goalsError.message}`);
+    if (countError) {
+      throw new Error(`Failed to count goals: ${countError.message}`);
     }
 
-    if (!goals || goals.length === 0) {
+    if (!totalGoals || totalGoals === 0) {
       return new Response(
         JSON.stringify({ 
-          success: true, 
-          message: `No goals found for year ${year}`,
-          totalProcessed: 0,
-          totalUpdated: 0,
+          success: false, 
+          error: `No goals found for year ${year}`
         }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
       );
     }
 
-    console.log(`Found ${goals.length} goals to recalculate`);
+    // Create sync job
+    const { data: syncJob, error: syncJobError } = await supabase
+      .from('sync_jobs')
+      .insert({
+        guesty_account_id: guestyAccountId,
+        sync_type: 'goal_recalculation',
+        status: 'running',
+        progress_message: 'Starting goal recalculation...',
+        total_items: totalGoals,
+        items_synced: 0,
+      })
+      .select()
+      .single();
 
-    // Process in batches of 500
-    const BATCH_SIZE = 500;
-    let totalUpdated = 0;
-    let errors = 0;
-
-    for (let i = 0; i < goals.length; i += BATCH_SIZE) {
-      const batch = goals.slice(i, i + BATCH_SIZE);
-      console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}, goals ${i + 1} to ${Math.min(i + BATCH_SIZE, goals.length)}`);
-
-      // Recalculate values for this batch
-      const updates = batch.map(goal => {
-        const currentProjection = goal.projection_revenue || 0;
-        
-        return {
-          id: goal.id,
-          goal_revenue: currentProjection, // Move projection to goal
-          projection_revenue: Math.round(currentProjection * 0.85), // 85% of current projection
-          budget_revenue: Math.round(currentProjection * 0.75), // 75% of current projection
-          updated_at: new Date().toISOString(),
-        };
-      });
-
-      // Update the batch
-      for (const update of updates) {
-        const { error: updateError } = await supabase
-          .from('property_goals')
-          .update({
-            goal_revenue: update.goal_revenue,
-            projection_revenue: update.projection_revenue,
-            budget_revenue: update.budget_revenue,
-            updated_at: update.updated_at,
-          })
-          .eq('id', update.id);
-
-        if (updateError) {
-          console.error(`Error updating goal ${update.id}:`, updateError);
-          errors++;
-        } else {
-          totalUpdated++;
-        }
-      }
-
-      console.log(`Batch complete. Updated ${totalUpdated} goals so far, ${errors} errors`);
+    if (syncJobError || !syncJob) {
+      throw new Error(`Failed to create sync job: ${syncJobError?.message}`);
     }
 
-    console.log(`Recalculation complete. Total updated: ${totalUpdated}, Errors: ${errors}`);
+    console.log(`Created sync job ${syncJob.id} for ${totalGoals} goals`);
 
+    // Start background task
+    const backgroundTask = async () => {
+      try {
+        // Fetch all property_goals for the year and user's listings
+        const { data: goals, error: goalsError } = await supabase
+          .from('property_goals')
+          .select('*')
+          .eq('year', year)
+          .in('listing_id', listingIds);
+
+        if (goalsError || !goals) {
+          throw new Error(`Failed to fetch goals: ${goalsError?.message}`);
+        }
+
+        console.log(`Processing ${goals.length} goals in background`);
+
+        // Process in batches of 500
+        const BATCH_SIZE = 500;
+        let totalUpdated = 0;
+        let errors = 0;
+
+        for (let i = 0; i < goals.length; i += BATCH_SIZE) {
+          const batch = goals.slice(i, i + BATCH_SIZE);
+          const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+          const totalBatches = Math.ceil(goals.length / BATCH_SIZE);
+          
+          console.log(`Processing batch ${batchNum}/${totalBatches}, goals ${i + 1} to ${Math.min(i + BATCH_SIZE, goals.length)}`);
+
+          // Update progress
+          await supabase
+            .from('sync_jobs')
+            .update({
+              progress_message: `Processing batch ${batchNum}/${totalBatches}...`,
+              items_synced: totalUpdated,
+            })
+            .eq('id', syncJob.id);
+
+          // Recalculate values for this batch
+          const updates = batch.map(goal => {
+            const currentProjection = goal.projection_revenue || 0;
+            
+            return {
+              id: goal.id,
+              goal_revenue: currentProjection,
+              projection_revenue: Math.round(currentProjection * 0.85),
+              budget_revenue: Math.round(currentProjection * 0.75),
+              updated_at: new Date().toISOString(),
+            };
+          });
+
+          // Update the batch
+          for (const update of updates) {
+            const { error: updateError } = await supabase
+              .from('property_goals')
+              .update({
+                goal_revenue: update.goal_revenue,
+                projection_revenue: update.projection_revenue,
+                budget_revenue: update.budget_revenue,
+                updated_at: update.updated_at,
+              })
+              .eq('id', update.id);
+
+            if (updateError) {
+              console.error(`Error updating goal ${update.id}:`, updateError);
+              errors++;
+            } else {
+              totalUpdated++;
+            }
+          }
+
+          console.log(`Batch complete. Updated ${totalUpdated} goals so far, ${errors} errors`);
+        }
+
+        // Mark job as completed
+        await supabase
+          .from('sync_jobs')
+          .update({
+            status: 'completed',
+            progress_message: `Successfully recalculated ${totalUpdated} goals`,
+            items_synced: totalUpdated,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', syncJob.id);
+
+        console.log(`Recalculation complete. Total updated: ${totalUpdated}, Errors: ${errors}`);
+
+      } catch (error) {
+        console.error('Background task error:', error);
+        await supabase
+          .from('sync_jobs')
+          .update({
+            status: 'failed',
+            error_message: error instanceof Error ? error.message : 'Unknown error',
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', syncJob.id);
+      }
+    };
+
+    // Run in background
+    EdgeRuntime.waitUntil(backgroundTask());
+
+    // Return immediately
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Successfully recalculated ${totalUpdated} goals for year ${year}`,
-        totalProcessed: goals.length,
-        totalUpdated,
-        errors,
+        jobId: syncJob.id,
+        message: `Started recalculation of ${totalGoals} goals`,
+        totalGoals,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
