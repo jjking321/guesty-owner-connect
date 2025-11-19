@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.generate-bulk-goals]
 verify_jwt = true
+
+[functions.recalculate-goals]
+verify_jwt = true
