@@ -33,13 +33,13 @@ serve(async (req) => {
 
     const simulationCount = Math.min(simulations || settings?.simulation_runs || 1000, 1000);
 
-    // Fetch ALL reservations (we need last year's data for baseline)
+    // Fetch ALL reservations (we need historical data for baseline and floor calculations)
     const { data: reservations, error: reservationsError } = await supabase
       .from('reservations')
       .select('id, listing_id, check_in, check_out, fare_accommodation_adjusted, nights_count, status, created_at_guesty')
       .eq('listing_id', listingId)
       .in('status', ['confirmed', 'checked_in', 'checked_out'])
-      .gte('check_in', `${year - 2}-01-01`)
+      .gte('check_in', `${year - 3}-01-01`)
       .order('check_in', { ascending: true });
 
     if (reservationsError) throw reservationsError;
@@ -54,6 +54,10 @@ serve(async (req) => {
     // Build baseline from last year's actual monthly revenue
     const baselineByMonth: Record<number, number> = {};
     const nightsByMonth: Record<number, number> = {};
+
+    // Also track prior year and prior-prior year actuals for floor calculation
+    let priorYearActual = 0;      // year - 1 total (e.g., 2025 for 2026 forecast)
+    let priorPriorYearActual = 0; // year - 2 total (e.g., 2024 for 2026 forecast)
 
     // Build baseline using night-based allocation
     reservations?.forEach(r => {
@@ -75,6 +79,11 @@ serve(async (req) => {
         if (nightYear === year - 1) {
           baselineByMonth[nightMonth] = (baselineByMonth[nightMonth] || 0) + revenuePerNight;
           nightsByMonth[nightMonth] = (nightsByMonth[nightMonth] || 0) + 1;
+          priorYearActual += revenuePerNight;
+        }
+        
+        if (nightYear === year - 2) {
+          priorPriorYearActual += revenuePerNight;
         }
         
         currentNight.setDate(currentNight.getDate() + 1);
@@ -84,8 +93,21 @@ serve(async (req) => {
     const annualTotal = Object.values(baselineByMonth).reduce((sum, v) => sum + v, 0);
     const annualAverage = annualTotal / 12;
 
+    // Calculate YoY growth rate from last two complete years
+    const yoyGrowthRate = priorPriorYearActual > 0 
+      ? priorYearActual / priorPriorYearActual 
+      : 1.0;
+
+    // Forecast floor = prior year actual * capped growth trend (between 0.95x and 1.10x)
+    const cappedGrowthRate = Math.max(0.95, Math.min(yoyGrowthRate, 1.10));
+    const forecastFloor = priorYearActual * cappedGrowthRate;
+
     console.log('Last year monthly baselines:', baselineByMonth);
-    console.log(`Annual average: $${annualAverage.toFixed(0)}\n`);
+    console.log(`Annual average: $${annualAverage.toFixed(0)}`);
+    console.log(`Prior year (${year - 1}) actual: $${priorYearActual.toFixed(0)}`);
+    console.log(`Prior-prior year (${year - 2}) actual: $${priorPriorYearActual.toFixed(0)}`);
+    console.log(`YoY growth rate: ${yoyGrowthRate.toFixed(2)}x (capped to ${cappedGrowthRate.toFixed(2)}x)`);
+    console.log(`Forecast floor: $${forecastFloor.toFixed(0)}\n`);
 
     const today = new Date();
     const currentYear = year;
@@ -234,25 +256,39 @@ serve(async (req) => {
       let velocityFactor = 1.0;
       let prorated = false;
       
-      // Calculate velocity based on RevPAR comparison
-      if (lastYearMetrics.revpar > 0) {
-        velocityFactor = currentMetrics.revpar / lastYearMetrics.revpar;
-      } else if (currentMetrics.revpar > 0) {
-        // No last year data but we have bookings this year = positive signal
-        velocityFactor = 1.3;
-        prorated = true;
-      }
-      
-      // For far-future months with very few bookings, dampen extreme velocities
+      // Calculate how many months until the target month
       const targetMonthStart = new Date(targetYear, targetMonth, 1);
-      const daysUntilMonth = Math.ceil(
-        (targetMonthStart.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
+      const monthsUntilTarget = (targetYear - asOfDate.getFullYear()) * 12 + 
+                                (targetMonth - asOfDate.getMonth());
       
-      if (daysUntilMonth > 60 && currentMetrics.bookingCount < 2) {
-        // Pull toward 1.0 for months far in future with sparse data
-        velocityFactor = 0.7 + (velocityFactor * 0.3);
+      // For months more than 12 months in the future, velocity comparison is unreliable
+      // because booking data is naturally sparse that far out
+      if (monthsUntilTarget > 12) {
+        // Use baseline (velocity = 1.0) for far-future months
+        // Don't penalize for sparse booking data
+        velocityFactor = 1.0;
         prorated = true;
+        console.log(`  → Far future month (${monthsUntilTarget}mo out), using baseline velocity of 1.0`);
+      } else {
+        // Calculate velocity based on RevPAR comparison for near-term months
+        if (lastYearMetrics.revpar > 0) {
+          velocityFactor = currentMetrics.revpar / lastYearMetrics.revpar;
+        } else if (currentMetrics.revpar > 0) {
+          // No last year data but we have bookings this year = positive signal
+          velocityFactor = 1.3;
+          prorated = true;
+        }
+        
+        // For months 2-12 months out with very few bookings, dampen extreme velocities
+        const daysUntilMonth = Math.ceil(
+          (targetMonthStart.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        
+        if (daysUntilMonth > 60 && currentMetrics.bookingCount < 2) {
+          // Pull toward 1.0 for months far in future with sparse data
+          velocityFactor = 0.7 + (velocityFactor * 0.3);
+          prorated = true;
+        }
       }
       
       // Clip to reasonable bounds (0.5x to 2.0x)
@@ -342,10 +378,11 @@ serve(async (req) => {
       };
     }
 
-    // Simplified Monte Carlo Simulation
+    // Monte Carlo Simulation with floor support
     function simulateForecast(
       monthlyForecasts: any[],
-      simulationCount: number
+      simulationCount: number,
+      forecastFloor: number
     ): { p10: number; p25: number; p50: number; p75: number; p90: number } {
       
       const simulations: number[] = [];
@@ -367,10 +404,11 @@ serve(async (req) => {
       
       simulations.sort((a, b) => a - b);
       
+      // Apply floor to lower percentiles to prevent unrealistic downside
       return {
-        p10: simulations[Math.floor(simulationCount * 0.1)],
-        p25: simulations[Math.floor(simulationCount * 0.25)],
-        p50: simulations[Math.floor(simulationCount * 0.5)],
+        p10: Math.max(forecastFloor * 0.90, simulations[Math.floor(simulationCount * 0.1)]),
+        p25: Math.max(forecastFloor * 0.95, simulations[Math.floor(simulationCount * 0.25)]),
+        p50: Math.max(forecastFloor, simulations[Math.floor(simulationCount * 0.5)]),
         p75: simulations[Math.floor(simulationCount * 0.75)],
         p90: simulations[Math.floor(simulationCount * 0.9)]
       };
@@ -401,19 +439,25 @@ serve(async (req) => {
       velocitySum += forecast.velocity_factor;
     }
 
-    const totalForecast = totalOnBooks + totalAdditional;
+    const calculatedForecast = totalOnBooks + totalAdditional;
     const avgVelocity = velocitySum / 12;
+
+    // Apply floor: forecast should not be below prior year without strong evidence
+    const totalForecast = Math.max(calculatedForecast, forecastFloor);
+    const floorApplied = totalForecast > calculatedForecast;
 
     console.log(
       `\n=== Annual Summary ===` +
       `\nOn Books: $${totalOnBooks.toFixed(0)}` +
       `\nAdditional Needed: $${totalAdditional.toFixed(0)}` +
-      `\nTotal Forecast: $${totalForecast.toFixed(0)}` +
+      `\nCalculated Forecast: $${calculatedForecast.toFixed(0)}` +
+      `\nForecast Floor: $${forecastFloor.toFixed(0)}` +
+      `\nFinal Forecast: $${totalForecast.toFixed(0)}${floorApplied ? ' (floor applied)' : ''}` +
       `\nAverage Velocity: ${avgVelocity.toFixed(2)}x\n`
     );
 
-    // Run simulations
-    const simResults = simulateForecast(monthlyForecasts, simulationCount);
+    // Run simulations with floor
+    const simResults = simulateForecast(monthlyForecasts, simulationCount, forecastFloor);
 
     console.log(
       `Simulation Results (${simulationCount} runs):` +
@@ -445,7 +489,8 @@ serve(async (req) => {
           const simForecast = forecast.baseline * forecast.velocity_factor * noise;
           simTotal += Math.max(forecast.revenue_on_books, simForecast);
         }
-        simulations.push(simTotal);
+        // Apply floor to simulations for goal probability calculation
+        simulations.push(Math.max(simTotal, forecastFloor));
       }
       
       goalProbabilities.budget = 
@@ -469,6 +514,14 @@ serve(async (req) => {
       risks: [] as string[],
       opportunities: [] as string[]
     };
+
+    // Add floor insight if applied
+    if (floorApplied) {
+      insights.drivers.push(
+        `Forecast floor applied: Based on ${year - 1} performance of $${priorYearActual.toFixed(0)} ` +
+        `(raised from $${calculatedForecast.toFixed(0)} to $${totalForecast.toFixed(0)})`
+      );
+    }
 
     // Overall velocity trend
     if (avgVelocity > 1.15) {
