@@ -436,26 +436,6 @@ export function ComparablesModule({
                     />
                   ))}
                 </div>
-
-                {/* Load More Button */}
-                {hasMoreResults && (
-                  <div className="flex justify-center pt-4">
-                    <Button 
-                      variant="outline" 
-                      onClick={loadMoreComparables}
-                      disabled={loadingMore}
-                    >
-                      {loadingMore ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                          Loading...
-                        </>
-                      ) : (
-                        'Load More Comparables'
-                      )}
-                    </Button>
-                  </div>
-                )}
               </div>
             )}
 
@@ -488,8 +468,28 @@ export function ComparablesModule({
                 </Button>
               </div>
             )}
-          </div>
-        )}
+              </div>
+            )}
+
+            {/* Load More Button */}
+            {hasMoreResults && (
+              <div className="flex justify-center pt-4">
+                <Button 
+                  variant="outline" 
+                  onClick={loadMoreComparables}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Loading...
+                    </>
+                  ) : (
+                    'Load More Comparables'
+                  )}
+                </Button>
+              </div>
+            )}
       </CardContent>
     </Card>
   );
