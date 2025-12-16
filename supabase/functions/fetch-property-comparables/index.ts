@@ -57,21 +57,23 @@ serve(async (req) => {
 
     const bedrooms = listing.bedrooms || 2;
     const guests = listing.accommodates || 4;
-
-    console.log(`Calling Air ROI API with: lat=${latitude}, lng=${longitude}, bedrooms=${bedrooms}, baths=${baths}, guests=${guests}`);
+    const bathsFloat = parseFloat(baths).toFixed(1); // Ensure "2.0" not "2"
 
     // Build query params
     const params = new URLSearchParams({
       latitude: latitude.toString(),
       longitude: longitude.toString(),
       bedrooms: bedrooms.toString(),
-      baths: baths.toString(),
+      baths: bathsFloat,
       guests: guests.toString(),
       currency: 'native',
     });
 
+    const fullUrl = `${AIRROI_API_URL}?${params}`;
+    console.log(`Full API URL: ${fullUrl}`);
+
     // Call Air ROI API
-    const airroiResponse = await fetch(`${AIRROI_API_URL}?${params}`, {
+    const airroiResponse = await fetch(fullUrl, {
       method: 'GET',
       headers: {
         'x-api-key': airroiApiKey,
@@ -79,14 +81,44 @@ serve(async (req) => {
       },
     });
 
+    // Log response headers for diagnostics
+    console.log('Response status:', airroiResponse.status);
+    console.log('Response headers:', {
+      contentType: airroiResponse.headers.get('content-type'),
+      rateLimit: airroiResponse.headers.get('x-ratelimit-remaining'),
+      rateLimitReset: airroiResponse.headers.get('x-ratelimit-reset'),
+    });
+
+    const responseText = await airroiResponse.text();
+    console.log('Raw API response:', responseText);
+
     if (!airroiResponse.ok) {
-      const errorText = await airroiResponse.text();
-      console.error('Air ROI API error:', airroiResponse.status, errorText);
-      throw new Error(`Air ROI API error: ${airroiResponse.status} - ${errorText}`);
+      console.error('Air ROI API error:', airroiResponse.status, responseText);
+      throw new Error(`Air ROI API error: ${airroiResponse.status} - ${responseText}`);
     }
 
-    const airroiData = await airroiResponse.json();
-    console.log(`Air ROI returned ${airroiData.results?.length || 0} comparables`);
+    let airroiData;
+    try {
+      airroiData = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('Failed to parse API response as JSON:', parseError);
+      throw new Error(`Failed to parse Air ROI response: ${responseText.substring(0, 200)}`);
+    }
+
+    // Log the full response structure
+    console.log('Parsed Air ROI response:', JSON.stringify(airroiData, null, 2));
+
+    // Check for error fields in the response body
+    if (airroiData.error) {
+      console.error('Air ROI returned error in body:', airroiData.error);
+      throw new Error(`Air ROI API error: ${airroiData.error}`);
+    }
+    if (airroiData.message && !airroiData.results) {
+      console.warn('Air ROI returned message:', airroiData.message);
+    }
+
+    const apiResultCount = airroiData.results?.length || 0;
+    console.log(`Air ROI returned ${apiResultCount} comparables`);
 
     // Process and upsert comparables
     const comparables = airroiData.results || [];
@@ -144,12 +176,10 @@ serve(async (req) => {
         blocked_days: comp.blocked_days,
       },
       fetched_at: new Date().toISOString(),
-      // Keep existing is_selected status if updating
     }));
 
     if (upsertData.length > 0) {
       // First, delete old comparables that are not selected for this listing
-      // to avoid stale data
       const { error: deleteError } = await supabase
         .from('property_comparables')
         .delete()
@@ -188,11 +218,24 @@ serve(async (req) => {
 
     console.log(`Returning ${allComparables?.length || 0} total comparables`);
 
+    // Build search params for diagnostic info
+    const searchParams = {
+      latitude,
+      longitude,
+      bedrooms,
+      baths: bathsFloat,
+      guests,
+      currency: 'native',
+    };
+
     return new Response(
       JSON.stringify({
         success: true,
         count: allComparables?.length || 0,
         comparables: allComparables || [],
+        searchParams,
+        apiResultCount,
+        apiResponse: apiResultCount === 0 ? airroiData : undefined, // Include full response if no results
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
