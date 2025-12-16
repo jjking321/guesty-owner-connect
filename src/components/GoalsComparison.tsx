@@ -45,15 +45,8 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   // When external goals are provided, derive year from them
   const year = externalGoals ? (externalGoals[0]?.year || currentYear) : selectedYear;
   
-  // Available years for selection (3 years back, current, 2 years forward)
-  const availableYears = [
-    currentYear - 3,
-    currentYear - 2,
-    currentYear - 1,
-    currentYear,
-    currentYear + 1,
-    currentYear + 2,
-  ];
+  // Available years for selection
+  const availableYears = [2024, 2025, 2026];
 
   useEffect(() => {
     loadGoalsComparison();
