@@ -60,7 +60,6 @@ serve(async (req) => {
       latitude: latitude,
       longitude: longitude,
       radius_miles: parseFloat(radius_miles),
-      limit: 25,  // Request more results (default is 10)
       sort: {
         ttm_revenue: "desc"  // Sort by TTM revenue, highest first
       }
