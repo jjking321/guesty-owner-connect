@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const AIRROI_API_URL = 'https://api.airroi.com/listings/comparables';
+const AIRROI_API_URL = 'https://api.airroi.com/listings/search/radius';
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -25,13 +25,13 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { listing_id, baths = 2 } = await req.json();
+    const { listing_id, radius_miles = 10 } = await req.json();
 
     if (!listing_id) {
       throw new Error('listing_id is required');
     }
 
-    console.log(`Fetching comparables for listing: ${listing_id}, baths: ${baths}`);
+    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles`);
 
     // Fetch listing details from database
     const { data: listing, error: listingError } = await supabase
@@ -55,30 +55,25 @@ serve(async (req) => {
       throw new Error('Listing does not have valid coordinates (lat/lng)');
     }
 
-    const bedrooms = listing.bedrooms || 2;
-    const guests = listing.accommodates || 4;
-    const bathsFloat = parseFloat(baths).toFixed(1); // Ensure "2.0" not "2"
+    // Build POST body for radius search
+    const requestBody = {
+      latitude: latitude,
+      longitude: longitude,
+      radius_miles: parseFloat(radius_miles),
+      page_size: 50,
+    };
 
-    // Build query params
-    const params = new URLSearchParams({
-      latitude: latitude.toString(),
-      longitude: longitude.toString(),
-      bedrooms: bedrooms.toString(),
-      baths: bathsFloat,
-      guests: guests.toString(),
-      currency: 'native',
-    });
+    console.log(`Calling Air ROI API (POST): ${AIRROI_API_URL}`);
+    console.log('Request body:', JSON.stringify(requestBody, null, 2));
 
-    const fullUrl = `${AIRROI_API_URL}?${params}`;
-    console.log(`Full API URL: ${fullUrl}`);
-
-    // Call Air ROI API
-    const airroiResponse = await fetch(fullUrl, {
-      method: 'GET',
+    // Call Air ROI API with POST
+    const airroiResponse = await fetch(AIRROI_API_URL, {
+      method: 'POST',
       headers: {
         'x-api-key': airroiApiKey,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify(requestBody),
     });
 
     // Log response headers for diagnostics
@@ -117,33 +112,35 @@ serve(async (req) => {
       console.warn('Air ROI returned message:', airroiData.message);
     }
 
-    const apiResultCount = airroiData.results?.length || 0;
+    // Handle different response formats - radius endpoint might use 'listings' instead of 'results'
+    const resultsArray = airroiData.results || airroiData.listings || [];
+    const apiResultCount = resultsArray.length;
     console.log(`Air ROI returned ${apiResultCount} comparables`);
 
     // Process and upsert comparables
-    const comparables = airroiData.results || [];
+    const comparables = resultsArray;
     const upsertData = comparables.map((comp: any) => ({
       listing_id: listing_id,
-      airroi_listing_id: comp.listing_id,
-      listing_name: comp.listing_name,
-      listing_type: comp.listing_type,
+      airroi_listing_id: comp.listing_id || comp.id,
+      listing_name: comp.listing_name || comp.name,
+      listing_type: comp.listing_type || comp.property_type,
       room_type: comp.room_type,
-      cover_photo_url: comp.cover_photo_url,
+      cover_photo_url: comp.cover_photo_url || comp.photo_url || comp.thumbnail,
       host_name: comp.host_name,
       superhost: comp.superhost || false,
       location_info: {
         country: comp.country,
         region: comp.region,
-        locality: comp.locality,
-        district: comp.district,
-        lat: comp.lat,
-        lng: comp.lng,
+        locality: comp.locality || comp.city,
+        district: comp.district || comp.neighborhood,
+        lat: comp.lat || comp.latitude,
+        lng: comp.lng || comp.longitude,
       },
       property_details: {
-        guests: comp.guests,
+        guests: comp.guests || comp.accommodates,
         bedrooms: comp.bedrooms,
         beds: comp.beds,
-        baths: comp.baths,
+        baths: comp.baths || comp.bathrooms,
         amenities: comp.amenities,
       },
       booking_settings: {
@@ -157,8 +154,8 @@ serve(async (req) => {
         extra_guest_fee: comp.extra_guest_fee,
       },
       ratings: {
-        num_reviews: comp.num_reviews,
-        rating_overall: comp.rating_overall,
+        num_reviews: comp.num_reviews || comp.review_count,
+        rating_overall: comp.rating_overall || comp.rating,
         rating_accuracy: comp.rating_accuracy,
         rating_checkin: comp.rating_checkin,
         rating_cleanliness: comp.rating_cleanliness,
@@ -167,10 +164,10 @@ serve(async (req) => {
         rating_value: comp.rating_value,
       },
       performance_metrics: {
-        ttm_revenue: comp.ttm_revenue,
-        ttm_occupancy: comp.ttm_occupancy,
-        ttm_adr: comp.ttm_adr,
-        ttm_revpar: comp.ttm_revpar,
+        ttm_revenue: comp.ttm_revenue || comp.annual_revenue,
+        ttm_occupancy: comp.ttm_occupancy || comp.occupancy_rate,
+        ttm_adr: comp.ttm_adr || comp.adr,
+        ttm_revpar: comp.ttm_revpar || comp.revpar,
         available_days: comp.available_days,
         reserved_days: comp.reserved_days,
         blocked_days: comp.blocked_days,
@@ -222,10 +219,8 @@ serve(async (req) => {
     const searchParams = {
       latitude,
       longitude,
-      bedrooms,
-      baths: bathsFloat,
-      guests,
-      currency: 'native',
+      radius_miles,
+      page_size: 50,
     };
 
     return new Response(
@@ -235,7 +230,7 @@ serve(async (req) => {
         comparables: allComparables || [],
         searchParams,
         apiResultCount,
-        apiResponse: apiResultCount === 0 ? airroiData : undefined, // Include full response if no results
+        apiResponse: apiResultCount === 0 ? airroiData : undefined,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

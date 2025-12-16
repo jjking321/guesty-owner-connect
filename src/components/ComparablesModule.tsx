@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, DollarSign, Percent, Building } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building } from "lucide-react";
 
 interface ComparablesModuleProps {
   listingId: string;
@@ -84,7 +84,7 @@ export function ComparablesModule({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [bathrooms, setBathrooms] = useState<number>(2);
+  const [radiusMiles, setRadiusMiles] = useState<number>(10);
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
 
   // Load existing comparables on mount
@@ -131,7 +131,7 @@ export function ComparablesModule({
       const { data, error } = await supabase.functions.invoke('fetch-property-comparables', {
         body: {
           listing_id: listingId,
-          baths: bathrooms,
+          radius_miles: radiusMiles,
         },
       });
 
@@ -260,19 +260,23 @@ export function ComparablesModule({
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <Label htmlFor="bathrooms" className="text-sm text-muted-foreground whitespace-nowrap">
-                Bathrooms:
+              <Label htmlFor="radius" className="text-sm text-muted-foreground whitespace-nowrap">
+                Search Radius:
               </Label>
-              <Input
-                id="bathrooms"
-                type="number"
-                step="0.5"
-                min="0.5"
-                max="10"
-                value={bathrooms}
-                onChange={(e) => setBathrooms(parseFloat(e.target.value) || 2)}
-                className="w-20"
-              />
+              <Select
+                value={radiusMiles.toString()}
+                onValueChange={(value) => setRadiusMiles(parseInt(value))}
+              >
+                <SelectTrigger className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">5 miles</SelectItem>
+                  <SelectItem value="10">10 miles</SelectItem>
+                  <SelectItem value="25">25 miles</SelectItem>
+                  <SelectItem value="50">50 miles</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <Button 
               onClick={fetchComparables} 
