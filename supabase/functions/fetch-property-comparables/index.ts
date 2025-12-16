@@ -71,9 +71,9 @@ serve(async (req) => {
         requestBody.filter.amenities = { all: amenities };
       }
       
-      // Bedrooms filter - exact match
+      // Bedrooms filter - exact match using 'eq' operator
       if (bedrooms !== null) {
-        requestBody.filter.bedrooms = { all: [bedrooms] };
+        requestBody.filter.bedrooms = { eq: bedrooms };
       }
     }
 
