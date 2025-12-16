@@ -5,6 +5,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 interface ComparableLocation {
   id: string;
   listing_name: string | null;
+  cover_photo_url?: string | null;
   location_info: {
     lat?: number;
     lng?: number;
@@ -166,36 +167,45 @@ export function ComparablesMap({
         border-radius: 50%;
         box-shadow: 0 2px 6px rgba(0,0,0,0.25);
         cursor: pointer;
-        transition: transform 0.2s;
+        transform-origin: center bottom;
+        will-change: transform;
+        transition: transform 0.15s ease-out;
       `;
       el.onmouseenter = () => {
-        el.style.transform = 'scale(1.2)';
+        el.style.transform = 'scale(1.15)';
       };
       el.onmouseleave = () => {
         el.style.transform = 'scale(1)';
       };
 
-      const popup = new mapboxgl.Popup({ offset: 20 }).setHTML(`
-        <div style="padding: 12px; font-family: system-ui, sans-serif; min-width: 180px;">
-          <strong style="font-size: 14px; color: ${isSelected ? 'hsl(142, 76%, 36%)' : 'hsl(215, 25%, 27%)'};">
-            ${comp.listing_name || 'Unknown Property'}
-          </strong>
-          ${comp.location_info?.locality ? `<p style="margin: 4px 0 8px; color: #666; font-size: 12px;">${comp.location_info.locality}</p>` : ''}
-          <div style="display: grid; gap: 4px; font-size: 13px;">
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #888;">TTM Revenue:</span>
-              <strong>${formatCurrency(comp.performance_metrics?.ttm_revenue)}</strong>
+      const photoHtml = comp.cover_photo_url 
+        ? `<img src="${comp.cover_photo_url}" style="width: 100%; height: 80px; object-fit: cover; border-radius: 8px 8px 0 0;" onerror="this.style.display='none'" />`
+        : '';
+
+      const popup = new mapboxgl.Popup({ offset: 20, maxWidth: '280px' }).setHTML(`
+        <div style="font-family: system-ui, -apple-system, sans-serif; min-width: 220px; overflow: hidden; border-radius: 8px;">
+          ${photoHtml}
+          <div style="padding: 12px;">
+            <div style="font-weight: 600; font-size: 14px; color: #1f2937; line-height: 1.3;">
+              ${comp.listing_name || 'Unknown Property'}
             </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #888;">Occupancy:</span>
-              <strong>${formatPercent(comp.performance_metrics?.ttm_occupancy)}</strong>
+            ${comp.location_info?.locality ? `<div style="font-size: 12px; color: #6b7280; margin-top: 2px;">${comp.location_info.locality}</div>` : ''}
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">
+              <div style="background: #f3f4f6; border-radius: 6px; padding: 6px 10px; flex: 1; min-width: 60px;">
+                <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Revenue</div>
+                <div style="font-weight: 600; color: #16a34a; font-size: 13px;">${formatCurrency(comp.performance_metrics?.ttm_revenue)}</div>
+              </div>
+              <div style="background: #f3f4f6; border-radius: 6px; padding: 6px 10px; flex: 1; min-width: 60px;">
+                <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Occupancy</div>
+                <div style="font-weight: 600; color: #1f2937; font-size: 13px;">${formatPercent(comp.performance_metrics?.ttm_occupancy)}</div>
+              </div>
+              <div style="background: #f3f4f6; border-radius: 6px; padding: 6px 10px; flex: 1; min-width: 60px;">
+                <div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">ADR</div>
+                <div style="font-weight: 600; color: #1f2937; font-size: 13px;">${formatCurrency(comp.performance_metrics?.ttm_adr)}</div>
+              </div>
             </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span style="color: #888;">ADR:</span>
-              <strong>${formatCurrency(comp.performance_metrics?.ttm_adr)}</strong>
-            </div>
+            ${isSelected ? '<div style="margin-top: 10px; padding: 6px 10px; background: #dcfce7; color: #16a34a; border-radius: 6px; font-size: 11px; text-align: center; font-weight: 500;">✓ Selected</div>' : ''}
           </div>
-          ${isSelected ? '<div style="margin-top: 8px; padding: 4px 8px; background: hsl(142, 76%, 95%); color: hsl(142, 76%, 36%); border-radius: 4px; font-size: 11px; text-align: center;">Selected</div>' : ''}
         </div>
       `);
 
