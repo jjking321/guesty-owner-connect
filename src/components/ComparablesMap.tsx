@@ -159,24 +159,15 @@ export function ComparablesMap({
       const isSelected = selectedIds.has(comp.id);
 
       const el = document.createElement('div');
-      el.style.cssText = `
-        width: 24px;
-        height: 24px;
-        background-color: ${isSelected ? 'hsl(142, 76%, 36%)' : 'hsl(215, 14%, 70%)'};
-        border: 2px solid white;
-        border-radius: 50%;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-        cursor: pointer;
-        transform-origin: center bottom;
-        will-change: transform;
-        transition: transform 0.15s ease-out;
-      `;
-      el.onmouseenter = () => {
-        el.style.transform = 'scale(1.15)';
-      };
-      el.onmouseleave = () => {
-        el.style.transform = 'scale(1)';
-      };
+        el.style.cssText = `
+          width: 24px;
+          height: 24px;
+          background-color: ${isSelected ? 'hsl(142, 76%, 36%)' : 'hsl(215, 14%, 70%)'};
+          border: 2px solid white;
+          border-radius: 50%;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+          cursor: pointer;
+        `;
 
       const photoHtml = comp.cover_photo_url 
         ? `<img src="${comp.cover_photo_url}" style="width: 100%; height: 80px; object-fit: cover; border-radius: 8px 8px 0 0;" onerror="this.style.display='none'" />`
