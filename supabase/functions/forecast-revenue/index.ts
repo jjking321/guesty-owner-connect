@@ -34,11 +34,13 @@ serve(async (req) => {
     const simulationCount = Math.min(simulations || settings?.simulation_runs || 1000, 1000);
 
     // Fetch ALL reservations (we need historical data for baseline and floor calculations)
+    // Exclude owner reservations from calculations
     const { data: reservations, error: reservationsError } = await supabase
       .from('reservations')
       .select('id, listing_id, check_in, check_out, fare_accommodation_adjusted, nights_count, status, created_at_guesty')
       .eq('listing_id', listingId)
       .in('status', ['confirmed', 'checked_in', 'checked_out'])
+      .neq('source', 'owner')
       .gte('check_in', `${year - 3}-01-01`)
       .order('check_in', { ascending: true });
 

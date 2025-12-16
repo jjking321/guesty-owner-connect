@@ -101,10 +101,11 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           ? goalsData?.filter(g => g.month === month + 1) || []
           : [goalsData?.find(g => g.month === month + 1)].filter(Boolean);
         
-        // Calculate actual revenue for this month
+        // Calculate actual revenue for this month (excluding owner reservations)
         const actualRevenue = reservations
           .filter(r => {
             if (!r.check_in) return false;
+            if (r.source === 'owner') return false;
             return ["confirmed", "checked_in", "checked_out"].includes(r.status);
           })
           .reduce((sum, r) => {

@@ -147,8 +147,8 @@ export default function PropertyDetail() {
       lastYearData.set(lastKey, { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
     }
 
-    // Process each reservation
-    reservations.forEach((reservation) => {
+    // Process each reservation (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
       if (!reservation.check_in || !reservation.check_out) return;
 
       const checkIn = parseISO(reservation.check_in);
@@ -215,8 +215,8 @@ export default function PropertyDetail() {
       lastYearData.set(lastKey, 0);
     }
 
-    // Process each reservation
-    reservations.forEach((reservation) => {
+    // Process each reservation (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
       if (!reservation.check_in || !reservation.check_out || !reservation.fare_accommodation_adjusted) return;
 
       const checkIn = parseISO(reservation.check_in);
@@ -284,8 +284,8 @@ export default function PropertyDetail() {
       lastYearData.set(lastKey, { revenue: 0, nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
     }
 
-    // Process each reservation
-    reservations.forEach((reservation) => {
+    // Process each reservation (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
       if (!reservation.check_in || !reservation.check_out) return;
 
       const resCheckIn = parseISO(reservation.check_in);
@@ -376,8 +376,8 @@ export default function PropertyDetail() {
       monthlyData.set(monthKey, { nightsBooked: 0, totalDays: daysInMonth });
     }
 
-    // Process each reservation
-    reservations.forEach((reservation) => {
+    // Process each reservation (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
       if (!reservation.check_in || !reservation.check_out) return;
 
       const checkIn = parseISO(reservation.check_in);
@@ -422,8 +422,8 @@ export default function PropertyDetail() {
       monthlyData.set(monthKey, 0);
     }
 
-    // Process each reservation - allocate revenue to nights
-    reservations.forEach((reservation) => {
+    // Process each reservation - allocate revenue to nights (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
       if (!reservation.check_in || !reservation.fare_accommodation_adjusted) return;
 
       const checkIn = parseISO(reservation.check_in);
