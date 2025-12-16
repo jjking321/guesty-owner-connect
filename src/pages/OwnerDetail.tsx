@@ -294,8 +294,8 @@ export default function OwnerDetail() {
       monthlyRevenue[monthKey] = { current: 0, last: 0 };
     }
 
-    // Calculate revenue per night and allocate to correct month
-    reservations?.forEach((r) => {
+    // Calculate revenue per night and allocate to correct month (excluding owner reservations)
+    reservations?.filter(r => r.source !== 'owner').forEach((r) => {
       if (!r.check_in || !r.check_out || !r.nights_count || r.nights_count <= 0) return;
 
       const checkIn = new Date(r.check_in);
@@ -336,8 +336,8 @@ export default function OwnerDetail() {
       monthlyOccupancy[i] = { currentNights: 0, lastNights: 0, totalDays: daysInMonth };
     }
 
-    // Count nights booked per month
-    reservations?.forEach((r) => {
+    // Count nights booked per month (excluding owner reservations)
+    reservations?.filter(r => r.source !== 'owner').forEach((r) => {
       if (!r.check_in || !r.check_out) return;
 
       const checkIn = new Date(r.check_in);

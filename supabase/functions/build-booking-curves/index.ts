@@ -67,11 +67,13 @@ Deno.serve(async (req) => {
     for (const listing of listings || []) {
       try {
         // Get reservations for this listing with created_at info
+        // Exclude owner reservations from calculations
         const { data: reservations, error: resError } = await supabase
           .from('reservations')
           .select('id, check_in, fare_accommodation_adjusted, created_at_guesty')
           .eq('listing_id', listing.id)
           .in('status', ['confirmed', 'checked_in', 'checked_out'])
+          .neq('source', 'owner')
           .gte('check_in', startDate.toISOString())
           .lte('check_in', endDate.toISOString())
           .not('created_at_guesty', 'is', null);

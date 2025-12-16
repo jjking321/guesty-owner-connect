@@ -35,9 +35,11 @@ export function PacingReport({ reservations }: PacingReportProps) {
     const lastYearStart = startOfYear(new Date(lastYear, 0, 1));
     
     // Filter reservations for current year YTD (check-out YTD up to today)
+    // Exclude owner reservations from calculations
     const currentYearReservations = reservations.filter((r) => {
       if (!r.check_out) return false;
       if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
+      if (r.source === 'owner') return false;
       const checkOut = parseISO(r.check_out);
       const todayThisYear = new Date(currentYear, today.getMonth(), today.getDate());
       return (
@@ -47,9 +49,11 @@ export function PacingReport({ reservations }: PacingReportProps) {
     });
 
     // Filter reservations for last year same period (check-out YTD up to same date last year)
+    // Exclude owner reservations from calculations
     const lastYearReservations = reservations.filter((r) => {
       if (!r.check_out) return false;
       if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
+      if (r.source === 'owner') return false;
       const checkOut = parseISO(r.check_out);
       const todayLastYear = new Date(lastYear, today.getMonth(), today.getDate());
       return (
@@ -104,10 +108,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const daysInMonth = new Date(year, month + 1, 0).getDate();
       
       // Current period booked nights for this specific month (check-in in this month, confirmed by today)
+      // Exclude owner reservations from calculations
       const currentNights = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
           if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
+          if (r.source === 'owner') return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayThisYear = new Date(year, today.getMonth(), today.getDate());
@@ -118,10 +124,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
         .reduce((sum, r) => sum + (r.nights_count || 0), 0);
       
       // Last year same month booked nights (check-in in same month last year, confirmed by same date last year)
+      // Exclude owner reservations from calculations
       const lastYearNights = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
           if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
+          if (r.source === 'owner') return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
@@ -159,10 +167,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const month = targetDate.getMonth();
       
       // Current period revenue for this specific month (check-in in this month, confirmed by today)
+      // Exclude owner reservations from calculations
       const currentRevenue = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
           if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
+          if (r.source === 'owner') return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayThisYear = new Date(year, today.getMonth(), today.getDate());
@@ -173,10 +183,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
         .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
       
       // Last year same month revenue (check-in in same month last year, confirmed by same date last year)
+      // Exclude owner reservations from calculations
       const lastYearRevenue = reservations
         .filter((r) => {
           if (!r.check_in || !r.created_at_guesty) return false;
           if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
+          if (r.source === 'owner') return false;
           const checkIn = parseISO(r.check_in);
           const createdAt = parseISO(r.created_at_guesty);
           const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());

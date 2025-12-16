@@ -31,11 +31,13 @@ serve(async (req) => {
     if (listingError) throw listingError;
 
     // Fetch all historical reservations for this property
+    // Exclude owner reservations from calculations
     const { data: reservations, error: reservationsError } = await supabase
       .from('reservations')
       .select('*')
       .eq('listing_id', listingId)
       .eq('status', 'confirmed')
+      .neq('source', 'owner')
       .order('check_in');
 
     if (reservationsError) throw reservationsError;
