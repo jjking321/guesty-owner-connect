@@ -26,6 +26,7 @@ interface ComparablesMapProps {
   selectedIds: Set<string>;
   radiusMiles: number;
   mapboxToken: string;
+  onToggleSelection?: (id: string) => void;
 }
 
 export function ComparablesMap({
@@ -35,6 +36,7 @@ export function ComparablesMap({
   selectedIds,
   radiusMiles,
   mapboxToken,
+  onToggleSelection,
 }: ComparablesMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
@@ -173,6 +175,11 @@ export function ComparablesMap({
         ? `<img src="${comp.cover_photo_url}" style="width: 100%; height: 80px; object-fit: cover; border-radius: 8px 8px 0 0;" onerror="this.style.display='none'" />`
         : '';
 
+      const buttonId = `select-btn-${comp.id}`;
+      const buttonHtml = isSelected
+        ? `<button id="${buttonId}" style="margin-top: 10px; width: 100%; padding: 8px 10px; background: #dcfce7; color: #16a34a; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 12px; text-align: center; font-weight: 500; cursor: pointer; transition: all 0.15s;">✓ Selected</button>`
+        : `<button id="${buttonId}" style="margin-top: 10px; width: 100%; padding: 8px 10px; background: hsl(217, 91%, 60%); color: white; border: none; border-radius: 6px; font-size: 12px; text-align: center; font-weight: 500; cursor: pointer; transition: all 0.15s;">Select</button>`;
+
       const popup = new mapboxgl.Popup({ offset: 20, maxWidth: '280px' }).setHTML(`
         <div style="font-family: system-ui, -apple-system, sans-serif; min-width: 220px; overflow: hidden; border-radius: 8px;">
           ${photoHtml}
@@ -195,10 +202,21 @@ export function ComparablesMap({
                 <div style="font-weight: 600; color: #1f2937; font-size: 13px;">${formatCurrency(comp.performance_metrics?.ttm_adr)}</div>
               </div>
             </div>
-            ${isSelected ? '<div style="margin-top: 10px; padding: 6px 10px; background: #dcfce7; color: #16a34a; border-radius: 6px; font-size: 11px; text-align: center; font-weight: 500;">✓ Selected</div>' : ''}
+            ${buttonHtml}
           </div>
         </div>
       `);
+
+      // Attach click handler when popup opens
+      popup.on('open', () => {
+        const btn = document.getElementById(buttonId);
+        if (btn && onToggleSelection) {
+          btn.onclick = () => {
+            onToggleSelection(comp.id);
+            popup.remove();
+          };
+        }
+      });
 
       const marker = new mapboxgl.Marker(el)
         .setLngLat([lng, lat])
