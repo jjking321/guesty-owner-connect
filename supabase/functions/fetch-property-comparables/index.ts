@@ -60,7 +60,6 @@ serve(async (req) => {
       latitude: latitude,
       longitude: longitude,
       radius_miles: parseFloat(radius_miles),
-      page_size: 50,
     };
 
     console.log(`Calling Air ROI API (POST): ${AIRROI_API_URL}`);
@@ -220,7 +219,6 @@ serve(async (req) => {
       latitude,
       longitude,
       radius_miles,
-      page_size: 50,
     };
 
     return new Response(
