@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -97,6 +98,8 @@ export function ComparablesModule({
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [matchBedrooms, setMatchBedrooms] = useState(false);
+  const [minRevenue, setMinRevenue] = useState<string>('');
+  const [maxRevenue, setMaxRevenue] = useState<string>('');
   
   // Pagination state
   const PAGE_SIZE = 10;
@@ -152,6 +155,8 @@ export function ComparablesModule({
           radius_miles: radiusMiles,
           amenities: selectedAmenities,
           bedrooms: matchBedrooms ? bedrooms : null,
+          min_revenue: minRevenue ? parseInt(minRevenue) : null,
+          max_revenue: maxRevenue ? parseInt(maxRevenue) : null,
           offset: 0,
           page_size: PAGE_SIZE,
         },
@@ -198,6 +203,8 @@ export function ComparablesModule({
           radius_miles: radiusMiles,
           amenities: selectedAmenities,
           bedrooms: matchBedrooms ? bedrooms : null,
+          min_revenue: minRevenue ? parseInt(minRevenue) : null,
+          max_revenue: maxRevenue ? parseInt(maxRevenue) : null,
           offset: nextOffset,
           page_size: PAGE_SIZE,
         },
@@ -400,6 +407,34 @@ export function ComparablesModule({
                   </Label>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* TTM Revenue Range Filter */}
+          <div>
+            <Label className="text-sm text-muted-foreground mb-2 block">TTM Revenue Range:</Label>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  placeholder="Min"
+                  value={minRevenue}
+                  onChange={(e) => setMinRevenue(e.target.value)}
+                  className="w-28 pl-7"
+                />
+              </div>
+              <span className="text-muted-foreground">to</span>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  placeholder="Max"
+                  value={maxRevenue}
+                  onChange={(e) => setMaxRevenue(e.target.value)}
+                  className="w-28 pl-7"
+                />
+              </div>
             </div>
           </div>
         </div>
