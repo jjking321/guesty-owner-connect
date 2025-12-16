@@ -615,6 +615,83 @@ export type Database = {
         }
         Relationships: []
       }
+      property_comparables: {
+        Row: {
+          airroi_listing_id: number
+          booking_settings: Json | null
+          cover_photo_url: string | null
+          created_at: string | null
+          fetched_at: string | null
+          host_name: string | null
+          id: string
+          is_selected: boolean | null
+          listing_id: string
+          listing_name: string | null
+          listing_type: string | null
+          location_info: Json | null
+          performance_metrics: Json | null
+          pricing_info: Json | null
+          property_details: Json | null
+          ratings: Json | null
+          room_type: string | null
+          selected_at: string | null
+          superhost: boolean | null
+          updated_at: string | null
+        }
+        Insert: {
+          airroi_listing_id: number
+          booking_settings?: Json | null
+          cover_photo_url?: string | null
+          created_at?: string | null
+          fetched_at?: string | null
+          host_name?: string | null
+          id?: string
+          is_selected?: boolean | null
+          listing_id: string
+          listing_name?: string | null
+          listing_type?: string | null
+          location_info?: Json | null
+          performance_metrics?: Json | null
+          pricing_info?: Json | null
+          property_details?: Json | null
+          ratings?: Json | null
+          room_type?: string | null
+          selected_at?: string | null
+          superhost?: boolean | null
+          updated_at?: string | null
+        }
+        Update: {
+          airroi_listing_id?: number
+          booking_settings?: Json | null
+          cover_photo_url?: string | null
+          created_at?: string | null
+          fetched_at?: string | null
+          host_name?: string | null
+          id?: string
+          is_selected?: boolean | null
+          listing_id?: string
+          listing_name?: string | null
+          listing_type?: string | null
+          location_info?: Json | null
+          performance_metrics?: Json | null
+          pricing_info?: Json | null
+          property_details?: Json | null
+          ratings?: Json | null
+          room_type?: string | null
+          selected_at?: string | null
+          superhost?: boolean | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_comparables_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       property_goals: {
         Row: {
           budget_revenue: number | null
