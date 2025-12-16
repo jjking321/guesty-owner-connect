@@ -60,6 +60,10 @@ serve(async (req) => {
       latitude: latitude,
       longitude: longitude,
       radius_miles: parseFloat(radius_miles),
+      limit: 25,  // Request more results (default is 10)
+      sort: {
+        ttm_revenue: "desc"  // Sort by TTM revenue, highest first
+      }
     };
 
     // Add filters if provided
@@ -227,12 +231,13 @@ serve(async (req) => {
     }
 
     // Fetch all comparables for this listing (including previously selected ones)
+    // Sort by selected first, then by TTM revenue (highest first)
     const { data: allComparables, error: fetchError } = await supabase
       .from('property_comparables')
       .select('*')
       .eq('listing_id', listing_id)
       .order('is_selected', { ascending: false })
-      .order('fetched_at', { ascending: false });
+      .order('performance_metrics->ttm_revenue', { ascending: false, nullsFirst: false });
 
     if (fetchError) {
       throw new Error(`Failed to fetch comparables: ${fetchError.message}`);
