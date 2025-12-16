@@ -405,12 +405,15 @@ serve(async (req) => {
       simulations.sort((a, b) => a - b);
       
       // Apply floor to lower percentiles to prevent unrealistic downside
+      const flooredP50 = Math.max(forecastFloor, simulations[Math.floor(simulationCount * 0.5)]);
+      
       return {
         p10: Math.max(forecastFloor * 0.90, simulations[Math.floor(simulationCount * 0.1)]),
         p25: Math.max(forecastFloor * 0.95, simulations[Math.floor(simulationCount * 0.25)]),
-        p50: Math.max(forecastFloor, simulations[Math.floor(simulationCount * 0.5)]),
-        p75: simulations[Math.floor(simulationCount * 0.75)],
-        p90: simulations[Math.floor(simulationCount * 0.9)]
+        p50: flooredP50,
+        // Ensure p75 and p90 are at least as high as p50 (monotonic percentiles)
+        p75: Math.max(flooredP50 * 1.02, simulations[Math.floor(simulationCount * 0.75)]),
+        p90: Math.max(flooredP50 * 1.05, simulations[Math.floor(simulationCount * 0.9)])
       };
     }
 
