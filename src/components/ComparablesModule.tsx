@@ -487,6 +487,7 @@ export function ComparablesModule({
               selectedIds={pendingSelections}
               radiusMiles={radiusMiles}
               mapboxToken={mapboxToken}
+              onToggleSelection={toggleSelection}
             />
           </div>
         )}
