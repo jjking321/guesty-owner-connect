@@ -70,7 +70,7 @@ Deno.serve(async (req) => {
         // Exclude owner reservations from calculations
         const { data: reservations, error: resError } = await supabase
           .from('reservations')
-          .select('id, check_in, fare_accommodation_adjusted, created_at_guesty')
+          .select('id, check_in, check_out, nights_count, fare_accommodation_adjusted, created_at_guesty')
           .eq('listing_id', listing.id)
           .in('status', ['confirmed', 'checked_in', 'checked_out'])
           .neq('source', 'owner')
@@ -88,18 +88,52 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // Group reservations by year-month of check-in
+        // Helper function to calculate night-based revenue for a specific month
+        const getMonthRevenue = (res: any, targetYearMonth: string): number => {
+          const [year, month] = targetYearMonth.split('-').map(Number);
+          const checkIn = new Date(res.check_in);
+          const checkOut = new Date(res.check_out);
+          const totalRevenue = parseFloat(res.fare_accommodation_adjusted || '0');
+          const nightsCount = res.nights_count || 0;
+          if (nightsCount === 0 || !res.check_out) return 0;
+          
+          const revenuePerNight = totalRevenue / nightsCount;
+          let nightsInMonth = 0;
+          const currentDate = new Date(checkIn);
+          
+          while (currentDate < checkOut) {
+            if (currentDate.getFullYear() === year && currentDate.getMonth() + 1 === month) {
+              nightsInMonth++;
+            }
+            currentDate.setDate(currentDate.getDate() + 1);
+          }
+          
+          return revenuePerNight * nightsInMonth;
+        };
+
+        // Group reservations by year-months they span (not just check-in month)
         const monthlyData: Record<string, any[]> = {};
         
         for (const res of reservations) {
+          if (!res.check_in || !res.check_out) continue;
+          
           const checkIn = new Date(res.check_in);
-          const yearMonth = `${checkIn.getFullYear()}-${String(checkIn.getMonth() + 1).padStart(2, '0')}`;
+          const checkOut = new Date(res.check_out);
+          const currentDate = new Date(checkIn);
+          const seenMonths = new Set<string>();
           
-          if (!monthlyData[yearMonth]) {
-            monthlyData[yearMonth] = [];
+          // Add reservation to all months it spans
+          while (currentDate < checkOut) {
+            const yearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+            if (!seenMonths.has(yearMonth)) {
+              seenMonths.add(yearMonth);
+              if (!monthlyData[yearMonth]) {
+                monthlyData[yearMonth] = [];
+              }
+              monthlyData[yearMonth].push(res);
+            }
+            currentDate.setDate(currentDate.getDate() + 1);
           }
-          
-          monthlyData[yearMonth].push(res);
         }
 
         // Process each month
@@ -111,8 +145,9 @@ Deno.serve(async (req) => {
             continue;
           }
 
+          // Calculate total month revenue using night-based allocation
           const totalMonthRevenue = monthReservations.reduce(
-            (sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || '0'),
+            (sum, r) => sum + getMonthRevenue(r, yearMonth),
             0
           );
 
@@ -131,8 +166,9 @@ Deno.serve(async (req) => {
               }
             }
 
+            // Calculate bucket revenue using night-based allocation
             const bucketRevenue = bucketReservations.reduce(
-              (sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || '0'),
+              (sum, r) => sum + getMonthRevenue(r, yearMonth),
               0
             );
 
