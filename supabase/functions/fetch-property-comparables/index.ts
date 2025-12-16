@@ -116,63 +116,74 @@ serve(async (req) => {
     const apiResultCount = resultsArray.length;
     console.log(`Air ROI returned ${apiResultCount} comparables`);
 
-    // Process and upsert comparables
+    // Process and upsert comparables - API returns nested structure
     const comparables = resultsArray;
-    const upsertData = comparables.map((comp: any) => ({
-      listing_id: listing_id,
-      airroi_listing_id: comp.listing_id || comp.id,
-      listing_name: comp.listing_name || comp.name,
-      listing_type: comp.listing_type || comp.property_type,
-      room_type: comp.room_type,
-      cover_photo_url: comp.cover_photo_url || comp.photo_url || comp.thumbnail,
-      host_name: comp.host_name,
-      superhost: comp.superhost || false,
-      location_info: {
-        country: comp.country,
-        region: comp.region,
-        locality: comp.locality || comp.city,
-        district: comp.district || comp.neighborhood,
-        lat: comp.lat || comp.latitude,
-        lng: comp.lng || comp.longitude,
-      },
-      property_details: {
-        guests: comp.guests || comp.accommodates,
-        bedrooms: comp.bedrooms,
-        beds: comp.beds,
-        baths: comp.baths || comp.bathrooms,
-        amenities: comp.amenities,
-      },
-      booking_settings: {
-        instant_book: comp.instant_book,
-        min_nights: comp.min_nights,
-        cancellation_policy: comp.cancellation_policy,
-      },
-      pricing_info: {
-        currency: comp.currency,
-        cleaning_fee: comp.cleaning_fee,
-        extra_guest_fee: comp.extra_guest_fee,
-      },
-      ratings: {
-        num_reviews: comp.num_reviews || comp.review_count,
-        rating_overall: comp.rating_overall || comp.rating,
-        rating_accuracy: comp.rating_accuracy,
-        rating_checkin: comp.rating_checkin,
-        rating_cleanliness: comp.rating_cleanliness,
-        rating_communication: comp.rating_communication,
-        rating_location: comp.rating_location,
-        rating_value: comp.rating_value,
-      },
-      performance_metrics: {
-        ttm_revenue: comp.ttm_revenue || comp.annual_revenue,
-        ttm_occupancy: comp.ttm_occupancy || comp.occupancy_rate,
-        ttm_adr: comp.ttm_adr || comp.adr,
-        ttm_revpar: comp.ttm_revpar || comp.revpar,
-        available_days: comp.available_days,
-        reserved_days: comp.reserved_days,
-        blocked_days: comp.blocked_days,
-      },
-      fetched_at: new Date().toISOString(),
-    }));
+    const upsertData = comparables.map((comp: any) => {
+      const listingInfo = comp.listing_info || {};
+      const hostInfo = comp.host_info || {};
+      const locationInfo = comp.location_info || {};
+      const propertyDetails = comp.property_details || {};
+      const bookingSettings = comp.booking_settings || {};
+      const pricingInfo = comp.pricing_info || {};
+      const ratings = comp.ratings || {};
+      const perfMetrics = comp.performance_metrics || {};
+
+      return {
+        listing_id: listing_id,
+        airroi_listing_id: listingInfo.listing_id,
+        listing_name: listingInfo.listing_name,
+        listing_type: listingInfo.listing_type,
+        room_type: listingInfo.room_type,
+        cover_photo_url: listingInfo.cover_photo_url,
+        host_name: hostInfo.host_name,
+        superhost: hostInfo.superhost || false,
+        location_info: {
+          country: locationInfo.country,
+          region: locationInfo.region,
+          locality: locationInfo.locality,
+          district: locationInfo.district,
+          lat: locationInfo.latitude,
+          lng: locationInfo.longitude,
+        },
+        property_details: {
+          guests: propertyDetails.guests,
+          bedrooms: propertyDetails.bedrooms,
+          beds: propertyDetails.beds,
+          baths: propertyDetails.baths,
+          amenities: propertyDetails.amenities,
+        },
+        booking_settings: {
+          instant_book: bookingSettings.instant_book,
+          min_nights: bookingSettings.min_nights,
+          cancellation_policy: bookingSettings.cancellation_policy,
+        },
+        pricing_info: {
+          currency: pricingInfo.currency,
+          cleaning_fee: pricingInfo.cleaning_fee,
+          extra_guest_fee: pricingInfo.extra_guest_fee,
+        },
+        ratings: {
+          num_reviews: ratings.num_reviews,
+          rating_overall: ratings.rating_overall,
+          rating_accuracy: ratings.rating_accuracy,
+          rating_checkin: ratings.rating_checkin,
+          rating_cleanliness: ratings.rating_cleanliness,
+          rating_communication: ratings.rating_communication,
+          rating_location: ratings.rating_location,
+          rating_value: ratings.rating_value,
+        },
+        performance_metrics: {
+          ttm_revenue: perfMetrics.ttm_revenue,
+          ttm_occupancy: perfMetrics.ttm_occupancy,
+          ttm_adr: perfMetrics.ttm_avg_rate,
+          ttm_revpar: perfMetrics.ttm_revpar,
+          available_days: perfMetrics.ttm_available_days,
+          reserved_days: perfMetrics.ttm_days_reserved,
+          blocked_days: perfMetrics.ttm_blocked_days,
+        },
+        fetched_at: new Date().toISOString(),
+      };
+    });
 
     if (upsertData.length > 0) {
       // First, delete old comparables that are not selected for this listing
