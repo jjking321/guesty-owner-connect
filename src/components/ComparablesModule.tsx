@@ -97,6 +97,12 @@ export function ComparablesModule({
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [matchBedrooms, setMatchBedrooms] = useState(false);
+  
+  // Pagination state
+  const PAGE_SIZE = 10;
+  const [currentOffset, setCurrentOffset] = useState(0);
+  const [hasMoreResults, setHasMoreResults] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Load existing comparables on mount
   useEffect(() => {
@@ -138,6 +144,7 @@ export function ComparablesModule({
     }
 
     setLoading(true);
+    setCurrentOffset(0); // Reset pagination on fresh fetch
     try {
       const { data, error } = await supabase.functions.invoke('fetch-property-comparables', {
         body: {
@@ -145,6 +152,8 @@ export function ComparablesModule({
           radius_miles: radiusMiles,
           amenities: selectedAmenities,
           bedrooms: matchBedrooms ? bedrooms : null,
+          offset: 0,
+          page_size: PAGE_SIZE,
         },
       });
 
@@ -152,6 +161,7 @@ export function ComparablesModule({
 
       if (data.success) {
         setComparables(data.comparables);
+        setHasMoreResults(data.pagination?.hasMore || false);
         // Update pending selections
         const selected = new Set<string>(data.comparables.filter((c: Comparable) => c.is_selected).map((c: Comparable) => c.id));
         setPendingSelections(selected);
@@ -172,6 +182,54 @@ export function ComparablesModule({
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreComparables = async () => {
+    if (!latitude || !longitude) return;
+
+    const nextOffset = currentOffset + PAGE_SIZE;
+    setLoadingMore(true);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('fetch-property-comparables', {
+        body: {
+          listing_id: listingId,
+          radius_miles: radiusMiles,
+          amenities: selectedAmenities,
+          bedrooms: matchBedrooms ? bedrooms : null,
+          offset: nextOffset,
+          page_size: PAGE_SIZE,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.success) {
+        setComparables(data.comparables);
+        setCurrentOffset(nextOffset);
+        setHasMoreResults(data.pagination?.hasMore || false);
+        // Preserve existing selections and add any newly fetched selected items
+        const newSelected = new Set<string>(pendingSelections);
+        data.comparables.filter((c: Comparable) => c.is_selected).forEach((c: Comparable) => newSelected.add(c.id));
+        setPendingSelections(newSelected);
+        
+        toast({
+          title: "More comparables loaded",
+          description: `Now showing ${data.count} comparable properties.`,
+        });
+      } else {
+        throw new Error(data.error || 'Failed to load more comparables');
+      }
+    } catch (error: any) {
+      console.error('Error loading more comparables:', error);
+      toast({
+        title: "Error loading more",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -378,6 +436,26 @@ export function ComparablesModule({
                     />
                   ))}
                 </div>
+
+                {/* Load More Button */}
+                {hasMoreResults && (
+                  <div className="flex justify-center pt-4">
+                    <Button 
+                      variant="outline" 
+                      onClick={loadMoreComparables}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Loading...
+                        </>
+                      ) : (
+                        'Load More Comparables'
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 

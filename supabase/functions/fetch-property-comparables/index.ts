@@ -25,13 +25,13 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { listing_id, radius_miles = 10, amenities = [], bedrooms = null } = await req.json();
+    const { listing_id, radius_miles = 10, amenities = [], bedrooms = null, offset = 0, page_size = 10 } = await req.json();
 
     if (!listing_id) {
       throw new Error('listing_id is required');
     }
 
-    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles, amenities: ${JSON.stringify(amenities)}, bedrooms: ${bedrooms}`);
+    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles, amenities: ${JSON.stringify(amenities)}, bedrooms: ${bedrooms}, offset: ${offset}, page_size: ${page_size}`);
 
     // Fetch listing details from database
     const { data: listing, error: listingError } = await supabase
@@ -62,6 +62,10 @@ serve(async (req) => {
       radius_miles: parseFloat(radius_miles),
       sort: {
         ttm_revenue: "desc"  // Sort by TTM revenue, highest first
+      },
+      pagination: {
+        page_size: page_size,
+        offset: offset
       }
     };
 
@@ -204,15 +208,17 @@ serve(async (req) => {
     });
 
     if (upsertData.length > 0) {
-      // First, delete old comparables that are not selected for this listing
-      const { error: deleteError } = await supabase
-        .from('property_comparables')
-        .delete()
-        .eq('listing_id', listing_id)
-        .eq('is_selected', false);
+      // Only delete old comparables on first page (offset === 0)
+      if (offset === 0) {
+        const { error: deleteError } = await supabase
+          .from('property_comparables')
+          .delete()
+          .eq('listing_id', listing_id)
+          .eq('is_selected', false);
 
-      if (deleteError) {
-        console.warn('Error deleting old comparables:', deleteError.message);
+        if (deleteError) {
+          console.warn('Error deleting old comparables:', deleteError.message);
+        }
       }
 
       // Upsert new comparables
@@ -259,6 +265,11 @@ serve(async (req) => {
         searchParams,
         apiResultCount,
         apiResponse: apiResultCount === 0 ? airroiData : undefined,
+        pagination: {
+          offset: offset,
+          page_size: page_size,
+          hasMore: apiResultCount === page_size // If we got a full page, there may be more
+        }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
