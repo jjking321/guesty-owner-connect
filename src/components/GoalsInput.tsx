@@ -110,16 +110,22 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
   const saveGoals = async () => {
     setIsSaving(true);
     try {
-      const upserts = goals.map(g => ({
-        id: g.id,
-        listing_id: listingId,
-        year,
-        month: g.month,
-        budget_revenue: g.budget,
-        projection_revenue: g.projection,
-        goal_revenue: g.goal,
-        locked: g.locked,
-      }));
+      const upserts = goals.map(g => {
+        const record: any = {
+          listing_id: listingId,
+          year,
+          month: g.month,
+          budget_revenue: g.budget,
+          projection_revenue: g.projection,
+          goal_revenue: g.goal,
+          locked: g.locked,
+        };
+        // Only include id if it exists (for updates)
+        if (g.id) {
+          record.id = g.id;
+        }
+        return record;
+      });
 
       const { error } = await supabase
         .from('property_goals')
