@@ -841,6 +841,12 @@ export default function PropertyDetail() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
+            {/* Goals Comparison */}
+            <GoalsComparison listingId={id!} reservations={reservations} />
+
+            {/* Revenue Forecast */}
+            <RevenueForecast listingId={id!} />
+
             {/* Charts */}
             <TrendChart 
               occupancyData={yearOverYearOccupancy}
@@ -853,12 +859,6 @@ export default function PropertyDetail() {
 
             {/* Pacing Report */}
             <PacingReport reservations={reservations} />
-
-            {/* Revenue Forecast */}
-            <RevenueForecast listingId={id!} />
-
-            {/* Goals Comparison */}
-            <GoalsComparison listingId={id!} reservations={reservations} />
           </TabsContent>
 
           <TabsContent value="reservations" className="space-y-6">
