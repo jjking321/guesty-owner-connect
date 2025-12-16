@@ -6,10 +6,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map } from "lucide-react";
+import { ComparablesMap } from "./ComparablesMap";
 
 interface ComparablesModuleProps {
   listingId: string;
@@ -100,6 +102,8 @@ export function ComparablesModule({
   const [matchBedrooms, setMatchBedrooms] = useState(false);
   const [minRevenue, setMinRevenue] = useState<string>('');
   const [maxRevenue, setMaxRevenue] = useState<string>('');
+  const [showMap, setShowMap] = useState(false);
+  const [mapboxToken, setMapboxToken] = useState<string | null>(null);
   
   // Pagination state
   const PAGE_SIZE = 10;
@@ -107,10 +111,23 @@ export function ComparablesModule({
   const [hasMoreResults, setHasMoreResults] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Load existing comparables on mount
+  // Load existing comparables and mapbox token on mount
   useEffect(() => {
     loadExistingComparables();
+    fetchMapboxToken();
   }, [listingId]);
+
+  const fetchMapboxToken = async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke('get-mapbox-token');
+      if (error) throw error;
+      if (data?.token) {
+        setMapboxToken(data.token);
+      }
+    } catch (error) {
+      console.error('Error fetching mapbox token:', error);
+    }
+  };
 
   const loadExistingComparables = async () => {
     try {
@@ -437,6 +454,20 @@ export function ComparablesModule({
               </div>
             </div>
           </div>
+          {/* Map Toggle */}
+          {hasCoordinates && mapboxToken && (
+            <div className="flex items-center gap-2">
+              <Switch
+                id="show-map"
+                checked={showMap}
+                onCheckedChange={setShowMap}
+              />
+              <Label htmlFor="show-map" className="flex items-center gap-2 cursor-pointer">
+                <Map className="h-4 w-4" />
+                Show Map
+              </Label>
+            </div>
+          )}
         </div>
 
         {!hasCoordinates && (
@@ -446,6 +477,20 @@ export function ComparablesModule({
         )}
       </CardHeader>
       <CardContent>
+        {/* Map Display */}
+        {showMap && comparables.length > 0 && latitude && longitude && mapboxToken && (
+          <div className="mb-6">
+            <ComparablesMap
+              subjectLatitude={latitude}
+              subjectLongitude={longitude}
+              comparables={comparables}
+              selectedIds={pendingSelections}
+              radiusMiles={radiusMiles}
+              mapboxToken={mapboxToken}
+            />
+          </div>
+        )}
+
         {comparables.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Building className="h-12 w-12 mx-auto mb-4 opacity-50" />
