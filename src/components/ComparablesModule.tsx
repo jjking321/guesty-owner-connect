@@ -99,7 +99,7 @@ export function ComparablesModule({
   const [radiusMiles, setRadiusMiles] = useState<number>(5);
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
-  const [matchBedrooms, setMatchBedrooms] = useState(false);
+  const [matchBedrooms, setMatchBedrooms] = useState(true);
   const [minRevenue, setMinRevenue] = useState<string>('');
   const [maxRevenue, setMaxRevenue] = useState<string>('');
   const [showMap, setShowMap] = useState(false);
