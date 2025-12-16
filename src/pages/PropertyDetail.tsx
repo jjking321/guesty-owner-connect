@@ -15,6 +15,7 @@ import { PropertySettings } from "@/components/PropertySettings";
 import { RevenueForecast } from "@/components/RevenueForecast";
 import { ReviewsSummary } from "@/components/ReviewsSummary";
 import { ReviewsTable } from "@/components/ReviewsTable";
+import { ComparablesModule } from "@/components/ComparablesModule";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -858,6 +859,15 @@ export default function PropertyDetail() {
               goalsData={goalsData}
               reservations={reservations}
               revenueForecast={revenueForecast}
+            />
+
+            {/* Property Comparables */}
+            <ComparablesModule
+              listingId={id!}
+              latitude={(listing?.address as any)?.lat}
+              longitude={(listing?.address as any)?.lng}
+              bedrooms={listing?.bedrooms}
+              guests={listing?.accommodates}
             />
           </TabsContent>
 

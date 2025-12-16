@@ -32,3 +32,6 @@ verify_jwt = true
 
 [functions.recalculate-goals]
 verify_jwt = true
+
+[functions.fetch-property-comparables]
+verify_jwt = true
