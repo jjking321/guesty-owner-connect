@@ -36,8 +36,24 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const [showForecast, setShowForecast] = useState(false);
   const { toast } = useToast();
 
-  // Derive year from the data instead of maintaining separate state
-  const year = externalGoals?.[0]?.year || new Date().getFullYear();
+  const currentYear = new Date().getFullYear();
+  
+  // For single property (listingId provided), use internal year selection
+  // For group/owner view (externalGoals provided), derive from external data
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  
+  // When external goals are provided, derive year from them
+  const year = externalGoals ? (externalGoals[0]?.year || currentYear) : selectedYear;
+  
+  // Available years for selection (3 years back, current, 2 years forward)
+  const availableYears = [
+    currentYear - 3,
+    currentYear - 2,
+    currentYear - 1,
+    currentYear,
+    currentYear + 1,
+    currentYear + 2,
+  ];
 
   useEffect(() => {
     loadGoalsComparison();
@@ -319,9 +335,23 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
 
       {/* Chart */}
       <Card>
-        <CardHeader>
-          <CardTitle>Revenue Performance - {year}</CardTitle>
-          <CardDescription>Track actual revenue against goals</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <div>
+            <CardTitle>Revenue Performance - {year}</CardTitle>
+            <CardDescription>Track actual revenue against goals</CardDescription>
+          </div>
+          {/* Year selector - only show when viewing single property (not group/owner view) */}
+          {!externalGoals && listingId && (
+            <Tabs value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
+              <TabsList>
+                {availableYears.map((yr) => (
+                  <TabsTrigger key={yr} value={yr.toString()} className="px-3">
+                    {yr}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          )}
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'monthly' | 'cumulative')}>
