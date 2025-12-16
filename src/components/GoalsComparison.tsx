@@ -103,6 +103,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       let cumulativeForecastP50 = 0;
       let cumulativeForecastP75 = 0;
       const currentMonth = new Date().getMonth();
+      const currentYearActual = new Date().getFullYear();
 
       for (let month = 0; month < 12; month++) {
         // For group-level, aggregate goals for this month
@@ -159,8 +160,12 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           });
         }
 
-        // Only show forecast for future months
-        const isFutureMonth = month > currentMonth;
+        // Only show forecast for future months based on selected year
+        // If viewing past year: no forecast
+        // If viewing future year: all months show forecast  
+        // If viewing current year: only months after current month
+        const isFutureMonth = year > currentYearActual || 
+          (year === currentYearActual && month > currentMonth);
         
         // Monthly data
         monthly.push({
@@ -392,25 +397,28 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                         type="monotone" 
                         dataKey="forecastP75" 
                         stroke="none" 
-                        fill="#06b6d4" 
-                        fillOpacity={0.3}
+                        fill="#0ea5e9" 
+                        fillOpacity={0.25}
                         name="Forecast Range"
+                        connectNulls={false}
                       />
                       <Area 
                         type="monotone" 
                         dataKey="forecastP25" 
                         stroke="none" 
-                        fill="hsl(var(--background))" 
+                        fill="#ffffff" 
                         fillOpacity={1}
-                        name=""
+                        legendType="none"
+                        connectNulls={false}
                       />
                       <Line 
                         type="monotone" 
                         dataKey="forecastP50" 
-                        stroke="#06b6d4" 
+                        stroke="#0ea5e9" 
                         strokeWidth={2} 
-                        strokeDasharray="3 3"
-                        name="Forecast (P50)"
+                        strokeDasharray="4 4"
+                        name="Forecast"
+                        connectNulls={false}
                       />
                     </>
                   )}
@@ -444,25 +452,28 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                         type="monotone" 
                         dataKey="forecastP75" 
                         stroke="none" 
-                        fill="#06b6d4" 
-                        fillOpacity={0.3}
+                        fill="#0ea5e9" 
+                        fillOpacity={0.25}
                         name="Forecast Range"
+                        connectNulls={false}
                       />
                       <Area 
                         type="monotone" 
                         dataKey="forecastP25" 
                         stroke="none" 
-                        fill="hsl(var(--background))" 
+                        fill="#ffffff" 
                         fillOpacity={1}
-                        name=""
+                        legendType="none"
+                        connectNulls={false}
                       />
                       <Line 
                         type="monotone" 
                         dataKey="forecastP50" 
-                        stroke="#06b6d4" 
+                        stroke="#0ea5e9" 
                         strokeWidth={2} 
-                        strokeDasharray="3 3"
-                        name="Forecast (P50)"
+                        strokeDasharray="4 4"
+                        name="Forecast"
+                        connectNulls={false}
                       />
                     </>
                   )}
