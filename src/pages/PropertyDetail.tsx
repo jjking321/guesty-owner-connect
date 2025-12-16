@@ -841,6 +841,9 @@ export default function PropertyDetail() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
+            {/* Pacing Report - YTD metrics */}
+            <PacingReport reservations={reservations} />
+
             {/* Goals Comparison */}
             <GoalsComparison listingId={id!} reservations={reservations} />
 
@@ -856,9 +859,6 @@ export default function PropertyDetail() {
               reservations={reservations}
               revenueForecast={revenueForecast}
             />
-
-            {/* Pacing Report */}
-            <PacingReport reservations={reservations} />
           </TabsContent>
 
           <TabsContent value="reservations" className="space-y-6">
