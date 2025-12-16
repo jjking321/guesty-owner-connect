@@ -517,10 +517,13 @@ export default function PropertyDetail() {
 
     // Filter to current year only
     const currentYear = new Date().getFullYear();
+    // Filter reservations that have any nights in current year
     const currentYearReservations = reservations.filter((r) => {
-      if (!r.check_in) return false;
-      const checkInDate = parseISO(r.check_in);
-      return checkInDate.getFullYear() === currentYear;
+      if (!r.check_in || !r.check_out) return false;
+      const checkIn = parseISO(r.check_in);
+      const checkOut = parseISO(r.check_out);
+      // Include if reservation spans any part of current year
+      return checkIn.getFullYear() <= currentYear && checkOut.getFullYear() >= currentYear;
     });
 
     if (currentYearReservations.length === 0) {
@@ -537,8 +540,26 @@ export default function PropertyDetail() {
       };
     }
 
-    const totalRevenue = currentYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
-    const totalNights = currentYearReservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
+    // Calculate revenue using night-based allocation for current year only
+    let totalRevenue = 0;
+    let totalNights = 0;
+    currentYearReservations.forEach(r => {
+      if (!r.fare_accommodation_adjusted || !r.nights_count || r.nights_count === 0) return;
+      
+      const revenuePerNight = parseFloat(r.fare_accommodation_adjusted) / r.nights_count;
+      const checkIn = parseISO(r.check_in);
+      const checkOut = parseISO(r.check_out);
+      
+      let currentNight = new Date(checkIn);
+      while (currentNight < checkOut) {
+        if (currentNight.getFullYear() === currentYear) {
+          totalRevenue += revenuePerNight;
+          totalNights += 1;
+        }
+        currentNight.setDate(currentNight.getDate() + 1);
+      }
+    });
+
     const totalGuests = currentYearReservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
     const averageADR = totalNights > 0 ? totalRevenue / totalNights : 0;
     const averageNightsPerReservation = totalNights / currentYearReservations.length;
