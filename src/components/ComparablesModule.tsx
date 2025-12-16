@@ -96,7 +96,7 @@ export function ComparablesModule({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [radiusMiles, setRadiusMiles] = useState<number>(10);
+  const [radiusMiles, setRadiusMiles] = useState<number>(5);
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [matchBedrooms, setMatchBedrooms] = useState(false);
@@ -374,6 +374,8 @@ export function ComparablesModule({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="1">1 mile</SelectItem>
+                  <SelectItem value="2">2 miles</SelectItem>
                   <SelectItem value="5">5 miles</SelectItem>
                   <SelectItem value="10">10 miles</SelectItem>
                   <SelectItem value="25">25 miles</SelectItem>
