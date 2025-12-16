@@ -341,15 +341,29 @@ serve(async (req) => {
         reservations
       );
       
-      // Step 3: Calculate revenue already on books for this month
-      const onBooks = reservations
-        .filter(r => {
-          const checkIn = new Date(r.check_in);
-          return checkIn.getFullYear() === targetYear &&
-                 checkIn.getMonth() === targetMonth &&
-                 ['confirmed', 'checked_in', 'checked_out'].includes(r.status);
-        })
-        .reduce((sum, r) => sum + (Number(r.fare_accommodation_adjusted) || 0), 0);
+      // Step 3: Calculate revenue already on books for this month using night-based allocation
+      let onBooks = 0;
+      reservations.forEach(r => {
+        if (!r.check_in || !r.check_out || !r.fare_accommodation_adjusted) return;
+        if (!['confirmed', 'checked_in', 'checked_out'].includes(r.status)) return;
+        
+        const totalRevenue = Number(r.fare_accommodation_adjusted) || 0;
+        const nightsCount = Number(r.nights_count) || 0;
+        if (nightsCount === 0) return;
+        
+        const revenuePerNight = totalRevenue / nightsCount;
+        const checkIn = new Date(r.check_in);
+        const checkOut = new Date(r.check_out);
+        
+        // Iterate through each night and allocate revenue to the correct month
+        let currentNight = new Date(checkIn);
+        while (currentNight < checkOut) {
+          if (currentNight.getFullYear() === targetYear && currentNight.getMonth() === targetMonth) {
+            onBooks += revenuePerNight;
+          }
+          currentNight.setDate(currentNight.getDate() + 1);
+        }
+      });
       
       // Step 4: Apply velocity to baseline
       const totalForecast = baseline * velocity.factor;

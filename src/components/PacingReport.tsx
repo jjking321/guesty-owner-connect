@@ -1,8 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendingUp, TrendingDown, DollarSign, Calendar, Moon, Percent } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Moon, Percent } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { format, parseISO, startOfYear, endOfYear, isBefore, isAfter } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { useState } from "react";
 
 interface PacingReportProps {
@@ -29,46 +29,69 @@ export function PacingReport({ reservations }: PacingReportProps) {
   const lastYear = currentYear - 1;
   const currentMonth = currentDate.getMonth(); // 0-indexed
 
+  // Helper function to calculate night-based revenue for a specific year/month range
+  const calculateNightBasedRevenue = (
+    targetYear: number,
+    endMonth: number,
+    endDay: number,
+    reservationList: any[]
+  ): { revenue: number; nights: number } => {
+    let totalRevenue = 0;
+    let totalNights = 0;
+    
+    reservationList.forEach(r => {
+      if (!r.check_in || !r.check_out || !r.fare_accommodation_adjusted) return;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return;
+      if (r.source === 'owner') return;
+      
+      const revenueTotal = parseFloat(r.fare_accommodation_adjusted || 0);
+      const nightsCount = r.nights_count || 0;
+      if (nightsCount === 0) return;
+      
+      const revenuePerNight = revenueTotal / nightsCount;
+      const checkIn = parseISO(r.check_in);
+      const checkOut = parseISO(r.check_out);
+      const cutoffDate = new Date(targetYear, endMonth, endDay);
+      
+      // Iterate through each night
+      let currentNight = new Date(checkIn);
+      while (currentNight < checkOut) {
+        // Only count nights in target year up to cutoff date
+        if (currentNight.getFullYear() === targetYear && currentNight <= cutoffDate) {
+          totalRevenue += revenuePerNight;
+          totalNights += 1;
+        }
+        currentNight.setDate(currentNight.getDate() + 1);
+      }
+    });
+    
+    return { revenue: totalRevenue, nights: totalNights };
+  };
+
   const calculatePacingMetrics = (): PacingMetrics => {
     const today = new Date();
-    const currentYearStart = startOfYear(new Date(currentYear, 0, 1));
-    const lastYearStart = startOfYear(new Date(lastYear, 0, 1));
     
-    // Filter reservations for current year YTD (check-out YTD up to today)
-    // Exclude owner reservations from calculations
-    const currentYearReservations = reservations.filter((r) => {
-      if (!r.check_out) return false;
-      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-      if (r.source === 'owner') return false;
-      const checkOut = parseISO(r.check_out);
-      const todayThisYear = new Date(currentYear, today.getMonth(), today.getDate());
-      return (
-        checkOut.getFullYear() === currentYear &&
-        checkOut <= todayThisYear
-      );
-    });
+    // Calculate YTD revenue and nights using night-based allocation
+    const currentYearData = calculateNightBasedRevenue(
+      currentYear,
+      today.getMonth(),
+      today.getDate(),
+      reservations
+    );
+    
+    const lastYearData = calculateNightBasedRevenue(
+      lastYear,
+      today.getMonth(),
+      today.getDate(),
+      reservations
+    );
 
-    // Filter reservations for last year same period (check-out YTD up to same date last year)
-    // Exclude owner reservations from calculations
-    const lastYearReservations = reservations.filter((r) => {
-      if (!r.check_out) return false;
-      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-      if (r.source === 'owner') return false;
-      const checkOut = parseISO(r.check_out);
-      const todayLastYear = new Date(lastYear, today.getMonth(), today.getDate());
-      return (
-        checkOut.getFullYear() === lastYear &&
-        checkOut <= todayLastYear
-      );
-    });
-
-    // Calculate revenue from all nights
-    const currentRevenue = currentYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
-    const lastRevenue = lastYearReservations.reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+    const currentRevenue = currentYearData.revenue;
+    const lastRevenue = lastYearData.revenue;
     const revenueChange = lastRevenue > 0 ? ((currentRevenue - lastRevenue) / lastRevenue) * 100 : 0;
 
-    const currentNights = currentYearReservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
-    const lastNights = lastYearReservations.reduce((sum, r) => sum + (r.nights_count || 0), 0);
+    const currentNights = currentYearData.nights;
+    const lastNights = lastYearData.nights;
     const nightsChange = lastNights > 0 ? ((currentNights - lastNights) / lastNights) * 100 : 0;
 
     // Calculate occupancy (nights booked / total available nights in YTD)
@@ -90,6 +113,39 @@ export function PacingReport({ reservations }: PacingReportProps) {
     };
   };
 
+  // Helper function to calculate nights in a specific month using night-based allocation
+  const calculateNightsForMonth = (
+    targetYear: number,
+    targetMonth: number,
+    asOfDate: Date,
+    reservationList: any[]
+  ): number => {
+    let totalNights = 0;
+    
+    reservationList.forEach(r => {
+      if (!r.check_in || !r.check_out || !r.created_at_guesty) return;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return;
+      if (r.source === 'owner') return;
+      
+      const createdAt = parseISO(r.created_at_guesty);
+      if (createdAt > asOfDate) return; // Only count bookings created by the as-of date
+      
+      const checkIn = parseISO(r.check_in);
+      const checkOut = parseISO(r.check_out);
+      
+      // Iterate through each night
+      let currentNight = new Date(checkIn);
+      while (currentNight < checkOut) {
+        if (currentNight.getFullYear() === targetYear && currentNight.getMonth() === targetMonth) {
+          totalNights += 1;
+        }
+        currentNight.setDate(currentNight.getDate() + 1);
+      }
+    });
+    
+    return totalNights;
+  };
+
   const calculateCumulativeOccupancy = (): CumulativeDataPoint[] => {
     const data: CumulativeDataPoint[] = [];
     const today = new Date();
@@ -107,37 +163,13 @@ export function PacingReport({ reservations }: PacingReportProps) {
       // Calculate days in this month
       const daysInMonth = new Date(year, month + 1, 0).getDate();
       
-      // Current period booked nights for this specific month (check-in in this month, confirmed by today)
-      // Exclude owner reservations from calculations
-      const currentNights = reservations
-        .filter((r) => {
-          if (!r.check_in || !r.created_at_guesty) return false;
-          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-          if (r.source === 'owner') return false;
-          const checkIn = parseISO(r.check_in);
-          const createdAt = parseISO(r.created_at_guesty);
-          const todayThisYear = new Date(year, today.getMonth(), today.getDate());
-          return checkIn.getFullYear() === year && 
-                 checkIn.getMonth() === month &&
-                 createdAt <= todayThisYear;
-        })
-        .reduce((sum, r) => sum + (r.nights_count || 0), 0);
+      // Current period: as of today
+      const todayThisYear = new Date(year, today.getMonth(), today.getDate());
+      const currentNights = calculateNightsForMonth(year, month, todayThisYear, reservations);
       
-      // Last year same month booked nights (check-in in same month last year, confirmed by same date last year)
-      // Exclude owner reservations from calculations
-      const lastYearNights = reservations
-        .filter((r) => {
-          if (!r.check_in || !r.created_at_guesty) return false;
-          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-          if (r.source === 'owner') return false;
-          const checkIn = parseISO(r.check_in);
-          const createdAt = parseISO(r.created_at_guesty);
-          const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
-          return checkIn.getFullYear() === year - 1 && 
-                 checkIn.getMonth() === month &&
-                 createdAt <= todayLastYear;
-        })
-        .reduce((sum, r) => sum + (r.nights_count || 0), 0);
+      // Last year same month: as of same date last year
+      const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
+      const lastYearNights = calculateNightsForMonth(year - 1, month, todayLastYear, reservations);
       
       const currentOccupancy = daysInMonth > 0 ? (currentNights / daysInMonth) * 100 : 0;
       const lastYearOccupancy = daysInMonth > 0 ? (lastYearNights / daysInMonth) * 100 : 0;
@@ -150,6 +182,44 @@ export function PacingReport({ reservations }: PacingReportProps) {
     }
 
     return data;
+  };
+
+  // Helper function to calculate revenue in a specific month using night-based allocation
+  const calculateRevenueForMonth = (
+    targetYear: number,
+    targetMonth: number,
+    asOfDate: Date,
+    reservationList: any[]
+  ): number => {
+    let totalRevenue = 0;
+    
+    reservationList.forEach(r => {
+      if (!r.check_in || !r.check_out || !r.created_at_guesty || !r.fare_accommodation_adjusted) return;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return;
+      if (r.source === 'owner') return;
+      
+      const createdAt = parseISO(r.created_at_guesty);
+      if (createdAt > asOfDate) return; // Only count bookings created by the as-of date
+      
+      const revenueTotal = parseFloat(r.fare_accommodation_adjusted || 0);
+      const nightsCount = r.nights_count || 0;
+      if (nightsCount === 0) return;
+      
+      const revenuePerNight = revenueTotal / nightsCount;
+      const checkIn = parseISO(r.check_in);
+      const checkOut = parseISO(r.check_out);
+      
+      // Iterate through each night
+      let currentNight = new Date(checkIn);
+      while (currentNight < checkOut) {
+        if (currentNight.getFullYear() === targetYear && currentNight.getMonth() === targetMonth) {
+          totalRevenue += revenuePerNight;
+        }
+        currentNight.setDate(currentNight.getDate() + 1);
+      }
+    });
+    
+    return totalRevenue;
   };
 
   const calculateCumulativeRevenue = (): CumulativeDataPoint[] => {
@@ -166,37 +236,13 @@ export function PacingReport({ reservations }: PacingReportProps) {
       const year = targetDate.getFullYear();
       const month = targetDate.getMonth();
       
-      // Current period revenue for this specific month (check-in in this month, confirmed by today)
-      // Exclude owner reservations from calculations
-      const currentRevenue = reservations
-        .filter((r) => {
-          if (!r.check_in || !r.created_at_guesty) return false;
-          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-          if (r.source === 'owner') return false;
-          const checkIn = parseISO(r.check_in);
-          const createdAt = parseISO(r.created_at_guesty);
-          const todayThisYear = new Date(year, today.getMonth(), today.getDate());
-          return checkIn.getFullYear() === year && 
-                 checkIn.getMonth() === month &&
-                 createdAt <= todayThisYear;
-        })
-        .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+      // Current period: as of today
+      const todayThisYear = new Date(year, today.getMonth(), today.getDate());
+      const currentRevenue = calculateRevenueForMonth(year, month, todayThisYear, reservations);
       
-      // Last year same month revenue (check-in in same month last year, confirmed by same date last year)
-      // Exclude owner reservations from calculations
-      const lastYearRevenue = reservations
-        .filter((r) => {
-          if (!r.check_in || !r.created_at_guesty) return false;
-          if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return false;
-          if (r.source === 'owner') return false;
-          const checkIn = parseISO(r.check_in);
-          const createdAt = parseISO(r.created_at_guesty);
-          const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
-          return checkIn.getFullYear() === year - 1 && 
-                 checkIn.getMonth() === month &&
-                 createdAt <= todayLastYear;
-        })
-        .reduce((sum, r) => sum + parseFloat(r.fare_accommodation_adjusted || 0), 0);
+      // Last year same month: as of same date last year
+      const todayLastYear = new Date(year - 1, today.getMonth(), today.getDate());
+      const lastYearRevenue = calculateRevenueForMonth(year - 1, month, todayLastYear, reservations);
       
       data.push({
         month: monthName,

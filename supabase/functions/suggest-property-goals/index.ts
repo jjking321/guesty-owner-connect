@@ -51,21 +51,43 @@ serve(async (req) => {
 
     console.log('Found', reservations?.length || 0, 'reservations');
 
-    // Calculate monthly revenue by year
+    // Calculate monthly revenue by year using night-based allocation
     const monthlyData: Record<number, Record<number, { revenue: number; bookings: number }>> = {};
     
     reservations?.forEach(res => {
-      const checkIn = new Date(res.check_in);
-      const resYear = checkIn.getFullYear();
-      const resMonth = checkIn.getMonth() + 1;
+      if (!res.check_in || !res.check_out || !res.fare_accommodation_adjusted) return;
       
-      if (!monthlyData[resYear]) monthlyData[resYear] = {};
-      if (!monthlyData[resYear][resMonth]) {
-        monthlyData[resYear][resMonth] = { revenue: 0, bookings: 0 };
+      const totalRevenue = Number(res.fare_accommodation_adjusted) || 0;
+      const nightsCount = Number(res.nights_count) || 0;
+      if (nightsCount === 0) return;
+      
+      const revenuePerNight = totalRevenue / nightsCount;
+      const checkIn = new Date(res.check_in);
+      const checkOut = new Date(res.check_out);
+      
+      // Allocate revenue to each night's month
+      let currentNight = new Date(checkIn);
+      while (currentNight < checkOut) {
+        const nightYear = currentNight.getFullYear();
+        const nightMonth = currentNight.getMonth() + 1;
+        
+        if (!monthlyData[nightYear]) monthlyData[nightYear] = {};
+        if (!monthlyData[nightYear][nightMonth]) {
+          monthlyData[nightYear][nightMonth] = { revenue: 0, bookings: 0 };
+        }
+        
+        monthlyData[nightYear][nightMonth].revenue += revenuePerNight;
+        currentNight.setDate(currentNight.getDate() + 1);
       }
       
-      monthlyData[resYear][resMonth].revenue += Number(res.fare_accommodation_adjusted || 0);
-      monthlyData[resYear][resMonth].bookings += 1;
+      // Count booking once (in check-in month)
+      const bookingYear = checkIn.getFullYear();
+      const bookingMonth = checkIn.getMonth() + 1;
+      if (!monthlyData[bookingYear]) monthlyData[bookingYear] = {};
+      if (!monthlyData[bookingYear][bookingMonth]) {
+        monthlyData[bookingYear][bookingMonth] = { revenue: 0, bookings: 0 };
+      }
+      monthlyData[bookingYear][bookingMonth].bookings += 1;
     });
 
     // Prepare data summary for AI
