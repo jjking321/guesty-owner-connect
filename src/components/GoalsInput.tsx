@@ -85,6 +85,16 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           };
         });
         setGoals(loadedGoals);
+      } else {
+        // Reset to empty goals when no data exists for this year
+        setGoals(monthNames.map((_, index) => ({ 
+          month: index + 1, 
+          budget: 0, 
+          projection: 0, 
+          goal: 0, 
+          locked: false 
+        })));
+        setLockerProfiles({});
       }
     } catch (error: any) {
       toast({
