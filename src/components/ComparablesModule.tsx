@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink } from "lucide-react";
 
 interface ComparablesModuleProps {
   listingId: string;
@@ -72,6 +72,15 @@ interface Comparable {
   selected_at: string | null;
 }
 
+const AMENITY_OPTIONS = [
+  { value: 'pool', label: 'Pool' },
+  { value: 'hot_tub', label: 'Hot Tub' },
+  { value: 'waterfront', label: 'Waterfront' },
+  { value: 'beach_access', label: 'Beach Access' },
+  { value: 'patio_or_balcony', label: 'Patio/Balcony' },
+  { value: 'pets_allowed', label: 'Pets Allowed' },
+];
+
 export function ComparablesModule({ 
   listingId, 
   latitude, 
@@ -86,6 +95,8 @@ export function ComparablesModule({
   const [initialLoading, setInitialLoading] = useState(true);
   const [radiusMiles, setRadiusMiles] = useState<number>(10);
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
+  const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
+  const [matchBedrooms, setMatchBedrooms] = useState(false);
 
   // Load existing comparables on mount
   useEffect(() => {
@@ -132,6 +143,8 @@ export function ComparablesModule({
         body: {
           listing_id: listingId,
           radius_miles: radiusMiles,
+          amenities: selectedAmenities,
+          bedrooms: matchBedrooms ? bedrooms : null,
         },
       });
 
@@ -248,6 +261,14 @@ export function ComparablesModule({
     );
   }
 
+  const toggleAmenity = (amenity: string) => {
+    setSelectedAmenities(prev => 
+      prev.includes(amenity) 
+        ? prev.filter(a => a !== amenity)
+        : [...prev, amenity]
+    );
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -288,6 +309,43 @@ export function ComparablesModule({
             </Button>
           </div>
         </div>
+
+        {/* Filters Section */}
+        <div className="mt-4 space-y-3">
+          {/* Bedroom Filter */}
+          {bedrooms !== undefined && (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="match-bedrooms"
+                checked={matchBedrooms}
+                onCheckedChange={(checked) => setMatchBedrooms(checked === true)}
+              />
+              <Label htmlFor="match-bedrooms" className="text-sm cursor-pointer">
+                Same bedrooms only ({bedrooms} bed{bedrooms !== 1 ? 's' : ''})
+              </Label>
+            </div>
+          )}
+
+          {/* Amenities Filter */}
+          <div>
+            <Label className="text-sm text-muted-foreground mb-2 block">Amenities:</Label>
+            <div className="flex flex-wrap gap-4">
+              {AMENITY_OPTIONS.map((amenity) => (
+                <div key={amenity.value} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`amenity-${amenity.value}`}
+                    checked={selectedAmenities.includes(amenity.value)}
+                    onCheckedChange={() => toggleAmenity(amenity.value)}
+                  />
+                  <Label htmlFor={`amenity-${amenity.value}`} className="text-sm cursor-pointer">
+                    {amenity.label}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
         {!hasCoordinates && (
           <p className="text-sm text-destructive mt-2">
             This property doesn't have valid coordinates. Cannot fetch comparables.
@@ -409,9 +467,21 @@ function ComparableCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <h4 className="font-medium truncate">
-                {comparable.listing_name || 'Unnamed Property'}
-              </h4>
+              <div className="flex items-center gap-2">
+                <h4 className="font-medium truncate">
+                  {comparable.listing_name || 'Unnamed Property'}
+                </h4>
+                <a
+                  href={`https://www.airbnb.com/rooms/${comparable.airroi_listing_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-muted-foreground hover:text-primary transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                  title="View on Airbnb"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              </div>
               <p className="text-sm text-muted-foreground">
                 {comparable.location_info?.locality || comparable.location_info?.region || 'Unknown location'}
               </p>

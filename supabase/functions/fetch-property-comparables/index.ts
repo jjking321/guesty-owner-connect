@@ -25,13 +25,13 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { listing_id, radius_miles = 10 } = await req.json();
+    const { listing_id, radius_miles = 10, amenities = [], bedrooms = null } = await req.json();
 
     if (!listing_id) {
       throw new Error('listing_id is required');
     }
 
-    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles`);
+    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles, amenities: ${JSON.stringify(amenities)}, bedrooms: ${bedrooms}`);
 
     // Fetch listing details from database
     const { data: listing, error: listingError } = await supabase
@@ -56,11 +56,26 @@ serve(async (req) => {
     }
 
     // Build POST body for radius search
-    const requestBody = {
+    const requestBody: any = {
       latitude: latitude,
       longitude: longitude,
       radius_miles: parseFloat(radius_miles),
     };
+
+    // Add filters if provided
+    if (amenities.length > 0 || bedrooms !== null) {
+      requestBody.filter = {};
+      
+      // Amenities filter - use "all" to require all selected amenities
+      if (amenities.length > 0) {
+        requestBody.filter.amenities = { all: amenities };
+      }
+      
+      // Bedrooms filter - exact match
+      if (bedrooms !== null) {
+        requestBody.filter.bedrooms = { all: [bedrooms] };
+      }
+    }
 
     console.log(`Calling Air ROI API (POST): ${AIRROI_API_URL}`);
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
