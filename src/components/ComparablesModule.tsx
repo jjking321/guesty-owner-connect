@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3 } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X } from "lucide-react";
 import { ComparablesMap } from "./ComparablesMap";
 
 interface ComparablesModuleProps {
@@ -115,6 +115,7 @@ export function ComparablesModule({
   const [hasMoreResults, setHasMoreResults] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [fetchingMetrics, setFetchingMetrics] = useState(false);
+  const [metricsSelection, setMetricsSelection] = useState<Set<string>>(new Set());
 
   // Load existing comparables and mapbox token on mount
   useEffect(() => {
@@ -313,11 +314,18 @@ export function ComparablesModule({
   };
 
   const fetchHistoricalMetrics = async () => {
-    if (selectedComparables.length === 0) return;
+    if (metricsSelection.size === 0) {
+      toast({
+        title: "No comparables selected",
+        description: "Please check the comparables you want to fetch metrics for.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setFetchingMetrics(true);
     try {
-      const selectedIds = selectedComparables.map(c => c.id);
+      const selectedIds = Array.from(metricsSelection);
       
       const { data, error } = await supabase.functions.invoke('fetch-comparable-metrics', {
         body: { comparable_ids: selectedIds }
@@ -332,6 +340,8 @@ export function ComparablesModule({
         });
         // Reload to show updated data
         await loadExistingComparables();
+        // Clear metrics selection after successful fetch
+        setMetricsSelection(new Set());
       } else {
         throw new Error(data.error || 'Unknown error');
       }
@@ -345,6 +355,40 @@ export function ComparablesModule({
     } finally {
       setFetchingMetrics(false);
     }
+  };
+
+  const toggleMetricsSelection = (id: string) => {
+    setMetricsSelection(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllForMetrics = () => {
+    setMetricsSelection(new Set(selectedComparables.map(c => c.id)));
+  };
+
+  const deselectAllForMetrics = () => {
+    setMetricsSelection(new Set());
+  };
+
+  const removeFromSelected = (id: string) => {
+    setPendingSelections(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(id);
+      return newSet;
+    });
+    // Also remove from metrics selection
+    setMetricsSelection(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(id);
+      return newSet;
+    });
   };
 
   const formatCurrency = (value?: number) => {
@@ -554,6 +598,7 @@ export function ComparablesModule({
                   <ComparableCard
                     key={comp.id}
                     comparable={comp}
+                    mode="search"
                     isSelected={pendingSelections.has(comp.id)}
                     onToggle={() => toggleSelection(comp.id)}
                     formatCurrency={formatCurrency}
@@ -597,18 +642,33 @@ export function ComparablesModule({
             ) : (
               <div className="space-y-4">
                 {/* Header with Fetch Metrics Button */}
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">
-                    {selectedComparables.length} comparable{selectedComparables.length !== 1 ? 's' : ''} selected
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-muted-foreground">
+                      {selectedComparables.length} comparable{selectedComparables.length !== 1 ? 's' : ''}
+                    </span>
+                    <span className="text-sm text-muted-foreground">|</span>
+                    <button 
+                      onClick={selectAllForMetrics}
+                      className="text-sm text-primary hover:underline"
+                    >
+                      Select all
+                    </button>
+                    <button 
+                      onClick={deselectAllForMetrics}
+                      className="text-sm text-muted-foreground hover:underline"
+                    >
+                      Deselect all
+                    </button>
                   </div>
                   <Button 
                     onClick={fetchHistoricalMetrics}
-                    disabled={fetchingMetrics}
+                    disabled={fetchingMetrics || metricsSelection.size === 0}
                     variant="outline"
                     size="sm"
                   >
                     <BarChart3 className="h-4 w-4 mr-2" />
-                    {fetchingMetrics ? 'Fetching...' : 'Fetch Historical Metrics'}
+                    {fetchingMetrics ? 'Fetching...' : `Fetch Metrics (${metricsSelection.size})`}
                   </Button>
                 </div>
 
@@ -618,8 +678,10 @@ export function ComparablesModule({
                     <ComparableCard
                       key={comp.id}
                       comparable={comp}
-                      isSelected={true}
-                      onToggle={() => toggleSelection(comp.id)}
+                      mode="selected"
+                      isCheckedForMetrics={metricsSelection.has(comp.id)}
+                      onMetricsToggle={() => toggleMetricsSelection(comp.id)}
+                      onRemove={() => removeFromSelected(comp.id)}
                       formatCurrency={formatCurrency}
                       formatPercent={formatPercent}
                     />
@@ -645,16 +707,27 @@ export function ComparablesModule({
 
 interface ComparableCardProps {
   comparable: Comparable;
-  isSelected: boolean;
-  onToggle: () => void;
+  mode: 'search' | 'selected';
+  // Search mode props
+  isSelected?: boolean;
+  onToggle?: () => void;
+  // Selected mode props
+  isCheckedForMetrics?: boolean;
+  onMetricsToggle?: () => void;
+  onRemove?: () => void;
+  // Common props
   formatCurrency: (value?: number) => string;
   formatPercent: (value?: number) => string;
 }
 
 function ComparableCard({ 
   comparable, 
-  isSelected, 
+  mode,
+  isSelected,
   onToggle,
+  isCheckedForMetrics,
+  onMetricsToggle,
+  onRemove,
   formatCurrency,
   formatPercent,
 }: ComparableCardProps) {
@@ -662,20 +735,31 @@ function ComparableCard({
   const metrics = comparable.performance_metrics;
   const ratings = comparable.ratings;
 
+  const isInSelectedMode = mode === 'selected';
+  const cardSelected = isInSelectedMode || isSelected;
+
   return (
     <div 
       className={`border rounded-lg p-4 transition-colors ${
-        isSelected ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/50'
+        cardSelected ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/50'
       }`}
     >
       <div className="flex gap-4">
-        {/* Checkbox */}
+        {/* Checkbox / Actions */}
         <div className="flex items-start pt-1">
-          <Checkbox
-            checked={isSelected}
-            onCheckedChange={onToggle}
-            aria-label={`Select ${comparable.listing_name}`}
-          />
+          {isInSelectedMode ? (
+            <Checkbox
+              checked={isCheckedForMetrics}
+              onCheckedChange={onMetricsToggle}
+              aria-label={`Select ${comparable.listing_name} for metrics fetch`}
+            />
+          ) : (
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={onToggle}
+              aria-label={`Select ${comparable.listing_name}`}
+            />
+          )}
         </div>
 
         {/* Photo */}
@@ -730,6 +814,18 @@ function ComparableCard({
                     </span>
                   )}
                 </div>
+              )}
+              {isInSelectedMode && onRemove && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove();
+                  }}
+                  className="ml-2 p-1 text-muted-foreground hover:text-destructive transition-colors"
+                  title="Remove from selected"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               )}
             </div>
           </div>
