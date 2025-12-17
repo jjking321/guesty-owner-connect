@@ -128,12 +128,40 @@ export function ComparablesModule({
   const [metricsSelection, setMetricsSelection] = useState<Set<string>>(new Set());
   const [metricsDialogOpen, setMetricsDialogOpen] = useState(false);
   const [selectedComparableForMetrics, setSelectedComparableForMetrics] = useState<Comparable | null>(null);
+  const [compsetSummary, setCompsetSummary] = useState<{
+    avg_ttm_revenue: number | null;
+    avg_ttm_adr: number | null;
+    avg_ttm_occupancy: number | null;
+    avg_ttm_revpar: number | null;
+    avg_prior_ttm_revenue: number | null;
+    avg_prior_ttm_adr: number | null;
+    avg_prior_ttm_occupancy: number | null;
+    avg_prior_ttm_revpar: number | null;
+    selected_comparables_count: number | null;
+    calculated_at: string | null;
+  } | null>(null);
 
   // Load existing comparables and mapbox token on mount
   useEffect(() => {
     loadExistingComparables();
     fetchMapboxToken();
+    loadCompsetSummary();
   }, [listingId]);
+
+  const loadCompsetSummary = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('property_compset_summary')
+        .select('*')
+        .eq('listing_id', listingId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error; // Ignore not found
+      setCompsetSummary(data);
+    } catch (error) {
+      console.error('Error loading compset summary:', error);
+    }
+  };
 
   const fetchMapboxToken = async () => {
     try {
@@ -352,6 +380,8 @@ export function ComparablesModule({
         });
         // Reload to show updated data
         await loadExistingComparables();
+        // Reload compset summary with new averages
+        await loadCompsetSummary();
         // Clear metrics selection after successful fetch
         setMetricsSelection(new Set());
       } else {
@@ -659,6 +689,15 @@ export function ComparablesModule({
               </div>
             ) : (
               <div className="space-y-4">
+                {/* Compset Summary Card */}
+                {compsetSummary?.calculated_at && (
+                  <CompsetSummaryCard 
+                    summary={compsetSummary} 
+                    formatCurrency={formatCurrency}
+                    formatPercent={formatPercent}
+                  />
+                )}
+
                 {/* Header with Fetch Metrics Button */}
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-3">
@@ -1017,6 +1056,84 @@ function MetricWithYoY({
           <span>No prior</span>
         </div>
       )}
+    </div>
+  );
+}
+
+// Compset Summary Card component
+interface CompsetSummaryCardProps {
+  summary: {
+    avg_ttm_revenue: number | null;
+    avg_ttm_adr: number | null;
+    avg_ttm_occupancy: number | null;
+    avg_ttm_revpar: number | null;
+    avg_prior_ttm_revenue: number | null;
+    avg_prior_ttm_adr: number | null;
+    avg_prior_ttm_occupancy: number | null;
+    avg_prior_ttm_revpar: number | null;
+    selected_comparables_count: number | null;
+    calculated_at: string | null;
+  };
+  formatCurrency: (value?: number | null) => string;
+  formatPercent: (value?: number | null) => string;
+}
+
+function CompsetSummaryCard({ summary, formatCurrency, formatPercent }: CompsetSummaryCardProps) {
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return '';
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  return (
+    <div className="border rounded-lg p-4 bg-primary/5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-5 w-5 text-primary" />
+          <span className="font-medium">
+            Compset Summary ({summary.selected_comparables_count || 0} Properties)
+          </span>
+        </div>
+        {summary.calculated_at && (
+          <span className="text-xs text-muted-foreground">
+            Updated: {formatDate(summary.calculated_at)}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <MetricWithYoY
+          label="Avg Revenue"
+          current={summary.avg_ttm_revenue}
+          prior={summary.avg_prior_ttm_revenue}
+          formatValue={formatCurrency}
+          isPositiveGood={true}
+          highlightCurrent={true}
+        />
+        <MetricWithYoY
+          label="Avg ADR"
+          current={summary.avg_ttm_adr}
+          prior={summary.avg_prior_ttm_adr}
+          formatValue={formatCurrency}
+          isPositiveGood={true}
+        />
+        <MetricWithYoY
+          label="Avg Occupancy"
+          current={summary.avg_ttm_occupancy}
+          prior={summary.avg_prior_ttm_occupancy}
+          formatValue={(v) => formatPercent(v)}
+          isPositiveGood={true}
+        />
+        <MetricWithYoY
+          label="Avg RevPAR"
+          current={summary.avg_ttm_revpar}
+          prior={summary.avg_prior_ttm_revpar}
+          formatValue={formatCurrency}
+          isPositiveGood={true}
+        />
+      </div>
     </div>
   );
 }
