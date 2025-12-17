@@ -1142,7 +1142,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                       dot={{ fill: "#8b5cf6", r: 3 }}
                       activeDot={{ r: 5 }}
                       name="Compset Avg"
-                      connectNulls={false}
+                      connectNulls
                     />
                   )}
                 </LineChart>
