@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { ComparablesMap } from "./ComparablesMap";
 import { ComparableMetricsDialog } from "./ComparableMetricsDialog";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+
 interface ComparablesModuleProps {
   listingId: string;
   latitude?: number;
@@ -698,6 +700,15 @@ export function ComparablesModule({
                   />
                 )}
 
+                {/* Compset Monthly Trend Chart */}
+                {selectedComparables.some(c => c.historical_metrics) && (
+                  <CompsetTrendChart 
+                    comparables={selectedComparables}
+                    formatCurrency={formatCurrency}
+                    formatPercent={formatPercent}
+                  />
+                )}
+
                 {/* Header with Fetch Metrics Button */}
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-3">
@@ -1133,6 +1144,171 @@ function CompsetSummaryCard({ summary, formatCurrency, formatPercent }: CompsetS
           formatValue={formatCurrency}
           isPositiveGood={true}
         />
+      </div>
+    </div>
+  );
+}
+
+// Monthly rollup data type
+interface MonthlyRollup {
+  date: string;
+  month: string;
+  avgRevenue: number | null;
+  avgAdr: number | null;
+  avgOccupancy: number | null;
+  avgRevpar: number | null;
+  propertyCount: number;
+}
+
+// Compset Trend Chart component
+interface CompsetTrendChartProps {
+  comparables: Comparable[];
+  formatCurrency: (value?: number | null) => string;
+  formatPercent: (value?: number | null) => string;
+}
+
+function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: CompsetTrendChartProps) {
+  const [activeMetric, setActiveMetric] = useState<'revenue' | 'adr' | 'occupancy' | 'revpar'>('revenue');
+
+  const monthlyRollups = useMemo((): MonthlyRollup[] => {
+    type MonthBucket = { revenue: number[]; adr: number[]; occupancy: number[]; revpar: number[] };
+    const monthlyData: Record<string, MonthBucket> = {};
+
+    // Aggregate all data by month
+    comparables.forEach(comp => {
+      const historicalData = comp.historical_metrics as { results?: Array<{
+        date: string;
+        revenue?: number;
+        average_daily_rate?: number;
+        occupancy?: number;
+        rev_par?: number;
+      }> } | null;
+      
+      if (!historicalData?.results) return;
+
+      historicalData.results.forEach((monthData) => {
+        const key = monthData.date; // "YYYY-MM"
+        if (!monthlyData[key]) {
+          monthlyData[key] = { revenue: [], adr: [], occupancy: [], revpar: [] };
+        }
+        const bucket = monthlyData[key];
+        if (monthData.revenue && monthData.revenue > 0) bucket.revenue.push(monthData.revenue);
+        if (monthData.average_daily_rate && monthData.average_daily_rate > 0) bucket.adr.push(monthData.average_daily_rate);
+        if (monthData.occupancy && monthData.occupancy > 0) bucket.occupancy.push(monthData.occupancy);
+        if (monthData.rev_par && monthData.rev_par > 0) bucket.revpar.push(monthData.rev_par);
+      });
+    });
+
+    // Calculate averages and format
+    const formatMonth = (dateStr: string) => {
+      const [year, month] = dateStr.split('-');
+      const date = new Date(parseInt(year), parseInt(month) - 1);
+      return date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+    };
+
+    return Object.entries(monthlyData)
+      .map(([date, data]): MonthlyRollup => ({
+        date,
+        month: formatMonth(date),
+        avgRevenue: data.revenue.length ? data.revenue.reduce((a, b) => a + b, 0) / data.revenue.length : null,
+        avgAdr: data.adr.length ? data.adr.reduce((a, b) => a + b, 0) / data.adr.length : null,
+        avgOccupancy: data.occupancy.length ? data.occupancy.reduce((a, b) => a + b, 0) / data.occupancy.length : null,
+        avgRevpar: data.revpar.length ? data.revpar.reduce((a, b) => a + b, 0) / data.revpar.length : null,
+        propertyCount: Math.max(data.revenue.length, data.adr.length, data.occupancy.length, data.revpar.length)
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [comparables]);
+
+  if (monthlyRollups.length === 0) {
+    return null;
+  }
+
+  const metricConfig = {
+    revenue: { key: 'avgRevenue', label: 'Avg Revenue', format: formatCurrency, color: 'hsl(var(--primary))' },
+    adr: { key: 'avgAdr', label: 'Avg ADR', format: formatCurrency, color: 'hsl(var(--chart-2))' },
+    occupancy: { key: 'avgOccupancy', label: 'Avg Occupancy', format: (v: number | null) => v != null ? `${(v * 100).toFixed(0)}%` : 'N/A', color: 'hsl(var(--chart-3))' },
+    revpar: { key: 'avgRevpar', label: 'Avg RevPAR', format: formatCurrency, color: 'hsl(var(--chart-4))' },
+  };
+
+  const config = metricConfig[activeMetric];
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload as MonthlyRollup;
+      return (
+        <div className="bg-background border rounded-lg shadow-lg p-3">
+          <p className="font-medium">{label}</p>
+          <p className="text-sm" style={{ color: config.color }}>
+            {config.label}: {config.format(payload[0].value)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {data.propertyCount} propert{data.propertyCount === 1 ? 'y' : 'ies'}
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div className="border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-5 w-5 text-primary" />
+          <span className="font-medium">Compset Monthly Performance</span>
+        </div>
+      </div>
+      
+      {/* Metric Tabs */}
+      <div className="flex gap-2 mb-4">
+        {(Object.keys(metricConfig) as Array<keyof typeof metricConfig>).map((metric) => (
+          <button
+            key={metric}
+            onClick={() => setActiveMetric(metric)}
+            className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+              activeMetric === metric 
+                ? 'bg-primary text-primary-foreground' 
+                : 'bg-muted hover:bg-muted/80'
+            }`}
+          >
+            {metricConfig[metric].label.replace('Avg ', '')}
+          </button>
+        ))}
+      </div>
+
+      {/* Chart */}
+      <div className="h-[300px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={monthlyRollups} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            <XAxis 
+              dataKey="month" 
+              tick={{ fontSize: 12 }}
+              tickLine={false}
+              axisLine={false}
+            />
+            <YAxis 
+              tick={{ fontSize: 12 }}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(value) => {
+                if (activeMetric === 'occupancy') return `${(value * 100).toFixed(0)}%`;
+                if (value >= 1000) return `$${(value / 1000).toFixed(0)}k`;
+                return `$${value.toFixed(0)}`;
+              }}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <Line
+              type="monotone"
+              dataKey={config.key}
+              stroke={config.color}
+              strokeWidth={2}
+              dot={{ fill: config.color, strokeWidth: 0, r: 3 }}
+              activeDot={{ r: 5, strokeWidth: 0 }}
+              connectNulls
+            />
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
