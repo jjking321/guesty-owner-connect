@@ -476,10 +476,38 @@ function FutureRatesCalendar({ futureRates, futureRatesFetchedAt, formatCurrency
     const minRate = Math.min(...rates);
     const maxRate = Math.max(...rates);
     const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
-    const availableDays = futureRates.rates.filter(r => r.available).length;
+    const blockedDays = futureRates.rates.filter(r => !r.available).length;
     const totalDays = futureRates.rates.length;
+    const occupancy = totalDays > 0 ? (blockedDays / totalDays) * 100 : 0;
     
-    return { minRate, maxRate, avgRate, availableDays, totalDays };
+    return { minRate, maxRate, avgRate, blockedDays, totalDays, occupancy };
+  }, [futureRates]);
+
+  // Monthly aggregated data for chart
+  const monthlyChartData = useMemo(() => {
+    if (!futureRates?.rates || futureRates.rates.length === 0) return [];
+    
+    const monthGroups = new Map<string, { rates: number[], blockedDays: number, totalDays: number }>();
+    
+    for (const rate of futureRates.rates) {
+      const monthKey = format(parseISO(rate.date), 'yyyy-MM');
+      const existing = monthGroups.get(monthKey) || { rates: [], blockedDays: 0, totalDays: 0 };
+      
+      if (rate.rate > 0) existing.rates.push(rate.rate);
+      if (!rate.available) existing.blockedDays++;
+      existing.totalDays++;
+      
+      monthGroups.set(monthKey, existing);
+    }
+    
+    return Array.from(monthGroups.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([month, data]) => ({
+        month,
+        monthFormatted: format(parse(month, 'yyyy-MM', new Date()), 'MMM yyyy'),
+        avgRate: data.rates.length > 0 ? Math.round(data.rates.reduce((a, b) => a + b, 0) / data.rates.length) : 0,
+        occupancy: Math.round((data.blockedDays / data.totalDays) * 100),
+      }));
   }, [futureRates]);
 
   // Get color based on rate relative to min/max
@@ -539,8 +567,69 @@ function FutureRatesCalendar({ futureRates, futureRatesFetchedAt, formatCurrency
             <div className="font-semibold text-red-600">{formatCurrency(rateStats.maxRate)}</div>
           </div>
           <div className="bg-muted/50 rounded-lg p-3 text-center">
-            <div className="text-xs text-muted-foreground">Availability</div>
-            <div className="font-semibold">{rateStats.availableDays}/{rateStats.totalDays} days</div>
+            <div className="text-xs text-muted-foreground">Occupancy</div>
+            <div className="font-semibold">{rateStats.occupancy.toFixed(1)}%</div>
+          </div>
+        </div>
+      )}
+
+      {/* Monthly Rates & Occupancy Chart */}
+      {monthlyChartData.length > 0 && (
+        <div className="mb-4">
+          <h5 className="text-xs font-medium text-muted-foreground mb-2">Monthly Avg Rate & Occupancy</h5>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={monthlyChartData}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis 
+                  dataKey="monthFormatted" 
+                  tick={{ fontSize: 10 }}
+                  tickLine={false}
+                />
+                <YAxis 
+                  yAxisId="rate"
+                  orientation="left"
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(value) => `$${value}`}
+                  tickLine={false}
+                />
+                <YAxis 
+                  yAxisId="occupancy"
+                  orientation="right"
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(value) => `${value}%`}
+                  domain={[0, 100]}
+                  tickLine={false}
+                />
+                <Tooltip 
+                  formatter={(value: number, name: string) => {
+                    if (name === 'avgRate') return [`$${value}`, 'Avg Rate'];
+                    return [`${value}%`, 'Occupancy'];
+                  }}
+                  contentStyle={{ fontSize: 12 }}
+                />
+                <Legend 
+                  wrapperStyle={{ fontSize: 11 }}
+                  formatter={(value) => value === 'avgRate' ? 'Avg Rate' : 'Occupancy'}
+                />
+                <Line 
+                  yAxisId="rate"
+                  type="monotone" 
+                  dataKey="avgRate" 
+                  stroke="hsl(var(--primary))" 
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+                <Line 
+                  yAxisId="occupancy"
+                  type="monotone" 
+                  dataKey="occupancy" 
+                  stroke="hsl(var(--chart-2))" 
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
           </div>
         </div>
       )}
