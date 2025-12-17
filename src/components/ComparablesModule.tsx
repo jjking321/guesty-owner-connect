@@ -1385,13 +1385,12 @@ function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: Comps
             />
             <Tooltip content={<CustomTooltip />} />
             <Line
-              type="linear"
+              type="monotone"
               dataKey={config.key}
               stroke={config.color}
               strokeWidth={2}
-              dot={{ fill: config.color, strokeWidth: 0, r: 4 }}
-              activeDot={{ r: 6, strokeWidth: 0 }}
-              connectNulls={true}
+              name={config.label}
+              connectNulls
             />
           </LineChart>
         </ResponsiveContainer>
