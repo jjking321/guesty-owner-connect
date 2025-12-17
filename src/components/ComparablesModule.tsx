@@ -785,7 +785,7 @@ export function ComparablesModule({
                       size="sm"
                     >
                       <BarChart3 className="h-4 w-4 mr-2" />
-                      {fetchingMetrics ? 'Fetching...' : `Fetch Metrics (${metricsSelection.size})`}
+                      {fetchingMetrics ? 'Fetching...' : `Fetch Historicals (${metricsSelection.size})`}
                     </Button>
                     <Button 
                       onClick={fetchFutureRates}
