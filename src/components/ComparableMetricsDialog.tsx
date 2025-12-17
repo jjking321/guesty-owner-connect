@@ -603,7 +603,7 @@ function FutureRatesCalendar({ futureRates, futureRatesFetchedAt, formatCurrency
                 />
                 <Tooltip 
                   formatter={(value: number, name: string) => {
-                    if (name === 'avgRate') return [`$${value}`, 'Avg Rate'];
+                    if (name === 'Avg Rate') return [`$${value}`, 'Avg Rate'];
                     return [`${value}%`, 'Occupancy'];
                   }}
                   contentStyle={{ fontSize: 12 }}
