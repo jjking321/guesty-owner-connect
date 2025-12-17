@@ -113,3 +113,24 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Blocked calendar day striped pattern */
+.blocked-stripe {
+  background: repeating-linear-gradient(
+    -45deg,
+    #e5e7eb,
+    #e5e7eb 2px,
+    #f3f4f6 2px,
+    #f3f4f6 8px
+  );
+}
+
+.dark .blocked-stripe {
+  background: repeating-linear-gradient(
+    -45deg,
+    #374151,
+    #374151 2px,
+    #4b5563 2px,
+    #4b5563 8px
+  );
+}
