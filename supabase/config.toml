@@ -47,3 +47,6 @@ verify_jwt = true
 
 [functions.sync-listing-calendar]
 verify_jwt = true
+
+[functions.backfill-compset-averages]
+verify_jwt = false
