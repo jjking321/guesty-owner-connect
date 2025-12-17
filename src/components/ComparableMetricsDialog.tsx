@@ -55,10 +55,10 @@ interface ComparableMetricsDialogProps {
 }
 
 const METRIC_OPTIONS = [
-  { key: 'revenue', label: 'Revenue', color: 'hsl(142, 76%, 36%)', yAxisId: 'left' },
-  { key: 'average_daily_rate', label: 'ADR', color: 'hsl(217, 91%, 60%)', yAxisId: 'left' },
-  { key: 'occupancy', label: 'Occupancy', color: 'hsl(38, 92%, 50%)', yAxisId: 'right' },
-  { key: 'rev_par', label: 'RevPAR', color: 'hsl(262, 83%, 58%)', yAxisId: 'left' },
+  { key: 'revenue', label: 'Revenue', color: 'hsl(142, 76%, 36%)', yAxisId: 'revenue' },
+  { key: 'average_daily_rate', label: 'ADR', color: 'hsl(217, 91%, 60%)', yAxisId: 'adr' },
+  { key: 'occupancy', label: 'Occupancy', color: 'hsl(38, 92%, 50%)', yAxisId: 'occupancy' },
+  { key: 'rev_par', label: 'RevPAR', color: 'hsl(262, 83%, 58%)', yAxisId: 'adr' },
 ];
 
 export function ComparableMetricsDialog({
@@ -123,10 +123,9 @@ export function ComparableMetricsDialog({
     return formatCurrency(value);
   };
 
-  const hasLeftAxisMetrics = Array.from(selectedMetrics).some(
-    m => METRIC_OPTIONS.find(opt => opt.key === m)?.yAxisId === 'left'
-  );
-  const hasRightAxisMetrics = selectedMetrics.has('occupancy');
+  const hasRevenueAxis = selectedMetrics.has('revenue');
+  const hasAdrAxis = selectedMetrics.has('average_daily_rate') || selectedMetrics.has('rev_par');
+  const hasOccupancyAxis = selectedMetrics.has('occupancy');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -207,7 +206,7 @@ export function ComparableMetricsDialog({
         ) : (
           <div className="h-[400px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+              <ComposedChart data={chartData} margin={{ top: 5, right: hasOccupancyAxis ? 60 : 30, left: hasAdrAxis ? 60 : 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis 
                   dataKey="dateFormatted" 
@@ -215,22 +214,34 @@ export function ComparableMetricsDialog({
                   interval="preserveStartEnd"
                   className="fill-muted-foreground"
                 />
-                {hasLeftAxisMetrics && (
+                {hasRevenueAxis && (
                   <YAxis
-                    yAxisId="left"
+                    yAxisId="revenue"
                     tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
                     tick={{ fontSize: 12 }}
                     className="fill-muted-foreground"
+                    label={{ value: 'Revenue', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: 'hsl(142, 76%, 36%)' } }}
                   />
                 )}
-                {hasRightAxisMetrics && (
+                {hasAdrAxis && (
                   <YAxis
-                    yAxisId="right"
+                    yAxisId="adr"
+                    orientation={hasRevenueAxis ? 'left' : 'left'}
+                    tickFormatter={(value) => `$${value.toFixed(0)}`}
+                    tick={{ fontSize: 12 }}
+                    className="fill-muted-foreground"
+                    label={{ value: 'ADR / RevPAR', angle: -90, position: hasRevenueAxis ? 'insideLeft' : 'insideLeft', dx: hasRevenueAxis ? -40 : 0, style: { textAnchor: 'middle', fill: 'hsl(217, 91%, 60%)' } }}
+                  />
+                )}
+                {hasOccupancyAxis && (
+                  <YAxis
+                    yAxisId="occupancy"
                     orientation="right"
                     tickFormatter={(value) => `${value}%`}
                     domain={[0, 100]}
                     tick={{ fontSize: 12 }}
                     className="fill-muted-foreground"
+                    label={{ value: 'Occupancy', angle: 90, position: 'insideRight', style: { textAnchor: 'middle', fill: 'hsl(38, 92%, 50%)' } }}
                   />
                 )}
                 <Tooltip
