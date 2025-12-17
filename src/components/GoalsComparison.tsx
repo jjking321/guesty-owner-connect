@@ -43,6 +43,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
   const [cumulativeData, setCumulativeData] = useState<GoalData[]>([]);
   const [showForecast, setShowForecast] = useState(false);
+  const [showGoals, setShowGoals] = useState(true);
   const [showCompset, setShowCompset] = useState(false);
   const [compsetMonthlyAverages, setCompsetMonthlyAverages] = useState<CompsetMonthlyAverage[]>([]);
   const { toast } = useToast();
@@ -411,6 +412,16 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
                   <Checkbox
+                    id="show-goals"
+                    checked={showGoals}
+                    onCheckedChange={(checked) => setShowGoals(checked as boolean)}
+                  />
+                  <Label htmlFor="show-goals" className="text-sm cursor-pointer">
+                    Show Goals
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
                     id="show-forecast"
                     checked={showForecast}
                     onCheckedChange={(checked) => setShowForecast(checked as boolean)}
@@ -456,9 +467,13 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   <Tooltip content={<CustomTooltip />} />
                   <Legend />
                   <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
-                  <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
-                  <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
-                  <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                  {showGoals && (
+                    <>
+                      <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
+                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
+                      <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                    </>
+                  )}
                   {showForecast && (
                     <>
                       <Area 
@@ -522,9 +537,13 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   <Tooltip content={<CustomTooltip />} />
                   <Legend />
                   <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
-                  <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
-                  <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
-                  <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                  {showGoals && (
+                    <>
+                      <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
+                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
+                      <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                    </>
+                  )}
                   {showForecast && (
                     <>
                       <Area 
