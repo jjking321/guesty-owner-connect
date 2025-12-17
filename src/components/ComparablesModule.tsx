@@ -1386,9 +1386,9 @@ function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: Comps
               dataKey={config.key}
               stroke={config.color}
               strokeWidth={2}
-              dot={{ fill: config.color, strokeWidth: 0, r: 3 }}
-              activeDot={{ r: 5, strokeWidth: 0 }}
-              connectNulls
+              dot={{ fill: config.color, strokeWidth: 0, r: 4 }}
+              activeDot={{ r: 6, strokeWidth: 0 }}
+              connectNulls={true}
             />
           </LineChart>
         </ResponsiveContainer>
