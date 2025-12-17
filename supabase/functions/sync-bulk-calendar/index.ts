@@ -5,6 +5,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Process 50 listings per invocation (~75-90 seconds)
+const BATCH_SIZE = 50;
+
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -190,7 +193,8 @@ async function performSync(
   supabase: any,
   guestyAccountId: string,
   syncJobId: string,
-  resumeFromOffset: number
+  resumeFromOffset: number,
+  authToken: string
 ) {
   console.log(`Starting bulk calendar sync for account ${guestyAccountId}, resuming from offset ${resumeFromOffset}`);
 
@@ -298,6 +302,32 @@ async function performSync(
 
       // Rate limit delay - 500ms between listings
       await sleep(500);
+
+      // Check if we've hit the batch limit and need to self-invoke
+      const itemsProcessedThisBatch = i - resumeFromOffset + 1;
+      if (itemsProcessedThisBatch >= BATCH_SIZE && i < listings.length - 1) {
+        // Update progress before self-invoking
+        await supabase.from('sync_jobs').update({
+          items_synced: i + 1,
+          last_synced_offset: i,
+          progress_message: `Processed ${i + 1}/${listings.length} listings. Continuing in next batch...`,
+        }).eq('id', syncJobId);
+
+        console.log(`Batch of ${BATCH_SIZE} complete at listing ${i + 1}. Self-invoking for continuation...`);
+
+        // Self-invoke to continue with next batch
+        const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
+          headers: { Authorization: `Bearer ${authToken}` },
+          body: { guestyAccountId },
+        });
+
+        if (invokeError) {
+          console.error('Self-invocation failed:', invokeError);
+          // Don't throw - job can be resumed manually
+        }
+
+        return; // Exit this invocation
+      }
     }
 
     // Mark as completed and update last sync timestamp
@@ -324,6 +354,11 @@ async function performSync(
   }
 }
 
+// Shutdown handler for logging
+addEventListener('beforeunload', (ev: any) => {
+  console.log('Function shutdown due to:', ev.detail?.reason);
+});
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -338,6 +373,9 @@ Deno.serve(async (req) => {
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Extract auth token for self-invocation
+    const authToken = authHeader.replace('Bearer ', '');
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -412,8 +450,8 @@ Deno.serve(async (req) => {
       console.log(`Created new sync job: ${syncJobId}`);
     }
 
-    // Start background sync
-    EdgeRuntime.waitUntil(performSync(supabase, guestyAccountId, syncJobId, resumeFromOffset));
+    // Start background sync with auth token for self-invocation
+    EdgeRuntime.waitUntil(performSync(supabase, guestyAccountId, syncJobId, resumeFromOffset, authToken));
 
     return new Response(
       JSON.stringify({ 

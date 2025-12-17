@@ -166,6 +166,32 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     }
   };
 
+  const handleResumeCalendar = async () => {
+    if (!syncJob) return;
+    
+    try {
+      setStopping(true);
+      const { data, error } = await supabase.functions.invoke('sync-bulk-calendar', {
+        body: { guestyAccountId: accountId }
+      });
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Calendar sync resumed",
+        description: "Calendar sync has been resumed from where it left off",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to resume calendar sync",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setStopping(false);
+    }
+  };
+
   if (!syncJob || dismissed) return null;
 
   const progress = syncJob.total_items && syncJob.items_synced
@@ -224,6 +250,20 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
                   size="sm"
                   className="h-7 text-xs"
                   onClick={handleResume}
+                  disabled={stopping}
+                >
+                  <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
+                  Resume
+                </Button>
+              )}
+              
+              {/* Resume button - only show for failed capacity_calendar */}
+              {syncJob.status === 'failed' && syncType === 'capacity_calendar' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleResumeCalendar}
                   disabled={stopping}
                 >
                   <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
