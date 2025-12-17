@@ -633,11 +633,20 @@ export type Database = {
           metrics_fetched_at: string | null
           performance_metrics: Json | null
           pricing_info: Json | null
+          prior_ttm_adr: number | null
+          prior_ttm_occupancy: number | null
+          prior_ttm_revenue: number | null
+          prior_ttm_revpar: number | null
           property_details: Json | null
           ratings: Json | null
+          rollups_calculated_at: string | null
           room_type: string | null
           selected_at: string | null
           superhost: boolean | null
+          ttm_adr: number | null
+          ttm_occupancy: number | null
+          ttm_revenue: number | null
+          ttm_revpar: number | null
           updated_at: string | null
         }
         Insert: {
@@ -657,11 +666,20 @@ export type Database = {
           metrics_fetched_at?: string | null
           performance_metrics?: Json | null
           pricing_info?: Json | null
+          prior_ttm_adr?: number | null
+          prior_ttm_occupancy?: number | null
+          prior_ttm_revenue?: number | null
+          prior_ttm_revpar?: number | null
           property_details?: Json | null
           ratings?: Json | null
+          rollups_calculated_at?: string | null
           room_type?: string | null
           selected_at?: string | null
           superhost?: boolean | null
+          ttm_adr?: number | null
+          ttm_occupancy?: number | null
+          ttm_revenue?: number | null
+          ttm_revpar?: number | null
           updated_at?: string | null
         }
         Update: {
@@ -681,11 +699,20 @@ export type Database = {
           metrics_fetched_at?: string | null
           performance_metrics?: Json | null
           pricing_info?: Json | null
+          prior_ttm_adr?: number | null
+          prior_ttm_occupancy?: number | null
+          prior_ttm_revenue?: number | null
+          prior_ttm_revpar?: number | null
           property_details?: Json | null
           ratings?: Json | null
+          rollups_calculated_at?: string | null
           room_type?: string | null
           selected_at?: string | null
           superhost?: boolean | null
+          ttm_adr?: number | null
+          ttm_occupancy?: number | null
+          ttm_revenue?: number | null
+          ttm_revpar?: number | null
           updated_at?: string | null
         }
         Relationships: [
@@ -693,6 +720,65 @@ export type Database = {
             foreignKeyName: "property_comparables_listing_id_fkey"
             columns: ["listing_id"]
             isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      property_compset_summary: {
+        Row: {
+          avg_prior_ttm_adr: number | null
+          avg_prior_ttm_occupancy: number | null
+          avg_prior_ttm_revenue: number | null
+          avg_prior_ttm_revpar: number | null
+          avg_ttm_adr: number | null
+          avg_ttm_occupancy: number | null
+          avg_ttm_revenue: number | null
+          avg_ttm_revpar: number | null
+          calculated_at: string | null
+          created_at: string | null
+          id: string
+          listing_id: string
+          selected_comparables_count: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          avg_prior_ttm_adr?: number | null
+          avg_prior_ttm_occupancy?: number | null
+          avg_prior_ttm_revenue?: number | null
+          avg_prior_ttm_revpar?: number | null
+          avg_ttm_adr?: number | null
+          avg_ttm_occupancy?: number | null
+          avg_ttm_revenue?: number | null
+          avg_ttm_revpar?: number | null
+          calculated_at?: string | null
+          created_at?: string | null
+          id?: string
+          listing_id: string
+          selected_comparables_count?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          avg_prior_ttm_adr?: number | null
+          avg_prior_ttm_occupancy?: number | null
+          avg_prior_ttm_revenue?: number | null
+          avg_prior_ttm_revpar?: number | null
+          avg_ttm_adr?: number | null
+          avg_ttm_occupancy?: number | null
+          avg_ttm_revenue?: number | null
+          avg_ttm_revpar?: number | null
+          calculated_at?: string | null
+          created_at?: string | null
+          id?: string
+          listing_id?: string
+          selected_comparables_count?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_compset_summary_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: true
             referencedRelation: "listings"
             referencedColumns: ["id"]
           },

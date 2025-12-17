@@ -8,6 +8,165 @@ const corsHeaders = {
 
 const AIRROI_API_URL = 'https://api.airroi.com/listings/metrics/all';
 
+interface HistoricalMetric {
+  date: string;
+  occupancy?: number;
+  average_daily_rate?: number;
+  rev_par?: number;
+  revenue?: number;
+}
+
+interface TtmMetrics {
+  revenue: number | null;
+  adr: number | null;
+  occupancy: number | null;
+  revpar: number | null;
+}
+
+interface ComparableWithTtm {
+  ttm_revenue: number | null;
+  ttm_adr: number | null;
+  ttm_occupancy: number | null;
+  ttm_revpar: number | null;
+  prior_ttm_revenue: number | null;
+  prior_ttm_adr: number | null;
+  prior_ttm_occupancy: number | null;
+  prior_ttm_revpar: number | null;
+}
+
+function calculateTtmRollups(results: HistoricalMetric[]): { ttmMetrics: TtmMetrics; priorTtmMetrics: TtmMetrics } {
+  if (!results || results.length === 0) {
+    return {
+      ttmMetrics: { revenue: null, adr: null, occupancy: null, revpar: null },
+      priorTtmMetrics: { revenue: null, adr: null, occupancy: null, revpar: null },
+    };
+  }
+
+  // Get current date and determine the last complete month
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-indexed
+
+  // Last complete month is one month before current
+  // TTM: Last 12 complete months
+  // Prior TTM: 12 months before that (months 13-24)
+  
+  const ttmData: HistoricalMetric[] = [];
+  const priorTtmData: HistoricalMetric[] = [];
+
+  for (const record of results) {
+    const recordDate = new Date(record.date);
+    const recordYear = recordDate.getFullYear();
+    const recordMonth = recordDate.getMonth();
+
+    // Calculate months ago from current month (excluding current incomplete month)
+    const monthsAgo = (currentYear - recordYear) * 12 + (currentMonth - recordMonth);
+
+    // TTM: 1-12 months ago (excludes current month which is incomplete)
+    if (monthsAgo >= 1 && monthsAgo <= 12) {
+      ttmData.push(record);
+    }
+    // Prior TTM: 13-24 months ago
+    else if (monthsAgo >= 13 && monthsAgo <= 24) {
+      priorTtmData.push(record);
+    }
+  }
+
+  console.log(`TTM data points: ${ttmData.length}, Prior TTM data points: ${priorTtmData.length}`);
+
+  const calculateMetrics = (data: HistoricalMetric[]): TtmMetrics => {
+    if (data.length === 0) {
+      return { revenue: null, adr: null, occupancy: null, revpar: null };
+    }
+
+    // Revenue is SUM
+    const revenueValues = data.filter(d => d.revenue != null).map(d => d.revenue!);
+    const revenue = revenueValues.length > 0 ? revenueValues.reduce((a, b) => a + b, 0) : null;
+
+    // ADR, Occupancy, RevPAR are simple averages
+    const adrValues = data.filter(d => d.average_daily_rate != null).map(d => d.average_daily_rate!);
+    const adr = adrValues.length > 0 ? adrValues.reduce((a, b) => a + b, 0) / adrValues.length : null;
+
+    const occValues = data.filter(d => d.occupancy != null).map(d => d.occupancy!);
+    const occupancy = occValues.length > 0 ? occValues.reduce((a, b) => a + b, 0) / occValues.length : null;
+
+    const revparValues = data.filter(d => d.rev_par != null).map(d => d.rev_par!);
+    const revpar = revparValues.length > 0 ? revparValues.reduce((a, b) => a + b, 0) / revparValues.length : null;
+
+    return { revenue, adr, occupancy, revpar };
+  };
+
+  return {
+    ttmMetrics: calculateMetrics(ttmData),
+    priorTtmMetrics: calculateMetrics(priorTtmData),
+  };
+}
+
+async function updateCompsetSummary(
+  supabase: any,
+  listingId: string
+): Promise<void> {
+  console.log(`Updating compset summary for listing ${listingId}`);
+
+  // Get all selected comparables with TTM data
+  const { data: selectedComps, error: selectError } = await supabase
+    .from('property_comparables')
+    .select('ttm_revenue, ttm_adr, ttm_occupancy, ttm_revpar, prior_ttm_revenue, prior_ttm_adr, prior_ttm_occupancy, prior_ttm_revpar')
+    .eq('listing_id', listingId)
+    .eq('is_selected', true)
+    .not('ttm_revenue', 'is', null);
+
+  if (selectError) {
+    console.error(`Failed to fetch selected comparables for compset summary: ${selectError.message}`);
+    return;
+  }
+
+  // Cast to proper type since new columns may not be in generated types yet
+  const comps = (selectedComps || []) as unknown as ComparableWithTtm[];
+
+  if (comps.length === 0) {
+    console.log(`No selected comparables with TTM data for listing ${listingId}`);
+    // Delete any existing summary
+    await supabase
+      .from('property_compset_summary')
+      .delete()
+      .eq('listing_id', listingId);
+    return;
+  }
+
+  // Calculate simple averages
+  const avg = (arr: (number | null)[]): number | null => {
+    const valid = arr.filter((v): v is number => v != null);
+    return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+  };
+
+  const summary = {
+    listing_id: listingId,
+    avg_ttm_revenue: avg(comps.map(c => c.ttm_revenue)),
+    avg_ttm_adr: avg(comps.map(c => c.ttm_adr)),
+    avg_ttm_occupancy: avg(comps.map(c => c.ttm_occupancy)),
+    avg_ttm_revpar: avg(comps.map(c => c.ttm_revpar)),
+    avg_prior_ttm_revenue: avg(comps.map(c => c.prior_ttm_revenue)),
+    avg_prior_ttm_adr: avg(comps.map(c => c.prior_ttm_adr)),
+    avg_prior_ttm_occupancy: avg(comps.map(c => c.prior_ttm_occupancy)),
+    avg_prior_ttm_revpar: avg(comps.map(c => c.prior_ttm_revpar)),
+    selected_comparables_count: comps.length,
+    calculated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  // Use upsert with any type to avoid type issues with new table
+  const { error: upsertError } = await (supabase as any)
+    .from('property_compset_summary')
+    .upsert(summary, { onConflict: 'listing_id' });
+
+  if (upsertError) {
+    console.error(`Failed to upsert compset summary: ${upsertError.message}`);
+  } else {
+    console.log(`Updated compset summary for listing ${listingId} with ${comps.length} comparables`);
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -33,10 +192,10 @@ serve(async (req) => {
 
     console.log(`Fetching historical metrics for ${comparable_ids.length} comparables`);
 
-    // Fetch the comparables to get their airroi_listing_ids (column is now text type)
+    // Fetch the comparables to get their airroi_listing_ids and listing_id
     const { data: comparables, error: fetchError } = await supabase
       .from('property_comparables')
-      .select('id, airroi_listing_id')
+      .select('id, airroi_listing_id, listing_id')
       .in('id', comparable_ids);
 
     if (fetchError) {
@@ -52,6 +211,7 @@ serve(async (req) => {
     let successCount = 0;
     let failedCount = 0;
     const errors: string[] = [];
+    const affectedListingIds = new Set<string>();
 
     // Fetch metrics for each comparable
     for (const comparable of comparables) {
@@ -79,14 +239,27 @@ serve(async (req) => {
         const metricsData = await response.json();
         console.log(`Received metrics data for ${comparable.airroi_listing_id}: ${JSON.stringify(metricsData).slice(0, 200)}...`);
 
-        // Update the comparable with the historical metrics
+        // Calculate TTM rollups
+        const { ttmMetrics, priorTtmMetrics } = calculateTtmRollups(metricsData.results || []);
+        console.log(`Calculated TTM metrics for ${comparable.airroi_listing_id}:`, ttmMetrics);
+
+        // Update the comparable with the historical metrics and rollups
         const { error: updateError } = await supabase
           .from('property_comparables')
           .update({
             historical_metrics: metricsData,
+            ttm_revenue: ttmMetrics.revenue,
+            ttm_adr: ttmMetrics.adr,
+            ttm_occupancy: ttmMetrics.occupancy,
+            ttm_revpar: ttmMetrics.revpar,
+            prior_ttm_revenue: priorTtmMetrics.revenue,
+            prior_ttm_adr: priorTtmMetrics.adr,
+            prior_ttm_occupancy: priorTtmMetrics.occupancy,
+            prior_ttm_revpar: priorTtmMetrics.revpar,
+            rollups_calculated_at: new Date().toISOString(),
             metrics_fetched_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-          })
+          } as any)
           .eq('id', comparable.id);
 
         if (updateError) {
@@ -96,6 +269,7 @@ serve(async (req) => {
         } else {
           console.log(`Successfully updated metrics for comparable ${comparable.id}`);
           successCount++;
+          affectedListingIds.add(comparable.listing_id);
         }
 
         // Small delay to avoid rate limiting
@@ -107,6 +281,11 @@ serve(async (req) => {
         errors.push(`Process ${comparable.airroi_listing_id}: ${errorMessage}`);
         failedCount++;
       }
+    }
+
+    // Update compset summaries for all affected listings
+    for (const listingId of affectedListingIds) {
+      await updateCompsetSummary(supabase, listingId);
     }
 
     console.log(`Completed: ${successCount} success, ${failedCount} failed`);

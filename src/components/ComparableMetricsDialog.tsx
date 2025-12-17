@@ -8,7 +8,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Star, Building } from "lucide-react";
+import { Star, Building, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -46,6 +46,16 @@ interface Comparable {
   } | null;
   historical_metrics: HistoricalMetricsData | null;
   metrics_fetched_at: string | null;
+  // TTM rollups
+  ttm_revenue?: number | null;
+  ttm_adr?: number | null;
+  ttm_occupancy?: number | null;
+  ttm_revpar?: number | null;
+  prior_ttm_revenue?: number | null;
+  prior_ttm_adr?: number | null;
+  prior_ttm_occupancy?: number | null;
+  prior_ttm_revpar?: number | null;
+  rollups_calculated_at?: string | null;
 }
 
 interface ComparableMetricsDialogProps {
@@ -114,7 +124,7 @@ export function ComparableMetricsDialog({
     }).format(value);
   };
 
-  const formatPercent = (value: number) => `${value.toFixed(0)}%`;
+  const formatPercent = (value: number) => `${value.toFixed(1)}%`;
 
   const formatTooltipValue = (value: number, name: string) => {
     if (name === 'Occupancy') {
@@ -126,6 +136,86 @@ export function ComparableMetricsDialog({
   const hasRevenueAxis = selectedMetrics.has('revenue');
   const hasAdrAxis = selectedMetrics.has('average_daily_rate') || selectedMetrics.has('rev_par');
   const hasOccupancyAxis = selectedMetrics.has('occupancy');
+
+  // Calculate YoY change percentage
+  const calculateYoY = (current: number | null | undefined, prior: number | null | undefined): number | null => {
+    if (current == null || prior == null || prior === 0) return null;
+    return ((current - prior) / prior) * 100;
+  };
+
+  // TTM metrics summary data
+  const ttmSummary = useMemo(() => {
+    if (!comparable) return null;
+    
+    const hasTtmData = comparable.ttm_revenue != null || comparable.ttm_adr != null || 
+                       comparable.ttm_occupancy != null || comparable.ttm_revpar != null;
+    
+    if (!hasTtmData) return null;
+
+    return {
+      revenue: {
+        ttm: comparable.ttm_revenue,
+        prior: comparable.prior_ttm_revenue,
+        yoy: calculateYoY(comparable.ttm_revenue, comparable.prior_ttm_revenue),
+      },
+      adr: {
+        ttm: comparable.ttm_adr,
+        prior: comparable.prior_ttm_adr,
+        yoy: calculateYoY(comparable.ttm_adr, comparable.prior_ttm_adr),
+      },
+      occupancy: {
+        ttm: comparable.ttm_occupancy != null ? comparable.ttm_occupancy * 100 : null, // Convert to percentage
+        prior: comparable.prior_ttm_occupancy != null ? comparable.prior_ttm_occupancy * 100 : null,
+        yoy: calculateYoY(comparable.ttm_occupancy, comparable.prior_ttm_occupancy),
+      },
+      revpar: {
+        ttm: comparable.ttm_revpar,
+        prior: comparable.prior_ttm_revpar,
+        yoy: calculateYoY(comparable.ttm_revpar, comparable.prior_ttm_revpar),
+      },
+    };
+  }, [comparable]);
+
+  // Get TTM window description
+  const getTtmWindowLabel = () => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
+    // TTM ends at last complete month
+    const endMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const endYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+    
+    // TTM starts 12 months before end
+    const startMonth = endMonth;
+    const startYear = endYear - 1;
+    
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${monthNames[startMonth]} ${startYear} - ${monthNames[endMonth]} ${endYear}`;
+  };
+
+  const YoYIndicator = ({ value }: { value: number | null }) => {
+    if (value == null) return <span className="text-muted-foreground">—</span>;
+    
+    const isPositive = value > 0;
+    const isNeutral = Math.abs(value) < 0.5;
+    
+    if (isNeutral) {
+      return (
+        <span className="flex items-center gap-1 text-muted-foreground">
+          <Minus className="h-3 w-3" />
+          {formatPercent(Math.abs(value))}
+        </span>
+      );
+    }
+    
+    return (
+      <span className={`flex items-center gap-1 ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+        {isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+        {isPositive ? '+' : ''}{formatPercent(value)}
+      </span>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -167,6 +257,54 @@ export function ComparableMetricsDialog({
             </div>
           </div>
         </DialogHeader>
+
+        {/* TTM Summary Section */}
+        {ttmSummary && (
+          <div className="bg-muted/50 rounded-lg p-4 my-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-medium">TTM Performance ({getTtmWindowLabel()})</h4>
+              <span className="text-xs text-muted-foreground">vs. Prior 12 Months</span>
+            </div>
+            <div className="grid grid-cols-4 gap-4">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Revenue</div>
+                <div className="text-lg font-semibold">
+                  {ttmSummary.revenue.ttm != null ? formatCurrency(ttmSummary.revenue.ttm) : '—'}
+                </div>
+                <div className="text-xs">
+                  <YoYIndicator value={ttmSummary.revenue.yoy} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">ADR</div>
+                <div className="text-lg font-semibold">
+                  {ttmSummary.adr.ttm != null ? formatCurrency(ttmSummary.adr.ttm) : '—'}
+                </div>
+                <div className="text-xs">
+                  <YoYIndicator value={ttmSummary.adr.yoy} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Occupancy</div>
+                <div className="text-lg font-semibold">
+                  {ttmSummary.occupancy.ttm != null ? formatPercent(ttmSummary.occupancy.ttm) : '—'}
+                </div>
+                <div className="text-xs">
+                  <YoYIndicator value={ttmSummary.occupancy.yoy} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">RevPAR</div>
+                <div className="text-lg font-semibold">
+                  {ttmSummary.revpar.ttm != null ? formatCurrency(ttmSummary.revpar.ttm) : '—'}
+                </div>
+                <div className="text-xs">
+                  <YoYIndicator value={ttmSummary.revpar.yoy} />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Metric Toggles */}
         <div className="border-y py-3 my-4">
