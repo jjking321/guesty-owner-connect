@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map } from "lucide-react";
@@ -104,6 +105,7 @@ export function ComparablesModule({
   const [maxRevenue, setMaxRevenue] = useState<string>('');
   const [showMap, setShowMap] = useState(false);
   const [mapboxToken, setMapboxToken] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("search");
   
   // Pagination state
   const PAGE_SIZE = 10;
@@ -479,100 +481,107 @@ export function ComparablesModule({
         )}
       </CardHeader>
       <CardContent>
-        {/* Map Display */}
-        {showMap && comparables.length > 0 && latitude && longitude && mapboxToken && (
-          <div className="mb-6">
-            <ComparablesMap
-              subjectLatitude={latitude}
-              subjectLongitude={longitude}
-              comparables={comparables}
-              selectedIds={pendingSelections}
-              radiusMiles={radiusMiles}
-              mapboxToken={mapboxToken}
-              onToggleSelection={toggleSelection}
-            />
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-4">
+            <TabsTrigger value="search">Search</TabsTrigger>
+            <TabsTrigger value="selected">
+              Selected ({pendingSelections.size})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Search Tab */}
+          <TabsContent value="search">
+            {/* Map Display */}
+            {showMap && comparables.length > 0 && latitude && longitude && mapboxToken && (
+              <div className="mb-6">
+                <ComparablesMap
+                  subjectLatitude={latitude}
+                  subjectLongitude={longitude}
+                  comparables={comparables}
+                  selectedIds={pendingSelections}
+                  radiusMiles={radiusMiles}
+                  mapboxToken={mapboxToken}
+                  onToggleSelection={toggleSelection}
+                />
+              </div>
+            )}
+
+            {comparables.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Building className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No comparables found. Click "Fetch Comparables" to search for similar properties.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {comparables.map((comp) => (
+                  <ComparableCard
+                    key={comp.id}
+                    comparable={comp}
+                    isSelected={pendingSelections.has(comp.id)}
+                    onToggle={() => toggleSelection(comp.id)}
+                    formatCurrency={formatCurrency}
+                    formatPercent={formatPercent}
+                  />
+                ))}
+
+                {/* Load More Button */}
+                {hasMoreResults && (
+                  <div className="flex justify-center pt-4">
+                    <Button 
+                      variant="outline" 
+                      onClick={loadMoreComparables}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Loading...
+                        </>
+                      ) : (
+                        'Load More Comparables'
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Selected Tab */}
+          <TabsContent value="selected">
+            {selectedComparables.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Building className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No comparables selected yet.</p>
+                <p className="text-sm mt-2">
+                  Go to the Search tab to find and select comparable properties.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {selectedComparables.map((comp) => (
+                  <ComparableCard
+                    key={comp.id}
+                    comparable={comp}
+                    isSelected={true}
+                    onToggle={() => toggleSelection(comp.id)}
+                    formatCurrency={formatCurrency}
+                    formatPercent={formatPercent}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {/* Save Button - Always visible when there are changes */}
+        {hasChanges && (
+          <div className="flex justify-end pt-4 border-t mt-4">
+            <Button onClick={saveSelections} disabled={saving}>
+              {saving ? 'Saving...' : `Save Selections (${pendingSelections.size})`}
+            </Button>
           </div>
         )}
-
-        {comparables.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <Building className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No comparables found. Click "Fetch Comparables" to search for similar properties.</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {/* Selected Comparables Section */}
-            {selectedComparables.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground mb-3">
-                  Selected Comparables ({selectedComparables.length})
-                </h4>
-                <div className="space-y-3">
-                  {selectedComparables.map((comp) => (
-                    <ComparableCard
-                      key={comp.id}
-                      comparable={comp}
-                      isSelected={pendingSelections.has(comp.id)}
-                      onToggle={() => toggleSelection(comp.id)}
-                      formatCurrency={formatCurrency}
-                      formatPercent={formatPercent}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Available Comparables Section */}
-            {unselectedComparables.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-muted-foreground mb-3">
-                  Available Comparables ({unselectedComparables.length})
-                </h4>
-                <div className="space-y-3">
-                  {unselectedComparables.map((comp) => (
-                    <ComparableCard
-                      key={comp.id}
-                      comparable={comp}
-                      isSelected={pendingSelections.has(comp.id)}
-                      onToggle={() => toggleSelection(comp.id)}
-                      formatCurrency={formatCurrency}
-                      formatPercent={formatPercent}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Save Button */}
-            {hasChanges && (
-              <div className="flex justify-end pt-4 border-t">
-                <Button onClick={saveSelections} disabled={saving}>
-                  {saving ? 'Saving...' : `Save Selections (${pendingSelections.size})`}
-                </Button>
-              </div>
-            )}
-              </div>
-            )}
-
-            {/* Load More Button */}
-            {hasMoreResults && (
-              <div className="flex justify-center pt-4">
-                <Button 
-                  variant="outline" 
-                  onClick={loadMoreComparables}
-                  disabled={loadingMore}
-                >
-                  {loadingMore ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Loading...
-                    </>
-                  ) : (
-                    'Load More Comparables'
-                  )}
-                </Button>
-              </div>
-            )}
       </CardContent>
     </Card>
   );
