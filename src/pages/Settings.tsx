@@ -269,7 +269,7 @@ export default function Settings() {
   const handleSyncCalendar = async (accountId: string) => {
     setSyncingCalendar(accountId);
     try {
-      const incompleteKey = `${accountId}-calendar`;
+      const incompleteKey = `${accountId}-capacity_calendar`;
       const incompleteJob = incompleteSyncJobs[incompleteKey];
       
       const { data, error } = await supabase.functions.invoke("sync-bulk-calendar", {
@@ -558,7 +558,7 @@ export default function Settings() {
                                 Syncing...
                               </>
                             ) : (() => {
-                              const incompleteKey = `${account.id}-calendar`;
+                              const incompleteKey = `${account.id}-capacity_calendar`;
                               const incompleteJob = incompleteSyncJobs[incompleteKey];
                               return incompleteJob ? (
                                 <>
@@ -581,7 +581,7 @@ export default function Settings() {
                     <SyncProgressCard accountId={account.id} syncType="listings" />
                     <SyncProgressCard accountId={account.id} syncType="reservations" />
                     <SyncProgressCard accountId={account.id} syncType="reviews" />
-                    <SyncProgressCard accountId={account.id} syncType="calendar" />
+                    <SyncProgressCard accountId={account.id} syncType="capacity_calendar" />
                   </div>
                 ))}
               </div>

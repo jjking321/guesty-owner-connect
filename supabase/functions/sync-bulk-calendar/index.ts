@@ -373,7 +373,7 @@ Deno.serve(async (req) => {
       .from('sync_jobs')
       .select('*')
       .eq('guesty_account_id', guestyAccountId)
-      .eq('sync_type', 'calendar')
+      .eq('sync_type', 'capacity_calendar')
       .eq('status', 'running')
       .order('started_at', { ascending: false })
       .limit(1)
@@ -395,7 +395,7 @@ Deno.serve(async (req) => {
         .from('sync_jobs')
         .insert({
           guesty_account_id: guestyAccountId,
-          sync_type: 'calendar',
+          sync_type: 'capacity_calendar',
           status: 'running',
           started_at: new Date().toISOString(),
           items_synced: 0,
