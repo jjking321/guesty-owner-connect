@@ -608,23 +608,22 @@ function FutureRatesCalendar({ futureRates, futureRatesFetchedAt, formatCurrency
                   }}
                   contentStyle={{ fontSize: 12 }}
                 />
-                <Legend 
-                  wrapperStyle={{ fontSize: 11 }}
-                  formatter={(value) => value === 'avgRate' ? 'Avg Rate' : 'Occupancy'}
-                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Line 
                   yAxisId="rate"
                   type="monotone" 
-                  dataKey="avgRate" 
-                  stroke="hsl(var(--primary))" 
+                  dataKey="avgRate"
+                  name="Avg Rate"
+                  stroke="#3b82f6"
                   strokeWidth={2}
                   dot={{ r: 3 }}
                 />
                 <Line 
                   yAxisId="occupancy"
                   type="monotone" 
-                  dataKey="occupancy" 
-                  stroke="hsl(var(--chart-2))" 
+                  dataKey="occupancy"
+                  name="Occupancy"
+                  stroke="#10b981"
                   strokeWidth={2}
                   dot={{ r: 3 }}
                 />
