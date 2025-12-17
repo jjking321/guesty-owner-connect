@@ -8,7 +8,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Star, Building, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Star, Building, TrendingUp, TrendingDown, Minus, CalendarDays } from "lucide-react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -19,7 +20,7 @@ import {
   Tooltip,
   Legend,
 } from "recharts";
-import { format, parse } from "date-fns";
+import { format, parse, parseISO, isSameDay, startOfMonth, addMonths } from "date-fns";
 
 interface HistoricalMetricsData {
   results?: Array<{
@@ -29,6 +30,16 @@ interface HistoricalMetricsData {
     rev_par: number;
     revenue: number;
   }>;
+}
+
+interface FutureRateData {
+  date: string;
+  available: boolean;
+  rate: number;
+}
+
+interface FutureRatesData {
+  rates?: FutureRateData[];
 }
 
 interface Comparable {
@@ -56,6 +67,9 @@ interface Comparable {
   prior_ttm_occupancy?: number | null;
   prior_ttm_revpar?: number | null;
   rollups_calculated_at?: string | null;
+  // Future rates
+  future_rates?: FutureRatesData | null;
+  future_rates_fetched_at?: string | null;
 }
 
 interface ComparableMetricsDialogProps {
@@ -414,6 +428,13 @@ export function ComparableMetricsDialog({
           </div>
         )}
 
+        {/* Future Rates Calendar Section */}
+        <FutureRatesCalendar 
+          futureRates={comparable?.future_rates}
+          futureRatesFetchedAt={comparable?.future_rates_fetched_at}
+          formatCurrency={formatCurrency}
+        />
+
         {/* Footer with fetch timestamp */}
         {comparable?.metrics_fetched_at && (
           <div className="text-xs text-muted-foreground pt-2 border-t mt-4">
@@ -422,5 +443,172 @@ export function ComparableMetricsDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface FutureRatesCalendarProps {
+  futureRates?: FutureRatesData | null;
+  futureRatesFetchedAt?: string | null;
+  formatCurrency: (value: number) => string;
+}
+
+function FutureRatesCalendar({ futureRates, futureRatesFetchedAt, formatCurrency }: FutureRatesCalendarProps) {
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+  
+  // Build a map of date -> rate data for quick lookup
+  const ratesMap = useMemo(() => {
+    const map = new Map<string, FutureRateData>();
+    if (futureRates?.rates) {
+      for (const rate of futureRates.rates) {
+        map.set(rate.date, rate);
+      }
+    }
+    return map;
+  }, [futureRates]);
+
+  // Get rate statistics for legend
+  const rateStats = useMemo(() => {
+    if (!futureRates?.rates || futureRates.rates.length === 0) return null;
+    
+    const rates = futureRates.rates.filter(r => r.rate > 0).map(r => r.rate);
+    if (rates.length === 0) return null;
+    
+    const minRate = Math.min(...rates);
+    const maxRate = Math.max(...rates);
+    const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+    const availableDays = futureRates.rates.filter(r => r.available).length;
+    const totalDays = futureRates.rates.length;
+    
+    return { minRate, maxRate, avgRate, availableDays, totalDays };
+  }, [futureRates]);
+
+  // Get color based on rate relative to min/max
+  const getRateColor = (rate: number, available: boolean) => {
+    if (!available) return 'bg-muted text-muted-foreground line-through';
+    if (!rateStats) return 'bg-primary/10';
+    
+    const { minRate, maxRate } = rateStats;
+    const range = maxRate - minRate;
+    if (range === 0) return 'bg-blue-100 dark:bg-blue-900/30';
+    
+    const normalized = (rate - minRate) / range;
+    
+    if (normalized < 0.33) return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
+    if (normalized < 0.66) return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
+    return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
+  };
+
+  if (!futureRates?.rates || futureRates.rates.length === 0) {
+    return (
+      <div className="border-t pt-4 mt-4">
+        <h4 className="text-sm font-medium flex items-center gap-2 mb-4">
+          <CalendarDays className="h-4 w-4" />
+          Future Rates Calendar
+        </h4>
+        <div className="text-center py-8 text-muted-foreground bg-muted/30 rounded-lg">
+          <CalendarDays className="h-10 w-10 mx-auto mb-3 opacity-50" />
+          <p>No future rates data available.</p>
+          <p className="text-sm mt-2">
+            Click "Fetch Future Rates" to retrieve upcoming pricing.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t pt-4 mt-4">
+      <h4 className="text-sm font-medium flex items-center gap-2 mb-4">
+        <CalendarDays className="h-4 w-4" />
+        Future Rates Calendar
+      </h4>
+      
+      {/* Rate Statistics Summary */}
+      {rateStats && (
+        <div className="grid grid-cols-4 gap-3 mb-4 text-sm">
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">Min Rate</div>
+            <div className="font-semibold text-green-600">{formatCurrency(rateStats.minRate)}</div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">Avg Rate</div>
+            <div className="font-semibold">{formatCurrency(rateStats.avgRate)}</div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">Max Rate</div>
+            <div className="font-semibold text-red-600">{formatCurrency(rateStats.maxRate)}</div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">Availability</div>
+            <div className="font-semibold">{rateStats.availableDays}/{rateStats.totalDays} days</div>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar with rates */}
+      <div className="flex justify-center">
+        <Calendar
+          mode="single"
+          month={calendarMonth}
+          onMonthChange={setCalendarMonth}
+          className="rounded-md border pointer-events-auto"
+          components={{
+            Day: ({ date, ...props }) => {
+              const dateStr = format(date, 'yyyy-MM-dd');
+              const rateData = ratesMap.get(dateStr);
+              
+              if (!rateData) {
+                return (
+                  <div className="h-12 w-12 p-1 text-center text-muted-foreground/50">
+                    <div className="text-xs">{format(date, 'd')}</div>
+                  </div>
+                );
+              }
+              
+              const colorClass = getRateColor(rateData.rate, rateData.available);
+              
+              return (
+                <div 
+                  className={`h-12 w-12 p-1 text-center rounded-md ${colorClass} cursor-default`}
+                  title={`${format(date, 'MMM d')}: ${formatCurrency(rateData.rate)} ${rateData.available ? '(available)' : '(blocked)'}`}
+                >
+                  <div className="text-xs font-medium">{format(date, 'd')}</div>
+                  <div className="text-[10px] truncate">
+                    {rateData.rate > 0 ? `$${Math.round(rateData.rate)}` : '—'}
+                  </div>
+                </div>
+              );
+            },
+          }}
+        />
+      </div>
+
+      {/* Legend */}
+      <div className="flex justify-center gap-4 mt-3 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded bg-green-100 dark:bg-green-900/30" />
+          <span>Low rate</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded bg-yellow-100 dark:bg-yellow-900/30" />
+          <span>Mid rate</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded bg-red-100 dark:bg-red-900/30" />
+          <span>High rate</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded bg-muted" />
+          <span>Blocked</span>
+        </div>
+      </div>
+
+      {/* Fetch timestamp */}
+      {futureRatesFetchedAt && (
+        <div className="text-xs text-muted-foreground text-center mt-3">
+          Rates fetched: {format(new Date(futureRatesFetchedAt), 'MMM d, yyyy \'at\' h:mm a')}
+        </div>
+      )}
+    </div>
   );
 }
