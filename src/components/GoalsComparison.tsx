@@ -26,6 +26,7 @@ interface GoalData {
   forecastP50?: number;
   forecastP75?: number;
   compsetAverage?: number;
+  lastYearActual?: number;
 }
 
 interface TrendDataPoint {
@@ -301,8 +302,10 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       let cumulativeForecastP50 = 0;
       let cumulativeForecastP75 = 0;
       let cumulativeCompset = 0;
+      let cumulativeLastYearActual = 0;
       const currentMonth = new Date().getMonth();
       const currentYearActual = new Date().getFullYear();
+      const lastYear = year - 1;
 
       for (let month = 0; month < 12; month++) {
         // For group-level, aggregate goals for this month
@@ -330,6 +333,35 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
             
             while (currentDate < checkOut) {
               if (currentDate.getFullYear() === year && currentDate.getMonth() === month) {
+                nightsInMonth++;
+              }
+              currentDate = new Date(currentDate);
+              currentDate.setDate(currentDate.getDate() + 1);
+            }
+            
+            return sum + (revenuePerNight * nightsInMonth);
+          }, 0);
+
+        // Calculate last year's actual revenue for this month
+        const lastYearActualRevenue = reservations
+          .filter(r => {
+            if (!r.check_in) return false;
+            if (r.source === 'owner') return false;
+            return ["confirmed", "checked_in", "checked_out"].includes(r.status);
+          })
+          .reduce((sum, r) => {
+            const revenue = Number(r.fare_accommodation_adjusted) || 0;
+            const nightsCount = r.nights_count || 0;
+            const revenuePerNight = nightsCount > 0 ? revenue / nightsCount : 0;
+            
+            // Calculate how many nights fall in this month of last year
+            const checkIn = new Date(r.check_in);
+            const checkOut = new Date(r.check_out);
+            let nightsInMonth = 0;
+            let currentDate = new Date(checkIn);
+            
+            while (currentDate < checkOut) {
+              if (currentDate.getFullYear() === lastYear && currentDate.getMonth() === month) {
                 nightsInMonth++;
               }
               currentDate = new Date(currentDate);
@@ -381,6 +413,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           forecastP50: isFutureMonth ? Math.round(forecastP50) : undefined,
           forecastP75: isFutureMonth ? Math.round(forecastP75) : undefined,
           compsetAverage: compsetAvg !== undefined ? Math.round(compsetAvg) : undefined,
+          lastYearActual: Math.round(lastYearActualRevenue),
         });
 
         // Cumulative data
@@ -392,6 +425,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         cumulativeForecastP50 += forecastP50;
         cumulativeForecastP75 += forecastP75;
         if (compsetAvg !== undefined) cumulativeCompset += compsetAvg;
+        cumulativeLastYearActual += lastYearActualRevenue;
 
         cumulative.push({
           month: monthNames[month],
@@ -403,6 +437,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           forecastP50: isFutureMonth ? Math.round(cumulativeForecastP50) : undefined,
           forecastP75: isFutureMonth ? Math.round(cumulativeForecastP75) : undefined,
           compsetAverage: compsetAvg !== undefined ? Math.round(cumulativeCompset) : undefined,
+          lastYearActual: Math.round(cumulativeLastYearActual),
         });
       }
 
@@ -452,6 +487,15 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />
                 <span className="text-muted-foreground">Compset Avg:</span>
                 <span className="font-medium">${data.compsetAverage.toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+          {showComparison && data.lastYearActual !== undefined && (
+            <div className="mt-2 pt-2 border-t border-border">
+              <div className="flex items-center gap-2 text-sm">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(var(--muted-foreground))' }} />
+                <span className="text-muted-foreground">Last Year:</span>
+                <span className="font-medium">${data.lastYearActual.toLocaleString()}</span>
               </div>
             </div>
           )}
@@ -677,6 +721,16 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                       </Label>
                     </div>
                   )}
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="show-comparison-revenue"
+                      checked={showComparison}
+                      onCheckedChange={(checked) => setShowComparison(checked as boolean)}
+                    />
+                    <Label htmlFor="show-comparison-revenue" className="text-sm cursor-pointer">
+                      Compare with Last Year
+                    </Label>
+                  </div>
                 </div>
               </div>
 
@@ -744,6 +798,15 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                         strokeDasharray="3 3"
                         name="Compset Avg"
                         connectNulls={false}
+                      />
+                    )}
+                    {showComparison && (
+                      <Line 
+                        type="monotone" 
+                        dataKey="lastYearActual" 
+                        stroke="hsl(var(--muted-foreground))" 
+                        strokeWidth={2.5} 
+                        name="Last Year"
                       />
                     )}
                   </LineChart>
@@ -814,6 +877,15 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                         strokeDasharray="3 3"
                         name="Compset Avg"
                         connectNulls={false}
+                      />
+                    )}
+                    {showComparison && (
+                      <Line 
+                        type="monotone" 
+                        dataKey="lastYearActual" 
+                        stroke="hsl(var(--muted-foreground))" 
+                        strokeWidth={2.5} 
+                        name="Last Year"
                       />
                     )}
                   </LineChart>
