@@ -1,0 +1,2 @@
+ALTER TABLE guesty_accounts 
+ADD COLUMN IF NOT EXISTS last_calendar_sync TIMESTAMP WITH TIME ZONE;
