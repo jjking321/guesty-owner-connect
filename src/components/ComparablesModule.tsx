@@ -88,6 +88,9 @@ interface Comparable {
   prior_ttm_occupancy?: number | null;
   prior_ttm_revpar?: number | null;
   rollups_calculated_at?: string | null;
+  // Future rates data
+  future_rates?: { rates: { date: string; available: boolean; rate: number }[] } | null;
+  future_rates_fetched_at?: string | null;
 }
 
 const AMENITY_OPTIONS = [
@@ -127,6 +130,7 @@ export function ComparablesModule({
   const [hasMoreResults, setHasMoreResults] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [fetchingMetrics, setFetchingMetrics] = useState(false);
+  const [fetchingFutureRates, setFetchingFutureRates] = useState(false);
   const [metricsSelection, setMetricsSelection] = useState<Set<string>>(new Set());
   const [metricsDialogOpen, setMetricsDialogOpen] = useState(false);
   const [selectedComparableForMetrics, setSelectedComparableForMetrics] = useState<Comparable | null>(null);
@@ -420,6 +424,50 @@ export function ComparablesModule({
 
   const deselectAllForMetrics = () => {
     setMetricsSelection(new Set());
+  };
+
+  const fetchFutureRates = async () => {
+    if (metricsSelection.size === 0) {
+      toast({
+        title: "No comparables selected",
+        description: "Please check the comparables you want to fetch future rates for.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setFetchingFutureRates(true);
+    try {
+      const selectedIds = Array.from(metricsSelection);
+      
+      const { data, error } = await supabase.functions.invoke('fetch-comparable-future-rates', {
+        body: { comparable_ids: selectedIds }
+      });
+      
+      if (error) throw error;
+      
+      if (data.success) {
+        toast({
+          title: "Future rates fetched",
+          description: `Successfully fetched rates for ${data.fetched} of ${data.total} comparables.`,
+        });
+        // Reload to show updated data
+        await loadExistingComparables();
+        // Clear metrics selection after successful fetch
+        setMetricsSelection(new Set());
+      } else {
+        throw new Error(data.error || 'Unknown error');
+      }
+    } catch (error: any) {
+      console.error('Error fetching future rates:', error);
+      toast({
+        title: "Error fetching future rates",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setFetchingFutureRates(false);
+    }
   };
 
   const removeFromSelected = (id: string) => {
@@ -729,15 +777,26 @@ export function ComparablesModule({
                       Deselect all
                     </button>
                   </div>
-                  <Button 
-                    onClick={fetchHistoricalMetrics}
-                    disabled={fetchingMetrics || metricsSelection.size === 0}
-                    variant="outline"
-                    size="sm"
-                  >
-                    <BarChart3 className="h-4 w-4 mr-2" />
-                    {fetchingMetrics ? 'Fetching...' : `Fetch Metrics (${metricsSelection.size})`}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      onClick={fetchHistoricalMetrics}
+                      disabled={fetchingMetrics || metricsSelection.size === 0}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <BarChart3 className="h-4 w-4 mr-2" />
+                      {fetchingMetrics ? 'Fetching...' : `Fetch Metrics (${metricsSelection.size})`}
+                    </Button>
+                    <Button 
+                      onClick={fetchFutureRates}
+                      disabled={fetchingFutureRates || metricsSelection.size === 0}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <TrendingUp className="h-4 w-4 mr-2" />
+                      {fetchingFutureRates ? 'Fetching...' : `Fetch Future Rates (${metricsSelection.size})`}
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Comparables List */}

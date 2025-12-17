@@ -35,3 +35,9 @@ verify_jwt = true
 
 [functions.fetch-property-comparables]
 verify_jwt = true
+
+[functions.fetch-comparable-metrics]
+verify_jwt = true
+
+[functions.fetch-comparable-future-rates]
+verify_jwt = true

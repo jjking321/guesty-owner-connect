@@ -622,6 +622,8 @@ export type Database = {
           cover_photo_url: string | null
           created_at: string | null
           fetched_at: string | null
+          future_rates: Json | null
+          future_rates_fetched_at: string | null
           historical_metrics: Json | null
           host_name: string | null
           id: string
@@ -655,6 +657,8 @@ export type Database = {
           cover_photo_url?: string | null
           created_at?: string | null
           fetched_at?: string | null
+          future_rates?: Json | null
+          future_rates_fetched_at?: string | null
           historical_metrics?: Json | null
           host_name?: string | null
           id?: string
@@ -688,6 +692,8 @@ export type Database = {
           cover_photo_url?: string | null
           created_at?: string | null
           fetched_at?: string | null
+          future_rates?: Json | null
+          future_rates_fetched_at?: string | null
           historical_metrics?: Json | null
           host_name?: string | null
           id?: string
