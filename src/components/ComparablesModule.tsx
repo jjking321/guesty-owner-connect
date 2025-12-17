@@ -356,129 +356,10 @@ export function ComparablesModule({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Property Comparables</CardTitle>
-            <CardDescription>
-              Compare with similar short-term rentals in the area
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Label htmlFor="radius" className="text-sm text-muted-foreground whitespace-nowrap">
-                Search Radius:
-              </Label>
-              <Select
-                value={radiusMiles.toString()}
-                onValueChange={(value) => setRadiusMiles(parseInt(value))}
-              >
-                <SelectTrigger className="w-28">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 mile</SelectItem>
-                  <SelectItem value="2">2 miles</SelectItem>
-                  <SelectItem value="5">5 miles</SelectItem>
-                  <SelectItem value="10">10 miles</SelectItem>
-                  <SelectItem value="25">25 miles</SelectItem>
-                  <SelectItem value="50">50 miles</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button 
-              onClick={fetchComparables} 
-              disabled={loading || !hasCoordinates}
-              size="sm"
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              {loading ? 'Fetching...' : 'Fetch Comparables'}
-            </Button>
-          </div>
-        </div>
-
-        {/* Filters Section */}
-        <div className="mt-4 space-y-3">
-          {/* Bedroom Filter */}
-          {bedrooms !== undefined && (
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="match-bedrooms"
-                checked={matchBedrooms}
-                onCheckedChange={(checked) => setMatchBedrooms(checked === true)}
-              />
-              <Label htmlFor="match-bedrooms" className="text-sm cursor-pointer">
-                Same bedrooms only ({bedrooms} bed{bedrooms !== 1 ? 's' : ''})
-              </Label>
-            </div>
-          )}
-
-          {/* Amenities Filter */}
-          <div>
-            <Label className="text-sm text-muted-foreground mb-2 block">Amenities:</Label>
-            <div className="flex flex-wrap gap-4">
-              {AMENITY_OPTIONS.map((amenity) => (
-                <div key={amenity.value} className="flex items-center gap-2">
-                  <Checkbox
-                    id={`amenity-${amenity.value}`}
-                    checked={selectedAmenities.includes(amenity.value)}
-                    onCheckedChange={() => toggleAmenity(amenity.value)}
-                  />
-                  <Label htmlFor={`amenity-${amenity.value}`} className="text-sm cursor-pointer">
-                    {amenity.label}
-                  </Label>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* TTM Revenue Range Filter */}
-          <div>
-            <Label className="text-sm text-muted-foreground mb-2 block">TTM Revenue Range:</Label>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <Input
-                  type="number"
-                  placeholder="Min"
-                  value={minRevenue}
-                  onChange={(e) => setMinRevenue(e.target.value)}
-                  className="w-28 pl-7"
-                />
-              </div>
-              <span className="text-muted-foreground">to</span>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <Input
-                  type="number"
-                  placeholder="Max"
-                  value={maxRevenue}
-                  onChange={(e) => setMaxRevenue(e.target.value)}
-                  className="w-28 pl-7"
-                />
-              </div>
-            </div>
-          </div>
-          {/* Map Toggle */}
-          {hasCoordinates && mapboxToken && (
-            <div className="flex items-center gap-2">
-              <Switch
-                id="show-map"
-                checked={showMap}
-                onCheckedChange={setShowMap}
-              />
-              <Label htmlFor="show-map" className="flex items-center gap-2 cursor-pointer">
-                <Map className="h-4 w-4" />
-                Show Map
-              </Label>
-            </div>
-          )}
-        </div>
-
-        {!hasCoordinates && (
-          <p className="text-sm text-destructive mt-2">
-            This property doesn't have valid coordinates. Cannot fetch comparables.
-          </p>
-        )}
+        <CardTitle>Property Comparables</CardTitle>
+        <CardDescription>
+          Compare with similar short-term rentals in the area
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -491,6 +372,124 @@ export function ComparablesModule({
 
           {/* Search Tab */}
           <TabsContent value="search">
+            {/* Search Controls */}
+            <div className="space-y-4 mb-6 pb-4 border-b">
+              {/* Radius selector and Fetch button */}
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="radius" className="text-sm text-muted-foreground whitespace-nowrap">
+                    Search Radius:
+                  </Label>
+                  <Select
+                    value={radiusMiles.toString()}
+                    onValueChange={(value) => setRadiusMiles(parseInt(value))}
+                  >
+                    <SelectTrigger className="w-28">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1 mile</SelectItem>
+                      <SelectItem value="2">2 miles</SelectItem>
+                      <SelectItem value="5">5 miles</SelectItem>
+                      <SelectItem value="10">10 miles</SelectItem>
+                      <SelectItem value="25">25 miles</SelectItem>
+                      <SelectItem value="50">50 miles</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button 
+                  onClick={fetchComparables} 
+                  disabled={loading || !hasCoordinates}
+                  size="sm"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                  {loading ? 'Fetching...' : 'Fetch Comparables'}
+                </Button>
+              </div>
+
+              {/* Bedroom Filter */}
+              {bedrooms !== undefined && (
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="match-bedrooms"
+                    checked={matchBedrooms}
+                    onCheckedChange={(checked) => setMatchBedrooms(checked === true)}
+                  />
+                  <Label htmlFor="match-bedrooms" className="text-sm cursor-pointer">
+                    Same bedrooms only ({bedrooms} bed{bedrooms !== 1 ? 's' : ''})
+                  </Label>
+                </div>
+              )}
+
+              {/* Amenities Filter */}
+              <div>
+                <Label className="text-sm text-muted-foreground mb-2 block">Amenities:</Label>
+                <div className="flex flex-wrap gap-4">
+                  {AMENITY_OPTIONS.map((amenity) => (
+                    <div key={amenity.value} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`amenity-${amenity.value}`}
+                        checked={selectedAmenities.includes(amenity.value)}
+                        onCheckedChange={() => toggleAmenity(amenity.value)}
+                      />
+                      <Label htmlFor={`amenity-${amenity.value}`} className="text-sm cursor-pointer">
+                        {amenity.label}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* TTM Revenue Range Filter */}
+              <div>
+                <Label className="text-sm text-muted-foreground mb-2 block">TTM Revenue Range:</Label>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                    <Input
+                      type="number"
+                      placeholder="Min"
+                      value={minRevenue}
+                      onChange={(e) => setMinRevenue(e.target.value)}
+                      className="w-28 pl-7"
+                    />
+                  </div>
+                  <span className="text-muted-foreground">to</span>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                    <Input
+                      type="number"
+                      placeholder="Max"
+                      value={maxRevenue}
+                      onChange={(e) => setMaxRevenue(e.target.value)}
+                      className="w-28 pl-7"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Map Toggle */}
+              {hasCoordinates && mapboxToken && (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="show-map"
+                    checked={showMap}
+                    onCheckedChange={setShowMap}
+                  />
+                  <Label htmlFor="show-map" className="flex items-center gap-2 cursor-pointer">
+                    <Map className="h-4 w-4" />
+                    Show Map
+                  </Label>
+                </div>
+              )}
+
+              {/* Missing coordinates warning */}
+              {!hasCoordinates && (
+                <p className="text-sm text-destructive">
+                  This property doesn't have valid coordinates. Cannot fetch comparables.
+                </p>
+              )}
+            </div>
             {/* Map Display */}
             {showMap && comparables.length > 0 && latitude && longitude && mapboxToken && (
               <div className="mb-6">
