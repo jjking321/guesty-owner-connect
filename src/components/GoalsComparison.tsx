@@ -34,6 +34,7 @@ interface TrendDataPoint {
   monthKey: string;
   currentYear: number;
   lastYear: number;
+  compsetAverage?: number;
 }
 
 interface CompsetMonthlyAverage {
@@ -117,6 +118,12 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       }
     });
 
+    // Create compset occupancy map
+    const compsetOccupancyMap = new Map<string, number>();
+    compsetMonthlyAverages.forEach(avg => {
+      compsetOccupancyMap.set(avg.month, avg.occupancy);
+    });
+
     // Combine data by month name
     const result = [];
     for (let month = 0; month < 12; month++) {
@@ -130,16 +137,20 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       const currentData = currentYearData.get(currentKey) || { nightsBooked: 0, totalDays: getDaysInMonth(currentDate) };
       const lastData = lastYearData.get(lastKey) || { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) };
       
+      // Get compset average for this month (format: "2024-01")
+      const compsetAvg = compsetOccupancyMap.get(currentKey);
+      
       result.push({
         month: monthName,
         monthKey: currentKey,
         currentYear: (currentData.nightsBooked / currentData.totalDays) * 100,
         lastYear: (lastData.nightsBooked / lastData.totalDays) * 100,
+        compsetAverage: compsetAvg !== undefined ? compsetAvg * 100 : undefined, // Convert from decimal to percentage
       });
     }
 
     return result;
-  }, [reservations, year]);
+  }, [reservations, year, compsetMonthlyAverages]);
 
   // Calculate year-over-year RevPAR data
   const revparData = useMemo((): TrendDataPoint[] => {
@@ -193,6 +204,12 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       }
     });
 
+    // Create compset revpar map
+    const compsetRevparMap = new Map<string, number>();
+    compsetMonthlyAverages.forEach(avg => {
+      compsetRevparMap.set(avg.month, avg.revpar);
+    });
+
     // Calculate RevPAR for each month
     const result = [];
     for (let month = 0; month < 12; month++) {
@@ -215,16 +232,20 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       const lastOccupancy = (lastData.nightsBooked / lastData.totalDays) * 100;
       const lastRevPAR = lastADR * (lastOccupancy / 100);
       
+      // Get compset average for this month
+      const compsetAvg = compsetRevparMap.get(currentKey);
+      
       result.push({
         month: monthName,
         monthKey: currentKey,
         currentYear: currentRevPAR,
         lastYear: lastRevPAR,
+        compsetAverage: compsetAvg,
       });
     }
 
     return result;
-  }, [reservations, year]);
+  }, [reservations, year, compsetMonthlyAverages]);
 
   useEffect(() => {
     loadGoalsComparison();
@@ -506,29 +527,46 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     if (!active || !payload || !payload.length) return null;
     
     const isOccupancy = activeMetric === 'occupancy';
-    const isRevPAR = activeMetric === 'revpar';
+    
+    // Find values by dataKey to handle variable ordering
+    const currentYearValue = payload.find((p: any) => p.dataKey === 'currentYear')?.value;
+    const lastYearValue = payload.find((p: any) => p.dataKey === 'lastYear')?.value;
+    const compsetValue = payload.find((p: any) => p.dataKey === 'compsetAverage')?.value;
     
     return (
       <div className="bg-popover border border-border rounded-lg shadow-lg p-4">
         <p className="font-medium text-sm mb-2">{label}</p>
         <div className="space-y-1">
-          <div className="flex items-center gap-2 text-sm">
-            <div className="w-3 h-3 rounded-full bg-primary" />
-            <span className="text-muted-foreground">Current Year:</span>
-            <span className="font-medium">
-              {isOccupancy
-                ? `${payload[0].value.toFixed(1)}%`
-                : `$${payload[0].value.toFixed(2)}`}
-            </span>
-          </div>
-          {showComparison && payload[1] && (
+          {currentYearValue !== undefined && (
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-3 h-3 rounded-full bg-primary" />
+              <span className="text-muted-foreground">Current Year:</span>
+              <span className="font-medium">
+                {isOccupancy
+                  ? `${currentYearValue.toFixed(1)}%`
+                  : `$${currentYearValue.toFixed(2)}`}
+              </span>
+            </div>
+          )}
+          {showComparison && lastYearValue !== undefined && (
             <div className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(var(--muted-foreground))' }} />
               <span className="text-muted-foreground">Last Year:</span>
               <span className="font-medium">
                 {isOccupancy
-                  ? `${payload[1].value.toFixed(1)}%`
-                  : `$${payload[1].value.toFixed(2)}`}
+                  ? `${lastYearValue.toFixed(1)}%`
+                  : `$${lastYearValue.toFixed(2)}`}
+              </span>
+            </div>
+          )}
+          {showCompset && compsetValue !== undefined && (
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />
+              <span className="text-muted-foreground">Compset Avg:</span>
+              <span className="font-medium">
+                {isOccupancy
+                  ? `${compsetValue.toFixed(1)}%`
+                  : `$${compsetValue.toFixed(2)}`}
               </span>
             </div>
           )}
@@ -893,7 +931,24 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           ) : (
             // Occupancy or RevPAR chart
             <div>
-              <div className="flex items-center justify-end mb-4">
+              <div className="flex items-center justify-end gap-4 mb-4">
+                {listingId && !externalGoals && (
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="compare-compset-trend"
+                      checked={showCompset}
+                      onCheckedChange={(checked) => setShowCompset(checked as boolean)}
+                      disabled={compsetMonthlyAverages.length === 0}
+                    />
+                    <Label 
+                      htmlFor="compare-compset-trend" 
+                      className={`text-sm cursor-pointer ${compsetMonthlyAverages.length === 0 ? 'text-muted-foreground' : ''}`}
+                      title={compsetMonthlyAverages.length === 0 ? 'No compset data available. Fetch historical metrics from selected comparables first.' : ''}
+                    >
+                      Show Compset Average
+                    </Label>
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="compare-yoy"
@@ -923,7 +978,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     tickLine={false}
                     axisLine={false}
                     tickFormatter={(value) =>
-                      activeMetric === 'occupancy' ? `${value}%` : `$${value.toFixed(0)}`
+                      activeMetric === 'occupancy' ? `${value.toFixed(0)}%` : `$${value.toFixed(0)}`
                     }
                   />
                   <Tooltip content={<TrendTooltip />} />
@@ -948,6 +1003,19 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                       activeDot={{ r: 6 }}
                       name="Last Year"
                       connectNulls
+                    />
+                  )}
+                  {showCompset && (
+                    <Line
+                      type="monotone"
+                      dataKey="compsetAverage"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      strokeDasharray="3 3"
+                      dot={{ fill: "#8b5cf6", r: 3 }}
+                      activeDot={{ r: 5 }}
+                      name="Compset Avg"
+                      connectNulls={false}
                     />
                   )}
                 </LineChart>
