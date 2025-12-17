@@ -122,7 +122,7 @@ export function ComparablesModule({
   const [maxRevenue, setMaxRevenue] = useState<string>('');
   const [showMap, setShowMap] = useState(false);
   const [mapboxToken, setMapboxToken] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("search");
+  const [activeTab, setActiveTab] = useState<string>("selected");
   
   // Pagination state
   const PAGE_SIZE = 10;
@@ -544,10 +544,10 @@ export function ComparablesModule({
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-4">
-            <TabsTrigger value="search">Search</TabsTrigger>
             <TabsTrigger value="selected">
               Selected ({pendingSelections.size})
             </TabsTrigger>
+            <TabsTrigger value="search">Search</TabsTrigger>
           </TabsList>
 
           {/* Search Tab */}
