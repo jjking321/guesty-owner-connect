@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, ChevronLeft, ChevronRight, Moon } from "lucide-react";
@@ -7,6 +7,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday, isBefore } from "date-fns";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 
 interface ListingCalendarProps {
   listingId: string;
@@ -26,11 +28,22 @@ interface CalendarDay {
   synced_from_guesty_at: string | null;
 }
 
+interface FutureRate {
+  date: string;
+  available: boolean;
+  rate: number;
+}
+
+interface ComparableFutureRates {
+  future_rates: { rates: FutureRate[] } | null;
+}
+
 export function ListingCalendar({ listingId }: ListingCalendarProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [legendOpen, setLegendOpen] = useState(false);
+  const [compareToCompset, setCompareToCompset] = useState(false);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -51,6 +64,52 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
       return data as CalendarDay[];
     },
   });
+
+  // Fetch selected comparables' future rates
+  const { data: compsetData } = useQuery({
+    queryKey: ['compset-future-rates', listingId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('property_comparables')
+        .select('future_rates')
+        .eq('listing_id', listingId)
+        .eq('is_selected', true)
+        .not('future_rates', 'is', null);
+      
+      if (error) throw error;
+      return data as unknown as ComparableFutureRates[];
+    },
+    enabled: compareToCompset,
+  });
+
+  // Calculate daily compset averages
+  const compsetAverages = useMemo(() => {
+    if (!compsetData || compsetData.length === 0) return new Map<string, number>();
+    
+    const dailyRates = new Map<string, number[]>();
+    
+    compsetData.forEach(comp => {
+      if (comp.future_rates?.rates) {
+        comp.future_rates.rates.forEach(rate => {
+          if (rate.rate > 0) {
+            const existing = dailyRates.get(rate.date) || [];
+            existing.push(rate.rate);
+            dailyRates.set(rate.date, existing);
+          }
+        });
+      }
+    });
+    
+    const averages = new Map<string, number>();
+    dailyRates.forEach((rates, date) => {
+      averages.set(date, rates.reduce((sum, r) => sum + r, 0) / rates.length);
+    });
+    
+    return averages;
+  }, [compsetData]);
+
+  // Check if compset data is available
+  const hasCompsetData = compsetData && compsetData.length > 0 && compsetAverages.size > 0;
 
   // Sync calendar mutation
   const syncMutation = useMutation({
@@ -86,6 +145,59 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   calendarData?.forEach(day => {
     calendarMap.set(day.date, day);
   });
+
+  // Get comparison ring style based on price difference
+  const getComparisonStyle = (myPrice: number | null, compsetAvg: number | undefined) => {
+    if (!myPrice || !compsetAvg || !compareToCompset) return '';
+    
+    const percentDiff = ((myPrice - compsetAvg) / compsetAvg) * 100;
+    
+    // Green: 10%+ below compset (opportunity to raise prices)
+    if (percentDiff <= -10) {
+      return 'ring-2 ring-emerald-500 ring-inset';
+    }
+    // Red: 10%+ above compset (priced higher than market)
+    if (percentDiff >= 10) {
+      return 'ring-2 ring-red-500 ring-inset';
+    }
+    // Yellow: within ±10% (competitive)
+    return 'ring-2 ring-amber-400 ring-inset';
+  };
+
+  // Calculate comparison summary stats
+  const comparisonStats = useMemo(() => {
+    if (!compareToCompset || !hasCompsetData || !calendarData) {
+      return { daysAbove: 0, daysBelow: 0, daysAt: 0, avgDiff: 0 };
+    }
+    
+    let daysAbove = 0;
+    let daysBelow = 0;
+    let daysAt = 0;
+    let totalDiff = 0;
+    let count = 0;
+    
+    calendarData.forEach(day => {
+      if (day.price && day.is_available) {
+        const compsetAvg = compsetAverages.get(day.date);
+        if (compsetAvg) {
+          const percentDiff = ((day.price - compsetAvg) / compsetAvg) * 100;
+          totalDiff += percentDiff;
+          count++;
+          
+          if (percentDiff >= 10) daysAbove++;
+          else if (percentDiff <= -10) daysBelow++;
+          else daysAt++;
+        }
+      }
+    });
+    
+    return {
+      daysAbove,
+      daysBelow,
+      daysAt,
+      avgDiff: count > 0 ? totalDiff / count : 0,
+    };
+  }, [compareToCompset, hasCompsetData, calendarData, compsetAverages]);
 
   // Get status styling - color-coded cells
   const getStatusStyle = (day: CalendarDay | undefined, date: Date) => {
@@ -156,14 +268,26 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
               {lastSyncTime ? `Last synced: ${lastSyncTime}` : 'Not synced yet'}
             </CardDescription>
           </div>
-          <Button 
-            onClick={() => syncMutation.mutate()} 
-            disabled={syncMutation.isPending}
-            variant="outline"
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-            {syncMutation.isPending ? 'Syncing...' : 'Sync Calendar'}
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Checkbox 
+                id="compareToCompset" 
+                checked={compareToCompset}
+                onCheckedChange={(checked) => setCompareToCompset(checked === true)}
+              />
+              <Label htmlFor="compareToCompset" className="text-sm cursor-pointer">
+                Compare to Compset
+              </Label>
+            </div>
+            <Button 
+              onClick={() => syncMutation.mutate()} 
+              disabled={syncMutation.isPending}
+              variant="outline"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+              {syncMutation.isPending ? 'Syncing...' : 'Sync Calendar'}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -221,6 +345,23 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                 <Moon className="h-3 w-3 text-muted-foreground" />
                 <span className="text-muted-foreground">Min nights</span>
               </div>
+              {compareToCompset && (
+                <>
+                  <div className="w-px h-4 bg-border" />
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded bg-white ring-2 ring-emerald-500 ring-inset" />
+                    <span className="text-muted-foreground">Below market (10%+)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded bg-white ring-2 ring-amber-400 ring-inset" />
+                    <span className="text-muted-foreground">At market (±10%)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded bg-white ring-2 ring-red-500 ring-inset" />
+                    <span className="text-muted-foreground">Above market (10%+)</span>
+                  </div>
+                </>
+              )}
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -250,6 +391,8 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                 const dateStr = format(date, 'yyyy-MM-dd');
                 const dayData = calendarMap.get(dateStr);
                 const textColors = getTextColors(dayData);
+                const compsetAvg = compsetAverages.get(dateStr);
+                const showComparison = compareToCompset && hasCompsetData && dayData?.price && dayData.is_available && compsetAvg;
                 
                 return (
                   <div
@@ -257,7 +400,8 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                     className={`
                       relative h-20 p-1.5 border flex flex-col
                       ${getStatusStyle(dayData, date)}
-                      ${isToday(date) ? 'ring-2 ring-primary ring-inset' : ''}
+                      ${isToday(date) && !showComparison ? 'ring-2 ring-primary ring-inset' : ''}
+                      ${showComparison ? getComparisonStyle(dayData?.price ?? null, compsetAvg) : ''}
                     `}
                   >
                     {/* Day number - top left */}
@@ -265,10 +409,16 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                       {format(date, 'd')}
                     </div>
                     
-                    {/* Price - centered, large */}
+                    {/* Price - centered */}
                     {dayData?.price && (
-                      <div className={`text-base font-bold ${textColors.price} flex-1 flex items-center justify-center`}>
+                      <div className={`text-base font-bold ${textColors.price} flex-1 flex flex-col items-center justify-center`}>
                         {formatPrice(dayData.price, dayData.currency)}
+                        {/* Compset average - smaller, below */}
+                        {showComparison && compsetAvg && (
+                          <div className="text-[10px] font-normal text-muted-foreground">
+                            avg {formatPrice(compsetAvg, dayData.currency)}
+                          </div>
+                        )}
                       </div>
                     )}
                     
@@ -316,6 +466,40 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                 {((calendarData.filter(d => d.status === 'booked' || d.block_reason === 'reservation').length / calendarData.length) * 100).toFixed(0)}%
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Compset Comparison Stats */}
+        {compareToCompset && hasCompsetData && (
+          <div className="mt-4 pt-4 border-t">
+            <h4 className="text-sm font-medium mb-3">Compset Comparison</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <div className="text-sm text-muted-foreground">Below Market</div>
+                <div className="text-lg font-semibold text-emerald-600">{comparisonStats.daysBelow} days</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">At Market</div>
+                <div className="text-lg font-semibold text-amber-500">{comparisonStats.daysAt} days</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Above Market</div>
+                <div className="text-lg font-semibold text-red-500">{comparisonStats.daysAbove} days</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Avg Difference</div>
+                <div className={`text-lg font-semibold ${comparisonStats.avgDiff >= 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                  {comparisonStats.avgDiff >= 0 ? '+' : ''}{comparisonStats.avgDiff.toFixed(1)}%
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* No compset data message */}
+        {compareToCompset && !hasCompsetData && (
+          <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-400">
+            No compset data available. Select comparables and fetch their future rates in the Comparables tab first.
           </div>
         )}
       </CardContent>
