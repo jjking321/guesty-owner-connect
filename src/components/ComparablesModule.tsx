@@ -1169,6 +1169,7 @@ interface CompsetTrendChartProps {
 
 function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: CompsetTrendChartProps) {
   const [activeMetric, setActiveMetric] = useState<'revenue' | 'adr' | 'occupancy' | 'revpar'>('revenue');
+  const [timeRange, setTimeRange] = useState<'6m' | '12m' | '24m' | 'all'>('12m');
 
   const monthlyRollups = useMemo((): MonthlyRollup[] => {
     type MonthBucket = { revenue: number[]; adr: number[]; occupancy: number[]; revpar: number[] };
@@ -1219,6 +1220,18 @@ function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: Comps
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [comparables]);
 
+  // Filter by selected time range
+  const filteredRollups = useMemo(() => {
+    if (timeRange === 'all') return monthlyRollups;
+    
+    const now = new Date();
+    const monthsToShow = timeRange === '6m' ? 6 : timeRange === '12m' ? 12 : 24;
+    const cutoffDate = new Date(now.getFullYear(), now.getMonth() - monthsToShow, 1);
+    const cutoffStr = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}`;
+    
+    return monthlyRollups.filter(r => r.date >= cutoffStr);
+  }, [monthlyRollups, timeRange]);
+
   if (monthlyRollups.length === 0) {
     return null;
   }
@@ -1257,6 +1270,17 @@ function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: Comps
           <TrendingUp className="h-5 w-5 text-primary" />
           <span className="font-medium">Compset Monthly Performance</span>
         </div>
+        <Select value={timeRange} onValueChange={(v) => setTimeRange(v as typeof timeRange)}>
+          <SelectTrigger className="w-[140px] h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="6m">Last 6 Months</SelectItem>
+            <SelectItem value="12m">Last 12 Months</SelectItem>
+            <SelectItem value="24m">Last 24 Months</SelectItem>
+            <SelectItem value="all">All Time</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       
       {/* Metric Tabs */}
@@ -1279,7 +1303,7 @@ function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: Comps
       {/* Chart */}
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={monthlyRollups} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+          <LineChart data={filteredRollups} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
             <XAxis 
               dataKey="month" 
