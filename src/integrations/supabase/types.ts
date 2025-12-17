@@ -65,28 +65,49 @@ export type Database = {
         Row: {
           block_reason: string | null
           created_at: string
+          cta: boolean | null
+          ctd: boolean | null
+          currency: string | null
           date: string
           id: string
           is_available: boolean
           listing_id: string
+          min_nights: number | null
+          price: number | null
+          status: string | null
+          synced_from_guesty_at: string | null
           updated_at: string
         }
         Insert: {
           block_reason?: string | null
           created_at?: string
+          cta?: boolean | null
+          ctd?: boolean | null
+          currency?: string | null
           date: string
           id?: string
           is_available?: boolean
           listing_id: string
+          min_nights?: number | null
+          price?: number | null
+          status?: string | null
+          synced_from_guesty_at?: string | null
           updated_at?: string
         }
         Update: {
           block_reason?: string | null
           created_at?: string
+          cta?: boolean | null
+          ctd?: boolean | null
+          currency?: string | null
           date?: string
           id?: string
           is_available?: boolean
           listing_id?: string
+          min_nights?: number | null
+          price?: number | null
+          status?: string | null
+          synced_from_guesty_at?: string | null
           updated_at?: string
         }
         Relationships: [

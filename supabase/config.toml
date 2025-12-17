@@ -41,3 +41,6 @@ verify_jwt = true
 
 [functions.fetch-comparable-future-rates]
 verify_jwt = true
+
+[functions.sync-listing-calendar]
+verify_jwt = true
