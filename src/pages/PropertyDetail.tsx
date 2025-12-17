@@ -16,6 +16,7 @@ import { RevenueForecast } from "@/components/RevenueForecast";
 import { ReviewsSummary } from "@/components/ReviewsSummary";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { ComparablesModule } from "@/components/ComparablesModule";
+import { ListingCalendar } from "@/components/ListingCalendar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -837,6 +838,7 @@ export default function PropertyDetail() {
         <Tabs defaultValue="overview" className="space-y-4">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="calendar">Calendar</TabsTrigger>
             <TabsTrigger value="reservations">Reservations</TabsTrigger>
             <TabsTrigger value="reviews">Reviews</TabsTrigger>
           </TabsList>
@@ -869,6 +871,10 @@ export default function PropertyDetail() {
               bedrooms={listing?.bedrooms}
               guests={listing?.accommodates}
             />
+          </TabsContent>
+
+          <TabsContent value="calendar" className="space-y-6">
+            <ListingCalendar listingId={id!} />
           </TabsContent>
 
           <TabsContent value="reservations" className="space-y-6">
