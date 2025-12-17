@@ -387,34 +387,37 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                       ${isToday(date) ? 'ring-2 ring-primary ring-inset' : ''}
                     `}
                   >
-                    {/* Day number */}
-                    <div className="text-xs text-muted-foreground font-medium">
-                      {format(date, 'd')}
+                    {/* Content area with bottom padding for bar */}
+                    <div className="flex flex-col flex-1 pb-4">
+                      {/* Day number */}
+                      <div className="text-xs text-muted-foreground font-medium">
+                        {format(date, 'd')}
+                      </div>
+                      
+                      {/* Price - larger */}
+                      {dayData?.price && (
+                        <div className="text-sm font-bold text-foreground mt-auto">
+                          {formatPrice(dayData.price, dayData.currency)}
+                        </div>
+                      )}
+                      
+                      {/* Min nights with moon icon */}
+                      {dayData?.min_nights && dayData.min_nights > 1 && (
+                        <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                          <Moon className="h-3 w-3" />
+                          <span>{dayData.min_nights}</span>
+                        </div>
+                      )}
                     </div>
                     
-                    {/* Price - larger */}
-                    {dayData?.price && (
-                      <div className="text-sm font-bold text-foreground mt-auto">
-                        {formatPrice(dayData.price, dayData.currency)}
-                      </div>
-                    )}
-                    
-                    {/* Min nights with moon icon */}
-                    {dayData?.min_nights && dayData.min_nights > 1 && (
-                      <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                        <Moon className="h-3 w-3" />
-                        <span>{dayData.min_nights}</span>
-                      </div>
-                    )}
-                    
-                    {/* Reservation bar overlay */}
+                    {/* Reservation bar overlay - at bottom */}
                     {reservation && (
                       <div 
                         className={`
-                          absolute left-0 right-0 bottom-1/4 h-5 bg-emerald-500 dark:bg-emerald-600 
-                          flex items-center text-white text-[10px] font-medium overflow-hidden
-                          ${isCheckIn ? 'rounded-l ml-1' : ''}
-                          ${isLastNight ? 'rounded-r mr-1' : ''}
+                          absolute bottom-0 h-4 bg-emerald-500 dark:bg-emerald-600 
+                          flex items-center text-white text-[10px] font-medium overflow-hidden z-10
+                          ${isCheckIn ? 'left-1 rounded-l' : 'left-0'}
+                          ${isLastNight ? 'right-1 rounded-r' : 'right-0'}
                         `}
                       >
                         {isCheckIn && (
