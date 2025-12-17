@@ -1362,7 +1362,10 @@ function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: Comps
       {/* Chart */}
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={filteredRollups} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+          <LineChart 
+            data={filteredRollups.filter(r => r[config.key as keyof MonthlyRollup] != null)} 
+            margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+          >
             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
             <XAxis 
               dataKey="month" 
@@ -1388,7 +1391,6 @@ function CompsetTrendChart({ comparables, formatCurrency, formatPercent }: Comps
               strokeWidth={2}
               dot={{ fill: config.color, strokeWidth: 0, r: 4 }}
               activeDot={{ r: 6, strokeWidth: 0 }}
-              connectNulls={true}
             />
           </LineChart>
         </ResponsiveContainer>
