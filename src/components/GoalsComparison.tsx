@@ -390,32 +390,49 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           .select('monthly_averages, future_monthly_averages')
           .eq('listing_id', listingId)
           .maybeSingle();
-        
-        // Start with historical averages
-        if (compsetData?.monthly_averages && Array.isArray(compsetData.monthly_averages)) {
-          compsetAverages = compsetData.monthly_averages as unknown as CompsetMonthlyAverage[];
-        }
-        
-        // Merge in future averages (future data takes precedence for overlapping months)
-        if (compsetData?.future_monthly_averages && Array.isArray(compsetData.future_monthly_averages)) {
-          const futureAverages = compsetData.future_monthly_averages as unknown as CompsetMonthlyAverage[];
-          const historicalMap = new Map(compsetAverages.map(avg => [avg.month, avg]));
-          
-          // Add future data, overwriting historical if there's overlap
-          for (const futureAvg of futureAverages) {
-            historicalMap.set(futureAvg.month, futureAvg);
-          }
-          
-          // Convert back to array and sort by month
-          compsetAverages = Array.from(historicalMap.values()).sort((a, b) => a.month.localeCompare(b.month));
-        }
+
+        const normalizeCompsetAverage = (raw: any): CompsetMonthlyAverage | null => {
+          if (!raw || typeof raw !== 'object') return null;
+
+          const month = raw.month ?? raw.year_month;
+          if (typeof month !== 'string' || !month) return null;
+
+          const revenueRaw = raw.revenue ?? raw.avg_revenue;
+          const adrRaw = raw.adr ?? raw.avg_adr;
+          const occupancyRaw = raw.occupancy ?? raw.avg_occupancy;
+          const revparRaw = raw.revpar ?? raw.avg_revpar;
+
+          const revenue = typeof revenueRaw === 'number' ? revenueRaw : Number.NaN;
+          const adr = typeof adrRaw === 'number' ? adrRaw : Number.NaN;
+          const occupancy = typeof occupancyRaw === 'number' ? occupancyRaw : Number.NaN;
+          const revpar = typeof revparRaw === 'number' ? revparRaw : Number.NaN;
+
+          return { month, revenue, adr, occupancy, revpar };
+        };
+
+        const normalizeArray = (arr: unknown): CompsetMonthlyAverage[] => {
+          if (!Array.isArray(arr)) return [];
+          return arr
+            .map(normalizeCompsetAverage)
+            .filter((x): x is CompsetMonthlyAverage => Boolean(x));
+        };
+
+        const historicalAverages = normalizeArray(compsetData?.monthly_averages);
+        const futureAverages = normalizeArray(compsetData?.future_monthly_averages);
+
+        // Merge (future takes precedence), then sort
+        const merged = new Map<string, CompsetMonthlyAverage>();
+        for (const avg of historicalAverages) merged.set(avg.month, avg);
+        for (const avg of futureAverages) merged.set(avg.month, avg);
+
+        compsetAverages = Array.from(merged.values()).sort((a, b) => a.month.localeCompare(b.month));
       }
       setCompsetMonthlyAverages(compsetAverages);
 
       // Create a map for quick lookup of compset averages by month
       const compsetMap = new Map<string, number>();
-      compsetAverages.forEach(avg => {
-        compsetMap.set(avg.month, avg.revenue);
+      compsetAverages.forEach((avg) => {
+        if (Number.isFinite(avg.revenue)) compsetMap.set(avg.month, avg.revenue);
       });
 
       // Calculate actual revenue per month
