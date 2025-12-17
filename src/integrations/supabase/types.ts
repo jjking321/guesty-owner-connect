@@ -255,6 +255,7 @@ export type Database = {
           client_secret: string
           created_at: string
           id: string
+          last_calendar_sync: string | null
           last_listings_sync: string | null
           last_owners_sync: string | null
           last_reservations_sync: string | null
@@ -269,6 +270,7 @@ export type Database = {
           client_secret: string
           created_at?: string
           id?: string
+          last_calendar_sync?: string | null
           last_listings_sync?: string | null
           last_owners_sync?: string | null
           last_reservations_sync?: string | null
@@ -283,6 +285,7 @@ export type Database = {
           client_secret?: string
           created_at?: string
           id?: string
+          last_calendar_sync?: string | null
           last_listings_sync?: string | null
           last_owners_sync?: string | null
           last_reservations_sync?: string | null

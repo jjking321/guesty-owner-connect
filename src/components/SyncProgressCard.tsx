@@ -19,7 +19,7 @@ interface SyncJob {
 
 interface SyncProgressCardProps {
   accountId: string;
-  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'goal_recalculation';
+  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'goal_recalculation' | 'calendar';
 }
 
 export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps) {
@@ -190,7 +190,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
                 <XCircle className="h-4 w-4 text-destructive" />
               )}
               <p className="font-medium text-sm capitalize">
-                {syncType === 'goal_recalculation' ? 'Goal Recalculation' : `${syncType} Sync`} - {syncJob.status}
+                {syncType === 'goal_recalculation' ? 'Goal Recalculation' : syncType === 'calendar' ? 'Calendar Sync' : `${syncType} Sync`} - {syncJob.status}
               </p>
             </div>
             
