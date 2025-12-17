@@ -23,7 +23,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus, Info as InfoIcon } from "lucide-react";
 import { MetricCard } from "@/components/MetricCard";
-import { TrendChart } from "@/components/TrendChart";
+
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PacingReport } from "@/components/PacingReport";
@@ -937,25 +937,6 @@ export default function GroupDetail() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Year-over-Year Performance</CardTitle>
-                <CardDescription>
-                  Comparing {dateRange.from.getFullYear()} vs {dateRange.from.getFullYear() - 1} across all {listingIds.length} properties
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <TrendChart
-                  occupancyData={occupancyData}
-                  revenueData={revenueData}
-                  revparData={revparData}
-                  goalsData={goals || []}
-                  reservations={reservations || []}
-                  revenueForecast={aggregatedMonthlyForecast}
-                />
-              </CardContent>
-            </Card>
-
             <GoalsComparison 
               listingId={null}
               reservations={reservations || []}

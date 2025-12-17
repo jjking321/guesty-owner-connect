@@ -8,7 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent } from "lucide-react";
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
-import { TrendChart } from "@/components/TrendChart";
+
 import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { PropertySettings } from "@/components/PropertySettings";
@@ -125,244 +125,6 @@ export default function PropertyDetail() {
     return listing.thumbnail || "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=800&h=600&fit=crop";
   };
 
-  // Calculate year-over-year occupancy comparison
-
-  const calculateYearOverYearOccupancy = () => {
-    if (reservations.length === 0) return [];
-
-    const currentYear = new Date().getFullYear();
-    const lastYear = currentYear - 1;
-
-    // Initialize data structures for both years
-    const currentYearData = new Map<string, { nightsBooked: number; totalDays: number }>();
-    const lastYearData = new Map<string, { nightsBooked: number; totalDays: number }>();
-
-    // Get all 12 months for both years
-    for (let month = 0; month < 12; month++) {
-      const currentDate = new Date(currentYear, month, 1);
-      const lastDate = new Date(lastYear, month, 1);
-      
-      const currentKey = format(currentDate, 'yyyy-MM');
-      const lastKey = format(lastDate, 'yyyy-MM');
-      
-      currentYearData.set(currentKey, { nightsBooked: 0, totalDays: getDaysInMonth(currentDate) });
-      lastYearData.set(lastKey, { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
-    }
-
-    // Process each reservation (excluding owner reservations)
-    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
-      if (!reservation.check_in || !reservation.check_out) return;
-
-      const checkIn = parseISO(reservation.check_in);
-      const checkOut = parseISO(reservation.check_out);
-      
-      // Iterate through each night of the reservation
-      let currentNight = checkIn;
-      while (currentNight < checkOut) {
-        const monthKey = format(currentNight, 'yyyy-MM');
-        const year = currentNight.getFullYear();
-        
-        if (year === currentYear && currentYearData.has(monthKey)) {
-          const data = currentYearData.get(monthKey)!;
-          data.nightsBooked++;
-        } else if (year === lastYear && lastYearData.has(monthKey)) {
-          const data = lastYearData.get(monthKey)!;
-          data.nightsBooked++;
-        }
-        
-        currentNight = addDays(currentNight, 1);
-      }
-    });
-
-    // Combine data by month name
-    const result = [];
-    for (let month = 0; month < 12; month++) {
-      const monthName = format(new Date(2000, month, 1), 'MMM');
-      const currentDate = new Date(currentYear, month, 1);
-      const lastDate = new Date(lastYear, month, 1);
-      
-      const currentKey = format(currentDate, 'yyyy-MM');
-      const lastKey = format(lastDate, 'yyyy-MM');
-      
-      const currentData = currentYearData.get(currentKey) || { nightsBooked: 0, totalDays: getDaysInMonth(currentDate) };
-      const lastData = lastYearData.get(lastKey) || { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) };
-      
-      result.push({
-        month: monthName,
-        monthKey: currentKey,
-        currentYear: (currentData.nightsBooked / currentData.totalDays) * 100,
-        lastYear: (lastData.nightsBooked / lastData.totalDays) * 100,
-      });
-    }
-
-    return result;
-  };
-
-  const calculateYearOverYearRevenue = () => {
-    if (reservations.length === 0) return [];
-
-    const currentYear = new Date().getFullYear();
-    const lastYear = currentYear - 1;
-
-    // Initialize data structures for both years
-    const currentYearData = new Map<string, number>();
-    const lastYearData = new Map<string, number>();
-
-    // Get all 12 months for both years
-    for (let month = 0; month < 12; month++) {
-      const currentKey = format(new Date(currentYear, month, 1), 'yyyy-MM');
-      const lastKey = format(new Date(lastYear, month, 1), 'yyyy-MM');
-      
-      currentYearData.set(currentKey, 0);
-      lastYearData.set(lastKey, 0);
-    }
-
-    // Process each reservation (excluding owner reservations)
-    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
-      if (!reservation.check_in || !reservation.check_out || !reservation.fare_accommodation_adjusted) return;
-
-      const checkIn = parseISO(reservation.check_in);
-      const checkOut = parseISO(reservation.check_out);
-      const totalRevenue = parseFloat(reservation.fare_accommodation_adjusted);
-      const nightsCount = reservation.nights_count || 0;
-      const revenuePerNight = nightsCount > 0 ? totalRevenue / nightsCount : 0;
-      
-      // Iterate through each night and allocate revenue to the month
-      let currentNight = checkIn;
-      while (currentNight < checkOut) {
-        const monthKey = format(currentNight, 'yyyy-MM');
-        const year = currentNight.getFullYear();
-        
-        if (year === currentYear && currentYearData.has(monthKey)) {
-          currentYearData.set(monthKey, currentYearData.get(monthKey)! + revenuePerNight);
-        } else if (year === lastYear && lastYearData.has(monthKey)) {
-          lastYearData.set(monthKey, lastYearData.get(monthKey)! + revenuePerNight);
-        }
-        
-        currentNight = addDays(currentNight, 1);
-      }
-    });
-
-    // Combine data by month name
-    const result = [];
-    for (let month = 0; month < 12; month++) {
-      const monthName = format(new Date(2000, month, 1), 'MMM');
-      const currentDate = new Date(currentYear, month, 1);
-      const lastDate = new Date(lastYear, month, 1);
-      
-      const currentKey = format(currentDate, 'yyyy-MM');
-      const lastKey = format(lastDate, 'yyyy-MM');
-      
-      result.push({
-        month: monthName,
-        monthKey: currentKey,
-        currentYear: currentYearData.get(currentKey) || 0,
-        lastYear: lastYearData.get(lastKey) || 0,
-      });
-    }
-
-    return result;
-  };
-
-  const calculateYearOverYearRevPAR = () => {
-    if (reservations.length === 0) return [];
-
-    const currentYear = new Date().getFullYear();
-    const lastYear = currentYear - 1;
-
-    // Initialize data structures for both years - tracking revenue and nights
-    const currentYearData = new Map<string, { revenue: number; nightsBooked: number; totalDays: number }>();
-    const lastYearData = new Map<string, { revenue: number; nightsBooked: number; totalDays: number }>();
-
-    // Get all 12 months for both years
-    for (let month = 0; month < 12; month++) {
-      const currentDate = new Date(currentYear, month, 1);
-      const lastDate = new Date(lastYear, month, 1);
-      
-      const currentKey = format(currentDate, 'yyyy-MM');
-      const lastKey = format(lastDate, 'yyyy-MM');
-      
-      currentYearData.set(currentKey, { revenue: 0, nightsBooked: 0, totalDays: getDaysInMonth(currentDate) });
-      lastYearData.set(lastKey, { revenue: 0, nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
-    }
-
-    // Process each reservation (excluding owner reservations)
-    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
-      if (!reservation.check_in || !reservation.check_out) return;
-
-      const resCheckIn = parseISO(reservation.check_in);
-      const resCheckOut = parseISO(reservation.check_out);
-      const resRevenue = parseFloat(reservation.fare_accommodation_adjusted || 0);
-      const resNightsCount = reservation.nights_count || 0;
-      const resRevenuePerNight = resNightsCount > 0 ? resRevenue / resNightsCount : 0;
-      
-      // Allocate revenue to each night
-      let nightCursor = resCheckIn;
-      while (nightCursor < resCheckOut) {
-        const monthKey = format(nightCursor, 'yyyy-MM');
-        const year = nightCursor.getFullYear();
-        
-        if (year === currentYear && currentYearData.has(monthKey)) {
-          const data = currentYearData.get(monthKey)!;
-          data.revenue += resRevenuePerNight;
-        } else if (year === lastYear && lastYearData.has(monthKey)) {
-          const data = lastYearData.get(monthKey)!;
-          data.revenue += resRevenuePerNight;
-        }
-        
-        nightCursor = addDays(nightCursor, 1);
-      }
-      
-      // For nights, iterate through each night of the reservation
-      let nightCursor2 = resCheckIn;
-      while (nightCursor2 < resCheckOut) {
-        const monthKey = format(nightCursor2, 'yyyy-MM');
-        const year = nightCursor2.getFullYear();
-        
-        if (year === currentYear && currentYearData.has(monthKey)) {
-          const data = currentYearData.get(monthKey)!;
-          data.nightsBooked++;
-        } else if (year === lastYear && lastYearData.has(monthKey)) {
-          const data = lastYearData.get(monthKey)!;
-          data.nightsBooked++;
-        }
-        
-        nightCursor2 = addDays(nightCursor2, 1);
-      }
-    });
-
-    // Calculate RevPAR for each month
-    const result = [];
-    for (let month = 0; month < 12; month++) {
-      const monthName = format(new Date(2000, month, 1), 'MMM');
-      const currentDate = new Date(currentYear, month, 1);
-      const lastDate = new Date(lastYear, month, 1);
-      
-      const currentKey = format(currentDate, 'yyyy-MM');
-      const lastKey = format(lastDate, 'yyyy-MM');
-      
-      const currentData = currentYearData.get(currentKey)!;
-      const lastData = lastYearData.get(lastKey)!;
-      
-      // Calculate ADR and Occupancy, then RevPAR = ADR × Occupancy
-      const currentADR = currentData.nightsBooked > 0 ? currentData.revenue / currentData.nightsBooked : 0;
-      const currentOccupancy = (currentData.nightsBooked / currentData.totalDays) * 100;
-      const currentRevPAR = currentADR * (currentOccupancy / 100);
-      
-      const lastADR = lastData.nightsBooked > 0 ? lastData.revenue / lastData.nightsBooked : 0;
-      const lastOccupancy = (lastData.nightsBooked / lastData.totalDays) * 100;
-      const lastRevPAR = lastADR * (lastOccupancy / 100);
-      
-      result.push({
-        month: monthName,
-        monthKey: currentKey,
-        currentYear: currentRevPAR,
-        lastYear: lastRevPAR,
-      });
-    }
-
-    return result;
-  };
 
   const calculateMonthlyOccupancy = () => {
     if (reservations.length === 0) return [];
@@ -594,9 +356,6 @@ export default function PropertyDetail() {
   };
 
   const metrics = calculateMetrics();
-  const yearOverYearOccupancy = calculateYearOverYearOccupancy();
-  const yearOverYearRevenue = calculateYearOverYearRevenue();
-  const yearOverYearRevPAR = calculateYearOverYearRevPAR();
 
   if (loading) {
     return (
@@ -853,15 +612,6 @@ export default function PropertyDetail() {
             {/* Revenue Forecast */}
             <RevenueForecast listingId={id!} />
 
-            {/* Charts */}
-            <TrendChart 
-              occupancyData={yearOverYearOccupancy}
-              revenueData={yearOverYearRevenue}
-              revparData={yearOverYearRevPAR}
-              goalsData={goalsData}
-              reservations={reservations}
-              revenueForecast={revenueForecast}
-            />
 
             {/* Property Comparables */}
             <ComparablesModule

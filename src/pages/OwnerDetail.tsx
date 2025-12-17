@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { PropertiesTable } from "@/components/PropertiesTable";
 import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
-import { TrendChart } from "@/components/TrendChart";
+
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { PacingReport } from "@/components/PacingReport";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -570,25 +570,6 @@ export default function OwnerDetail() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Year-over-Year Performance</CardTitle>
-                <CardDescription>
-                  Comparing {dateRange.from.getFullYear()} vs {dateRange.from.getFullYear() - 1} across all {listingIds.length} properties
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <TrendChart
-                  occupancyData={occupancyData}
-                  revenueData={revenueData}
-                  revparData={revparData}
-                  goalsData={goals || []}
-                  reservations={reservations || []}
-                  revenueForecast={aggregatedMonthlyForecast}
-                />
-              </CardContent>
-            </Card>
-
             <GoalsComparison 
               listingId={null}
               reservations={reservations || []}
