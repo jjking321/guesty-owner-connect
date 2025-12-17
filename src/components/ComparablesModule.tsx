@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X } from "lucide-react";
 import { ComparablesMap } from "./ComparablesMap";
-
+import { ComparableMetricsDialog } from "./ComparableMetricsDialog";
 interface ComparablesModuleProps {
   listingId: string;
   latitude?: number;
@@ -116,6 +116,8 @@ export function ComparablesModule({
   const [loadingMore, setLoadingMore] = useState(false);
   const [fetchingMetrics, setFetchingMetrics] = useState(false);
   const [metricsSelection, setMetricsSelection] = useState<Set<string>>(new Set());
+  const [metricsDialogOpen, setMetricsDialogOpen] = useState(false);
+  const [selectedComparableForMetrics, setSelectedComparableForMetrics] = useState<Comparable | null>(null);
 
   // Load existing comparables and mapbox token on mount
   useEffect(() => {
@@ -370,7 +372,8 @@ export function ComparablesModule({
   };
 
   const selectAllForMetrics = () => {
-    setMetricsSelection(new Set(selectedComparables.map(c => c.id)));
+    const selected = comparables.filter(c => pendingSelections.has(c.id));
+    setMetricsSelection(new Set(selected.map(c => c.id)));
   };
 
   const deselectAllForMetrics = () => {
@@ -389,6 +392,11 @@ export function ComparablesModule({
       newSet.delete(id);
       return newSet;
     });
+  };
+
+  const openMetricsDialog = (comparable: Comparable) => {
+    setSelectedComparableForMetrics(comparable);
+    setMetricsDialogOpen(true);
   };
 
   const formatCurrency = (value?: number) => {
@@ -682,6 +690,7 @@ export function ComparablesModule({
                       isCheckedForMetrics={metricsSelection.has(comp.id)}
                       onMetricsToggle={() => toggleMetricsSelection(comp.id)}
                       onRemove={() => removeFromSelected(comp.id)}
+                      onClick={() => openMetricsDialog(comp)}
                       formatCurrency={formatCurrency}
                       formatPercent={formatPercent}
                     />
@@ -700,6 +709,13 @@ export function ComparablesModule({
             </Button>
           </div>
         )}
+
+        {/* Metrics Dialog */}
+        <ComparableMetricsDialog
+          comparable={selectedComparableForMetrics}
+          open={metricsDialogOpen}
+          onOpenChange={setMetricsDialogOpen}
+        />
       </CardContent>
     </Card>
   );
@@ -715,6 +731,7 @@ interface ComparableCardProps {
   isCheckedForMetrics?: boolean;
   onMetricsToggle?: () => void;
   onRemove?: () => void;
+  onClick?: () => void;
   // Common props
   formatCurrency: (value?: number) => string;
   formatPercent: (value?: number) => string;
@@ -728,6 +745,7 @@ function ComparableCard({
   isCheckedForMetrics,
   onMetricsToggle,
   onRemove,
+  onClick,
   formatCurrency,
   formatPercent,
 }: ComparableCardProps) {
@@ -738,15 +756,23 @@ function ComparableCard({
   const isInSelectedMode = mode === 'selected';
   const cardSelected = isInSelectedMode || isSelected;
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Only trigger onClick in selected mode and if clicking the card itself
+    if (isInSelectedMode && onClick) {
+      onClick();
+    }
+  };
+
   return (
     <div 
       className={`border rounded-lg p-4 transition-colors ${
         cardSelected ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/50'
-      }`}
+      } ${isInSelectedMode ? 'cursor-pointer hover:bg-primary/10' : ''}`}
+      onClick={handleCardClick}
     >
       <div className="flex gap-4">
         {/* Checkbox / Actions */}
-        <div className="flex items-start pt-1">
+        <div className="flex items-start pt-1" onClick={(e) => e.stopPropagation()}>
           {isInSelectedMode ? (
             <Checkbox
               checked={isCheckedForMetrics}
