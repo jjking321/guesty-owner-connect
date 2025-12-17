@@ -57,6 +57,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const [showCompset, setShowCompset] = useState(false);
   const [showComparison, setShowComparison] = useState(true);
   const [compsetMonthlyAverages, setCompsetMonthlyAverages] = useState<CompsetMonthlyAverage[]>([]);
+  const [calendarRates, setCalendarRates] = useState<Map<string, { avgRate: number; totalDays: number; availableDays: number }>>(new Map());
   const { toast } = useToast();
 
   const currentYear = new Date().getFullYear();
@@ -247,11 +248,11 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     return result;
   }, [reservations, year, compsetMonthlyAverages]);
 
-  // Calculate year-over-year ADR data
+  // Calculate year-over-year ADR data - uses calendar asking rates for future months
   const adrData = useMemo((): TrendDataPoint[] => {
-    if (reservations.length === 0) return [];
-
     const lastYear = year - 1;
+    const currentDate = new Date();
+    const currentMonthKey = format(currentDate, 'yyyy-MM');
 
     // Initialize data structures for both years - tracking revenue and nights
     const currentYearData = new Map<string, { revenue: number; nightsBooked: number }>();
@@ -259,11 +260,11 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
 
     // Get all 12 months for both years
     for (let month = 0; month < 12; month++) {
-      const currentDate = new Date(year, month, 1);
-      const lastDate = new Date(lastYear, month, 1);
+      const currentDateObj = new Date(year, month, 1);
+      const lastDateObj = new Date(lastYear, month, 1);
       
-      const currentKey = format(currentDate, 'yyyy-MM');
-      const lastKey = format(lastDate, 'yyyy-MM');
+      const currentKey = format(currentDateObj, 'yyyy-MM');
+      const lastKey = format(lastDateObj, 'yyyy-MM');
       
       currentYearData.set(currentKey, { revenue: 0, nightsBooked: 0 });
       lastYearData.set(lastKey, { revenue: 0, nightsBooked: 0 });
@@ -299,7 +300,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       }
     });
 
-    // Create compset ADR map
+    // Create compset ADR map (uses future asking rates for future months)
     const compsetAdrMap = new Map<string, number>();
     compsetMonthlyAverages.forEach(avg => {
       compsetAdrMap.set(avg.month, avg.adr);
@@ -309,17 +310,28 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     const result = [];
     for (let month = 0; month < 12; month++) {
       const monthName = format(new Date(2000, month, 1), 'MMM');
-      const currentDate = new Date(year, month, 1);
-      const lastDate = new Date(lastYear, month, 1);
+      const currentDateObj = new Date(year, month, 1);
+      const lastDateObj = new Date(lastYear, month, 1);
       
-      const currentKey = format(currentDate, 'yyyy-MM');
-      const lastKey = format(lastDate, 'yyyy-MM');
+      const currentKey = format(currentDateObj, 'yyyy-MM');
+      const lastKey = format(lastDateObj, 'yyyy-MM');
       
       const currentData = currentYearData.get(currentKey)!;
       const lastData = lastYearData.get(lastKey)!;
       
-      // Calculate ADR = revenue / nights booked
-      const currentADR = currentData.nightsBooked > 0 ? currentData.revenue / currentData.nightsBooked : 0;
+      // Check if this is a future month
+      const isFutureMonth = currentKey > currentMonthKey;
+      
+      // For future months, use calendar asking rates; for past months, use realized ADR
+      let currentADR: number;
+      if (isFutureMonth && calendarRates.has(currentKey)) {
+        const calData = calendarRates.get(currentKey)!;
+        currentADR = calData.avgRate;
+      } else {
+        // Use realized ADR from reservations
+        currentADR = currentData.nightsBooked > 0 ? currentData.revenue / currentData.nightsBooked : 0;
+      }
+      
       const lastADR = lastData.nightsBooked > 0 ? lastData.revenue / lastData.nightsBooked : 0;
       
       // Get compset average for this month
@@ -335,7 +347,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     }
 
     return result;
-  }, [reservations, year, compsetMonthlyAverages]);
+  }, [reservations, year, compsetMonthlyAverages, calendarRates]);
 
   useEffect(() => {
     loadGoalsComparison();
@@ -428,6 +440,49 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         compsetAverages = Array.from(merged.values()).sort((a, b) => a.month.localeCompare(b.month));
       }
       setCompsetMonthlyAverages(compsetAverages);
+
+      // Fetch calendar rates for property's future asking rates (ADR chart)
+      if (listingId && !externalGoals) {
+        const startOfYear = `${year}-01-01`;
+        const endOfYear = `${year}-12-31`;
+        
+        const { data: calendarData } = await supabase
+          .from('capacity_calendar')
+          .select('date, price')
+          .eq('listing_id', listingId)
+          .gte('date', startOfYear)
+          .lte('date', endOfYear)
+          .not('price', 'is', null);
+
+        // Aggregate calendar rates by month
+        const calendarRatesMap = new Map<string, { totalPrice: number; count: number; availableDays: number; totalDays: number }>();
+        
+        if (calendarData) {
+          calendarData.forEach((day: any) => {
+            const monthKey = format(parseISO(day.date), 'yyyy-MM');
+            if (!calendarRatesMap.has(monthKey)) {
+              calendarRatesMap.set(monthKey, { totalPrice: 0, count: 0, availableDays: 0, totalDays: 0 });
+            }
+            const monthData = calendarRatesMap.get(monthKey)!;
+            if (day.price && day.price > 0) {
+              monthData.totalPrice += day.price;
+              monthData.count++;
+            }
+            monthData.totalDays++;
+          });
+        }
+
+        // Convert to average rates
+        const processedCalendarRates = new Map<string, { avgRate: number; totalDays: number; availableDays: number }>();
+        calendarRatesMap.forEach((data, monthKey) => {
+          processedCalendarRates.set(monthKey, {
+            avgRate: data.count > 0 ? data.totalPrice / data.count : 0,
+            totalDays: data.totalDays,
+            availableDays: data.count,
+          });
+        });
+        setCalendarRates(processedCalendarRates);
+      }
 
       // Create a map for quick lookup of compset averages by month
       const compsetMap = new Map<string, number>();
