@@ -463,7 +463,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         <p className="font-medium text-sm mb-2">{data.month}</p>
         <div className="space-y-1">
           {payload
-            .filter((entry: any) => entry.name && !entry.name.includes('Range'))
+            .filter((entry: any) => entry.name && !entry.name.includes('Range') && entry.name !== 'Last Year')
             .map((entry: any, index: number) => (
               <div key={index} className="flex items-center gap-2 text-sm">
                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />
