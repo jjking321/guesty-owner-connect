@@ -382,16 +382,32 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       }
 
       // Fetch compset monthly averages if viewing single property
+      // This includes both historical (monthly_averages) and future (future_monthly_averages) data
       let compsetAverages: CompsetMonthlyAverage[] = [];
       if (listingId && !externalGoals) {
         const { data: compsetData } = await supabase
           .from('property_compset_summary')
-          .select('monthly_averages')
+          .select('monthly_averages, future_monthly_averages')
           .eq('listing_id', listingId)
           .single();
         
+        // Start with historical averages
         if (compsetData?.monthly_averages && Array.isArray(compsetData.monthly_averages)) {
           compsetAverages = compsetData.monthly_averages as unknown as CompsetMonthlyAverage[];
+        }
+        
+        // Merge in future averages (future data takes precedence for overlapping months)
+        if (compsetData?.future_monthly_averages && Array.isArray(compsetData.future_monthly_averages)) {
+          const futureAverages = compsetData.future_monthly_averages as unknown as CompsetMonthlyAverage[];
+          const historicalMap = new Map(compsetAverages.map(avg => [avg.month, avg]));
+          
+          // Add future data, overwriting historical if there's overlap
+          for (const futureAvg of futureAverages) {
+            historicalMap.set(futureAvg.month, futureAvg);
+          }
+          
+          // Convert back to array and sort by month
+          compsetAverages = Array.from(historicalMap.values()).sort((a, b) => a.month.localeCompare(b.month));
         }
       }
       setCompsetMonthlyAverages(compsetAverages);
