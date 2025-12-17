@@ -194,12 +194,13 @@ async function performSync(
   guestyAccountId: string,
   syncJobId: string,
   resumeFromOffset: number,
-  authToken: string
+  authToken: string,
+  guestyToken?: string  // Reuse token from previous batch
 ) {
   console.log(`Starting bulk calendar sync for account ${guestyAccountId}, resuming from offset ${resumeFromOffset}`);
 
   try {
-    // Get Guesty credentials
+    // Get Guesty credentials (needed for new token if not provided)
     const { data: account, error: accountError } = await supabase
       .from('guesty_accounts')
       .select('client_id, client_secret')
@@ -234,8 +235,15 @@ async function performSync(
       progress_message: `Starting sync of ${listings.length} listings...`,
     }).eq('id', syncJobId);
 
-    // Get access token
-    const accessToken = await getGuestyAccessToken(account.client_id, account.client_secret);
+    // Reuse provided token or get a new one (only on first batch)
+    let accessToken: string;
+    if (guestyToken) {
+      console.log('Reusing Guesty token from previous batch');
+      accessToken = guestyToken;
+    } else {
+      console.log('Fetching new Guesty access token...');
+      accessToken = await getGuestyAccessToken(account.client_id, account.client_secret);
+    }
 
     // Calculate date range
     const today = new Date();
@@ -315,10 +323,10 @@ async function performSync(
 
         console.log(`Batch of ${BATCH_SIZE} complete at listing ${i + 1}. Self-invoking for continuation...`);
 
-        // Self-invoke to continue with next batch
+        // Self-invoke to continue with next batch, passing the token to avoid OAuth rate limits
         const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
           headers: { Authorization: `Bearer ${authToken}` },
-          body: { guestyAccountId },
+          body: { guestyAccountId, guestyToken: accessToken },
         });
 
         if (invokeError) {
@@ -395,7 +403,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { guestyAccountId } = await req.json();
+    const { guestyAccountId, guestyToken } = await req.json();
     
     if (!guestyAccountId) {
       return new Response(
@@ -450,8 +458,8 @@ Deno.serve(async (req) => {
       console.log(`Created new sync job: ${syncJobId}`);
     }
 
-    // Start background sync with auth token for self-invocation
-    EdgeRuntime.waitUntil(performSync(supabase, guestyAccountId, syncJobId, resumeFromOffset, authToken));
+    // Start background sync with auth token for self-invocation and optional Guesty token
+    EdgeRuntime.waitUntil(performSync(supabase, guestyAccountId, syncJobId, resumeFromOffset, authToken, guestyToken));
 
     return new Response(
       JSON.stringify({ 
