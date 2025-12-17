@@ -37,7 +37,13 @@ All colors MUST be HSL.
     --ring: 220 70% 50%;
 
     --radius: 0.75rem;
-    
+
+    /* Chart palette (used by Recharts via hsl(var(--chart-n))) */
+    --chart-1: 220 70% 50%;
+    --chart-2: 180 55% 45%;
+    --chart-3: 38 92% 55%;
+    --chart-4: 290 70% 55%;
+
     --gradient-primary: linear-gradient(135deg, hsl(220 70% 50%), hsl(180 65% 55%));
     --gradient-subtle: linear-gradient(180deg, hsl(220 17% 97%), hsl(0 0% 100%));
     --shadow-soft: 0 2px 8px -2px hsl(220 20% 10% / 0.08);
@@ -88,7 +94,13 @@ All colors MUST be HSL.
     --border: 220 15% 18%;
     --input: 220 15% 18%;
     --ring: 220 70% 55%;
-    
+
+    /* Chart palette (dark) */
+    --chart-1: 220 70% 60%;
+    --chart-2: 180 55% 55%;
+    --chart-3: 38 92% 60%;
+    --chart-4: 290 70% 65%;
+
     --gradient-primary: linear-gradient(135deg, hsl(220 70% 55%), hsl(180 65% 60%));
     --gradient-subtle: linear-gradient(180deg, hsl(220 20% 8%), hsl(220 18% 10%));
     --shadow-soft: 0 2px 8px -2px hsl(0 0% 0% / 0.3);
