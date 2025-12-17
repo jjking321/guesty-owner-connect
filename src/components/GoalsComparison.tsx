@@ -491,12 +491,10 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
             </div>
           )}
           {showComparison && data.lastYearActual !== undefined && (
-            <div className="mt-2 pt-2 border-t border-border">
-              <div className="flex items-center gap-2 text-sm">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(var(--muted-foreground))' }} />
-                <span className="text-muted-foreground">Last Year:</span>
-                <span className="font-medium">${data.lastYearActual.toLocaleString()}</span>
-              </div>
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(var(--muted-foreground))' }} />
+              <span className="text-muted-foreground">Last Year:</span>
+              <span className="font-medium">${data.lastYearActual.toLocaleString()}</span>
             </div>
           )}
         </div>
