@@ -767,6 +767,7 @@ export type Database = {
           avg_ttm_revpar: number | null
           calculated_at: string | null
           created_at: string | null
+          future_monthly_averages: Json | null
           id: string
           listing_id: string
           monthly_averages: Json | null
@@ -784,6 +785,7 @@ export type Database = {
           avg_ttm_revpar?: number | null
           calculated_at?: string | null
           created_at?: string | null
+          future_monthly_averages?: Json | null
           id?: string
           listing_id: string
           monthly_averages?: Json | null
@@ -801,6 +803,7 @@ export type Database = {
           avg_ttm_revpar?: number | null
           calculated_at?: string | null
           created_at?: string | null
+          future_monthly_averages?: Json | null
           id?: string
           listing_id?: string
           monthly_averages?: Json | null

@@ -8,6 +8,84 @@ const corsHeaders = {
 
 const AIRROI_API_URL = 'https://api.airroi.com/listings/future/rates';
 
+interface FutureRateDay {
+  date: string;
+  available: boolean;
+  rate: number;
+}
+
+interface MonthlyAverage {
+  month: string;
+  adr: number;
+  occupancy: number;
+  revpar: number;
+}
+
+// Helper function to aggregate daily future rates into monthly averages
+function aggregateFutureRatesToMonthly(comparablesWithRates: any[]): MonthlyAverage[] {
+  // Group all daily rates by month across all comparables
+  const monthlyData = new Map<string, { totalRate: number; rateCount: number; bookedDays: number; totalDays: number }>();
+
+  for (const comparable of comparablesWithRates) {
+    const futureRates = comparable.future_rates;
+    if (!futureRates || !Array.isArray(futureRates.rates)) continue;
+
+    for (const day of futureRates.rates as FutureRateDay[]) {
+      if (!day.date) continue;
+      
+      // Extract month key (e.g., "2025-07")
+      const monthKey = day.date.substring(0, 7);
+      
+      if (!monthlyData.has(monthKey)) {
+        monthlyData.set(monthKey, { totalRate: 0, rateCount: 0, bookedDays: 0, totalDays: 0 });
+      }
+      
+      const data = monthlyData.get(monthKey)!;
+      data.totalDays++;
+      
+      // Add rate if available (for ADR calculation)
+      if (day.rate && day.rate > 0) {
+        data.totalRate += day.rate;
+        data.rateCount++;
+      }
+      
+      // Count booked/unavailable days for occupancy
+      if (!day.available) {
+        data.bookedDays++;
+      }
+    }
+  }
+
+  // Convert to monthly averages
+  const result: MonthlyAverage[] = [];
+  
+  // Sort months chronologically
+  const sortedMonths = Array.from(monthlyData.keys()).sort();
+  
+  for (const month of sortedMonths) {
+    const data = monthlyData.get(month)!;
+    
+    // Calculate averages across all comparables
+    // ADR: average of all rates (only counting days with rates)
+    const adr = data.rateCount > 0 ? data.totalRate / data.rateCount : 0;
+    
+    // Occupancy: booked days / total days (as decimal 0-1)
+    const occupancy = data.totalDays > 0 ? data.bookedDays / data.totalDays : 0;
+    
+    // RevPAR = ADR × Occupancy
+    const revpar = adr * occupancy;
+    
+    result.push({
+      month,
+      adr,
+      occupancy,
+      revpar,
+    });
+  }
+
+  return result;
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -48,6 +126,9 @@ serve(async (req) => {
     }
 
     console.log(`Found ${comparables.length} comparables to fetch future rates for`);
+
+    // Get the listing_id for the compset summary update (all comparables should have same listing_id)
+    const listingId = comparables[0].listing_id;
 
     let successCount = 0;
     let failedCount = 0;
@@ -106,6 +187,47 @@ serve(async (req) => {
         console.error(`Error processing comparable ${comparable.id}:`, error);
         errors.push(`Process ${comparable.airroi_listing_id}: ${errorMessage}`);
         failedCount++;
+      }
+    }
+
+    console.log(`Completed fetching: ${successCount} success, ${failedCount} failed`);
+
+    // After fetching all future rates, aggregate and store monthly averages
+    if (successCount > 0 && listingId) {
+      console.log(`Aggregating future rates into monthly averages for listing ${listingId}`);
+
+      // Fetch all selected comparables with future rates for this listing
+      const { data: selectedComparables, error: selectError } = await supabase
+        .from('property_comparables')
+        .select('future_rates')
+        .eq('listing_id', listingId)
+        .eq('is_selected', true)
+        .not('future_rates', 'is', null);
+
+      if (selectError) {
+        console.error(`Failed to fetch selected comparables: ${selectError.message}`);
+      } else if (selectedComparables && selectedComparables.length > 0) {
+        // Aggregate future rates into monthly averages
+        const futureMonthlyAverages = aggregateFutureRatesToMonthly(selectedComparables);
+        console.log(`Calculated ${futureMonthlyAverages.length} months of future averages`);
+
+        // Upsert to property_compset_summary
+        const { error: upsertError } = await supabase
+          .from('property_compset_summary')
+          .upsert({
+            listing_id: listingId,
+            future_monthly_averages: futureMonthlyAverages,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'listing_id',
+          });
+
+        if (upsertError) {
+          console.error(`Failed to upsert future monthly averages: ${upsertError.message}`);
+          errors.push(`Aggregation: ${upsertError.message}`);
+        } else {
+          console.log(`Successfully stored future monthly averages for listing ${listingId}`);
+        }
       }
     }
 
