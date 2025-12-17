@@ -111,7 +111,7 @@ export function ComparablesModule({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [radiusMiles, setRadiusMiles] = useState<number>(5);
+  const [radiusMiles, setRadiusMiles] = useState<number>(1);
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [matchBedrooms, setMatchBedrooms] = useState(true);
