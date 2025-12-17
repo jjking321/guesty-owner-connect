@@ -255,7 +255,26 @@ Deno.serve(async (req) => {
         }
       }
     }
-    // Format 2: Object with data.days array
+    // Format 2: Object with data.days array (actual Guesty format: { status, data: { days: [...] } })
+    else if (calendarData.data && calendarData.data.days && Array.isArray(calendarData.data.days)) {
+      console.log(`Processing data.days array format with ${calendarData.data.days.length} days`);
+      for (const day of calendarData.data.days) {
+        calendarRecords.push({
+          listing_id: listingId,
+          date: day.date,
+          price: day.price || null,
+          currency: day.currency || 'USD',
+          min_nights: day.minNights || null,
+          status: day.status || null,
+          is_available: day.status === 'available',
+          cta: day.cta || false,
+          ctd: day.ctd || false,
+          block_reason: day.status === 'booked' ? 'reservation' : (day.status === 'unavailable' ? 'blocked' : null),
+          synced_from_guesty_at: syncedAt,
+        });
+      }
+    }
+    // Format 3: Object with data as direct array
     else if (calendarData.data && Array.isArray(calendarData.data)) {
       console.log(`Processing data array format with ${calendarData.data.length} days`);
       for (const day of calendarData.data) {
