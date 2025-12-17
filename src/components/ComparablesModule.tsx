@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3 } from "lucide-react";
 import { ComparablesMap } from "./ComparablesMap";
 
 interface ComparablesModuleProps {
@@ -74,6 +74,8 @@ interface Comparable {
   fetched_at: string;
   is_selected: boolean;
   selected_at: string | null;
+  historical_metrics: unknown | null;
+  metrics_fetched_at: string | null;
 }
 
 const AMENITY_OPTIONS = [
@@ -112,6 +114,7 @@ export function ComparablesModule({
   const [currentOffset, setCurrentOffset] = useState(0);
   const [hasMoreResults, setHasMoreResults] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [fetchingMetrics, setFetchingMetrics] = useState(false);
 
   // Load existing comparables and mapbox token on mount
   useEffect(() => {
@@ -306,6 +309,41 @@ export function ComparablesModule({
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const fetchHistoricalMetrics = async () => {
+    if (selectedComparables.length === 0) return;
+    
+    setFetchingMetrics(true);
+    try {
+      const selectedIds = selectedComparables.map(c => c.id);
+      
+      const { data, error } = await supabase.functions.invoke('fetch-comparable-metrics', {
+        body: { comparable_ids: selectedIds }
+      });
+      
+      if (error) throw error;
+      
+      if (data.success) {
+        toast({
+          title: "Historical metrics fetched",
+          description: `Successfully fetched metrics for ${data.fetched} of ${data.total} comparables.`,
+        });
+        // Reload to show updated data
+        await loadExistingComparables();
+      } else {
+        throw new Error(data.error || 'Unknown error');
+      }
+    } catch (error: any) {
+      console.error('Error fetching historical metrics:', error);
+      toast({
+        title: "Error fetching metrics",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setFetchingMetrics(false);
     }
   };
 
@@ -557,17 +595,36 @@ export function ComparablesModule({
                 </p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {selectedComparables.map((comp) => (
-                  <ComparableCard
-                    key={comp.id}
-                    comparable={comp}
-                    isSelected={true}
-                    onToggle={() => toggleSelection(comp.id)}
-                    formatCurrency={formatCurrency}
-                    formatPercent={formatPercent}
-                  />
-                ))}
+              <div className="space-y-4">
+                {/* Header with Fetch Metrics Button */}
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-muted-foreground">
+                    {selectedComparables.length} comparable{selectedComparables.length !== 1 ? 's' : ''} selected
+                  </div>
+                  <Button 
+                    onClick={fetchHistoricalMetrics}
+                    disabled={fetchingMetrics}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                    {fetchingMetrics ? 'Fetching...' : 'Fetch Historical Metrics'}
+                  </Button>
+                </div>
+
+                {/* Comparables List */}
+                <div className="space-y-3">
+                  {selectedComparables.map((comp) => (
+                    <ComparableCard
+                      key={comp.id}
+                      comparable={comp}
+                      isSelected={true}
+                      onToggle={() => toggleSelection(comp.id)}
+                      formatCurrency={formatCurrency}
+                      formatPercent={formatPercent}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </TabsContent>

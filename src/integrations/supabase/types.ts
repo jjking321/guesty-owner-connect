@@ -622,6 +622,7 @@ export type Database = {
           cover_photo_url: string | null
           created_at: string | null
           fetched_at: string | null
+          historical_metrics: Json | null
           host_name: string | null
           id: string
           is_selected: boolean | null
@@ -629,6 +630,7 @@ export type Database = {
           listing_name: string | null
           listing_type: string | null
           location_info: Json | null
+          metrics_fetched_at: string | null
           performance_metrics: Json | null
           pricing_info: Json | null
           property_details: Json | null
@@ -644,6 +646,7 @@ export type Database = {
           cover_photo_url?: string | null
           created_at?: string | null
           fetched_at?: string | null
+          historical_metrics?: Json | null
           host_name?: string | null
           id?: string
           is_selected?: boolean | null
@@ -651,6 +654,7 @@ export type Database = {
           listing_name?: string | null
           listing_type?: string | null
           location_info?: Json | null
+          metrics_fetched_at?: string | null
           performance_metrics?: Json | null
           pricing_info?: Json | null
           property_details?: Json | null
@@ -666,6 +670,7 @@ export type Database = {
           cover_photo_url?: string | null
           created_at?: string | null
           fetched_at?: string | null
+          historical_metrics?: Json | null
           host_name?: string | null
           id?: string
           is_selected?: boolean | null
@@ -673,6 +678,7 @@ export type Database = {
           listing_name?: string | null
           listing_type?: string | null
           location_info?: Json | null
+          metrics_fetched_at?: string | null
           performance_metrics?: Json | null
           pricing_info?: Json | null
           property_details?: Json | null
