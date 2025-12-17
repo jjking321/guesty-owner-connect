@@ -74,7 +74,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const occupancyData = useMemo((): TrendDataPoint[] => {
     if (reservations.length === 0) return [];
 
-    const lastYear = currentYear - 1;
+    const lastYear = year - 1;
 
     // Initialize data structures for both years
     const currentYearData = new Map<string, { nightsBooked: number; totalDays: number }>();
@@ -82,7 +82,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
 
     // Get all 12 months for both years
     for (let month = 0; month < 12; month++) {
-      const currentDate = new Date(currentYear, month, 1);
+      const currentDate = new Date(year, month, 1);
       const lastDate = new Date(lastYear, month, 1);
       
       const currentKey = format(currentDate, 'yyyy-MM');
@@ -103,12 +103,12 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       let currentNight = checkIn;
       while (currentNight < checkOut) {
         const monthKey = format(currentNight, 'yyyy-MM');
-        const year = currentNight.getFullYear();
+        const nightYear = currentNight.getFullYear();
         
-        if (year === currentYear && currentYearData.has(monthKey)) {
+        if (nightYear === year && currentYearData.has(monthKey)) {
           const data = currentYearData.get(monthKey)!;
           data.nightsBooked++;
-        } else if (year === lastYear && lastYearData.has(monthKey)) {
+        } else if (nightYear === lastYear && lastYearData.has(monthKey)) {
           const data = lastYearData.get(monthKey)!;
           data.nightsBooked++;
         }
@@ -121,7 +121,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     const result = [];
     for (let month = 0; month < 12; month++) {
       const monthName = format(new Date(2000, month, 1), 'MMM');
-      const currentDate = new Date(currentYear, month, 1);
+      const currentDate = new Date(year, month, 1);
       const lastDate = new Date(lastYear, month, 1);
       
       const currentKey = format(currentDate, 'yyyy-MM');
@@ -139,13 +139,13 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     }
 
     return result;
-  }, [reservations, currentYear]);
+  }, [reservations, year]);
 
   // Calculate year-over-year RevPAR data
   const revparData = useMemo((): TrendDataPoint[] => {
     if (reservations.length === 0) return [];
 
-    const lastYear = currentYear - 1;
+    const lastYear = year - 1;
 
     // Initialize data structures for both years - tracking revenue and nights
     const currentYearData = new Map<string, { revenue: number; nightsBooked: number; totalDays: number }>();
@@ -153,7 +153,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
 
     // Get all 12 months for both years
     for (let month = 0; month < 12; month++) {
-      const currentDate = new Date(currentYear, month, 1);
+      const currentDate = new Date(year, month, 1);
       const lastDate = new Date(lastYear, month, 1);
       
       const currentKey = format(currentDate, 'yyyy-MM');
@@ -177,13 +177,13 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       let nightCursor = resCheckIn;
       while (nightCursor < resCheckOut) {
         const monthKey = format(nightCursor, 'yyyy-MM');
-        const year = nightCursor.getFullYear();
+        const nightYear = nightCursor.getFullYear();
         
-        if (year === currentYear && currentYearData.has(monthKey)) {
+        if (nightYear === year && currentYearData.has(monthKey)) {
           const data = currentYearData.get(monthKey)!;
           data.revenue += resRevenuePerNight;
           data.nightsBooked++;
-        } else if (year === lastYear && lastYearData.has(monthKey)) {
+        } else if (nightYear === lastYear && lastYearData.has(monthKey)) {
           const data = lastYearData.get(monthKey)!;
           data.revenue += resRevenuePerNight;
           data.nightsBooked++;
@@ -197,7 +197,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     const result = [];
     for (let month = 0; month < 12; month++) {
       const monthName = format(new Date(2000, month, 1), 'MMM');
-      const currentDate = new Date(currentYear, month, 1);
+      const currentDate = new Date(year, month, 1);
       const lastDate = new Date(lastYear, month, 1);
       
       const currentKey = format(currentDate, 'yyyy-MM');
@@ -224,7 +224,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     }
 
     return result;
-  }, [reservations, currentYear]);
+  }, [reservations, year]);
 
   useEffect(() => {
     loadGoalsComparison();
@@ -649,8 +649,8 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
             <CardTitle>{getChartTitle()}</CardTitle>
             <CardDescription>{getChartDescription()}</CardDescription>
           </div>
-          {/* Year selector - only show for revenue metric when viewing single property */}
-          {activeMetric === 'revenue' && !externalGoals && listingId && (
+          {/* Year selector - show when viewing single property */}
+          {!externalGoals && listingId && (
             <Tabs value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
               <TabsList>
                 {availableYears.map((yr) => (
