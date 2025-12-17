@@ -375,7 +375,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           .eq('year', year)
           .order('generated_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
         forecastData = data ? [data] : [];
       } else {
         forecastData = [];
@@ -389,7 +389,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           .from('property_compset_summary')
           .select('monthly_averages, future_monthly_averages')
           .eq('listing_id', listingId)
-          .single();
+          .maybeSingle();
         
         // Start with historical averages
         if (compsetData?.monthly_averages && Array.isArray(compsetData.monthly_averages)) {
