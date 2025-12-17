@@ -25,6 +25,15 @@ interface GoalData {
   forecastP25?: number;
   forecastP50?: number;
   forecastP75?: number;
+  compsetAverage?: number;
+}
+
+interface CompsetMonthlyAverage {
+  month: string;
+  revenue: number;
+  adr: number;
+  occupancy: number;
+  revpar: number;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -34,6 +43,8 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
   const [cumulativeData, setCumulativeData] = useState<GoalData[]>([]);
   const [showForecast, setShowForecast] = useState(false);
+  const [showCompset, setShowCompset] = useState(false);
+  const [compsetMonthlyAverages, setCompsetMonthlyAverages] = useState<CompsetMonthlyAverage[]>([]);
   const { toast } = useToast();
 
   const currentYear = new Date().getFullYear();
@@ -92,6 +103,27 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         forecastData = [];
       }
 
+      // Fetch compset monthly averages if viewing single property
+      let compsetAverages: CompsetMonthlyAverage[] = [];
+      if (listingId && !externalGoals) {
+        const { data: compsetData } = await supabase
+          .from('property_compset_summary')
+          .select('monthly_averages')
+          .eq('listing_id', listingId)
+          .single();
+        
+        if (compsetData?.monthly_averages && Array.isArray(compsetData.monthly_averages)) {
+          compsetAverages = compsetData.monthly_averages as unknown as CompsetMonthlyAverage[];
+        }
+      }
+      setCompsetMonthlyAverages(compsetAverages);
+
+      // Create a map for quick lookup of compset averages by month
+      const compsetMap = new Map<string, number>();
+      compsetAverages.forEach(avg => {
+        compsetMap.set(avg.month, avg.revenue);
+      });
+
       // Calculate actual revenue per month
       const monthly: GoalData[] = [];
       const cumulative: GoalData[] = [];
@@ -102,6 +134,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       let cumulativeForecastP25 = 0;
       let cumulativeForecastP50 = 0;
       let cumulativeForecastP75 = 0;
+      let cumulativeCompset = 0;
       const currentMonth = new Date().getMonth();
       const currentYearActual = new Date().getFullYear();
 
@@ -166,6 +199,10 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         // If viewing current year: only months after current month
         const isFutureMonth = year > currentYearActual || 
           (year === currentYearActual && month > currentMonth);
+
+        // Get compset average for this month
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const compsetAvg = compsetMap.get(monthKey);
         
         // Monthly data
         monthly.push({
@@ -177,6 +214,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           forecastP25: isFutureMonth ? Math.round(forecastP25) : undefined,
           forecastP50: isFutureMonth ? Math.round(forecastP50) : undefined,
           forecastP75: isFutureMonth ? Math.round(forecastP75) : undefined,
+          compsetAverage: compsetAvg !== undefined ? Math.round(compsetAvg) : undefined,
         });
 
         // Cumulative data
@@ -187,6 +225,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         cumulativeForecastP25 += forecastP25;
         cumulativeForecastP50 += forecastP50;
         cumulativeForecastP75 += forecastP75;
+        if (compsetAvg !== undefined) cumulativeCompset += compsetAvg;
 
         cumulative.push({
           month: monthNames[month],
@@ -197,6 +236,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           forecastP25: isFutureMonth ? Math.round(cumulativeForecastP25) : undefined,
           forecastP50: isFutureMonth ? Math.round(cumulativeForecastP50) : undefined,
           forecastP75: isFutureMonth ? Math.round(cumulativeForecastP75) : undefined,
+          compsetAverage: compsetAvg !== undefined ? Math.round(cumulativeCompset) : undefined,
         });
       }
 
@@ -237,6 +277,15 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                 <div>P25 (Low): ${data.forecastP25?.toLocaleString()}</div>
                 <div>P50 (Mid): ${data.forecastP50?.toLocaleString()}</div>
                 <div>P75 (High): ${data.forecastP75?.toLocaleString()}</div>
+              </div>
+            </div>
+          )}
+          {data.compsetAverage !== undefined && showCompset && (
+            <div className="mt-2 pt-2 border-t border-border">
+              <div className="flex items-center gap-2 text-sm">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: '#8b5cf6' }} />
+                <span className="text-muted-foreground">Compset Avg:</span>
+                <span className="font-medium">${data.compsetAverage.toLocaleString()}</span>
               </div>
             </div>
           )}
@@ -359,15 +408,34 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                 <TabsTrigger value="cumulative">Cumulative</TabsTrigger>
               </TabsList>
               
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="show-forecast"
-                  checked={showForecast}
-                  onCheckedChange={(checked) => setShowForecast(checked as boolean)}
-                />
-                <Label htmlFor="show-forecast" className="text-sm cursor-pointer">
-                  Show Forecast Range
-                </Label>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="show-forecast"
+                    checked={showForecast}
+                    onCheckedChange={(checked) => setShowForecast(checked as boolean)}
+                  />
+                  <Label htmlFor="show-forecast" className="text-sm cursor-pointer">
+                    Show Forecast Range
+                  </Label>
+                </div>
+                {listingId && !externalGoals && (
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="show-compset"
+                      checked={showCompset}
+                      onCheckedChange={(checked) => setShowCompset(checked as boolean)}
+                      disabled={compsetMonthlyAverages.length === 0}
+                    />
+                    <Label 
+                      htmlFor="show-compset" 
+                      className={`text-sm cursor-pointer ${compsetMonthlyAverages.length === 0 ? 'text-muted-foreground' : ''}`}
+                      title={compsetMonthlyAverages.length === 0 ? 'No compset data available. Fetch historical metrics from selected comparables first.' : ''}
+                    >
+                      Show Compset Average
+                    </Label>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -421,6 +489,17 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                         connectNulls={false}
                       />
                     </>
+                  )}
+                  {showCompset && (
+                    <Line 
+                      type="monotone" 
+                      dataKey="compsetAverage" 
+                      stroke="#8b5cf6" 
+                      strokeWidth={2} 
+                      strokeDasharray="3 3"
+                      name="Compset Avg"
+                      connectNulls={false}
+                    />
                   )}
                 </LineChart>
               </ResponsiveContainer>
@@ -476,6 +555,17 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                         connectNulls={false}
                       />
                     </>
+                  )}
+                  {showCompset && (
+                    <Line 
+                      type="monotone" 
+                      dataKey="compsetAverage" 
+                      stroke="#8b5cf6" 
+                      strokeWidth={2} 
+                      strokeDasharray="3 3"
+                      name="Compset Avg"
+                      connectNulls={false}
+                    />
                   )}
                 </LineChart>
               </ResponsiveContainer>

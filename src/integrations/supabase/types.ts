@@ -769,6 +769,7 @@ export type Database = {
           created_at: string | null
           id: string
           listing_id: string
+          monthly_averages: Json | null
           selected_comparables_count: number | null
           updated_at: string | null
         }
@@ -785,6 +786,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           listing_id: string
+          monthly_averages?: Json | null
           selected_comparables_count?: number | null
           updated_at?: string | null
         }
@@ -801,6 +803,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           listing_id?: string
+          monthly_averages?: Json | null
           selected_comparables_count?: number | null
           updated_at?: string | null
         }

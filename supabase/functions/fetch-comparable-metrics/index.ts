@@ -102,16 +102,24 @@ function calculateTtmRollups(results: HistoricalMetric[]): { ttmMetrics: TtmMetr
   };
 }
 
+interface MonthlyAverage {
+  month: string;
+  revenue: number;
+  adr: number;
+  occupancy: number;
+  revpar: number;
+}
+
 async function updateCompsetSummary(
   supabase: any,
   listingId: string
 ): Promise<void> {
   console.log(`Updating compset summary for listing ${listingId}`);
 
-  // Get all selected comparables with TTM data
+  // Get all selected comparables with TTM data AND historical metrics
   const { data: selectedComps, error: selectError } = await supabase
     .from('property_comparables')
-    .select('ttm_revenue, ttm_adr, ttm_occupancy, ttm_revpar, prior_ttm_revenue, prior_ttm_adr, prior_ttm_occupancy, prior_ttm_revpar')
+    .select('ttm_revenue, ttm_adr, ttm_occupancy, ttm_revpar, prior_ttm_revenue, prior_ttm_adr, prior_ttm_occupancy, prior_ttm_revpar, historical_metrics')
     .eq('listing_id', listingId)
     .eq('is_selected', true)
     .not('ttm_revenue', 'is', null);
@@ -122,7 +130,7 @@ async function updateCompsetSummary(
   }
 
   // Cast to proper type since new columns may not be in generated types yet
-  const comps = (selectedComps || []) as unknown as ComparableWithTtm[];
+  const comps = (selectedComps || []) as unknown as (ComparableWithTtm & { historical_metrics?: { results?: HistoricalMetric[] } })[];
 
   if (comps.length === 0) {
     console.log(`No selected comparables with TTM data for listing ${listingId}`);
@@ -134,11 +142,49 @@ async function updateCompsetSummary(
     return;
   }
 
-  // Calculate simple averages
+  // Calculate simple averages for TTM metrics
   const avg = (arr: (number | null)[]): number | null => {
     const valid = arr.filter((v): v is number => v != null);
     return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
   };
+
+  // Calculate monthly averages from historical_metrics
+  const monthlyDataMap = new Map<string, { revenue: number[]; adr: number[]; occupancy: number[]; revpar: number[] }>();
+
+  for (const comp of comps) {
+    const results = comp.historical_metrics?.results || [];
+    for (const record of results) {
+      if (!record.date) continue;
+      const monthKey = record.date; // Already in "YYYY-MM" format
+      
+      if (!monthlyDataMap.has(monthKey)) {
+        monthlyDataMap.set(monthKey, { revenue: [], adr: [], occupancy: [], revpar: [] });
+      }
+      
+      const monthData = monthlyDataMap.get(monthKey)!;
+      if (record.revenue != null) monthData.revenue.push(record.revenue);
+      if (record.average_daily_rate != null) monthData.adr.push(record.average_daily_rate);
+      if (record.occupancy != null) monthData.occupancy.push(record.occupancy);
+      if (record.rev_par != null) monthData.revpar.push(record.rev_par);
+    }
+  }
+
+  // Convert to array of monthly averages
+  const monthlyAverages: MonthlyAverage[] = [];
+  for (const [month, data] of monthlyDataMap.entries()) {
+    monthlyAverages.push({
+      month,
+      revenue: data.revenue.length > 0 ? data.revenue.reduce((a, b) => a + b, 0) / data.revenue.length : 0,
+      adr: data.adr.length > 0 ? data.adr.reduce((a, b) => a + b, 0) / data.adr.length : 0,
+      occupancy: data.occupancy.length > 0 ? data.occupancy.reduce((a, b) => a + b, 0) / data.occupancy.length : 0,
+      revpar: data.revpar.length > 0 ? data.revpar.reduce((a, b) => a + b, 0) / data.revpar.length : 0,
+    });
+  }
+
+  // Sort by month descending (most recent first)
+  monthlyAverages.sort((a, b) => b.month.localeCompare(a.month));
+
+  console.log(`Calculated ${monthlyAverages.length} monthly averages for listing ${listingId}`);
 
   const summary = {
     listing_id: listingId,
@@ -150,6 +196,7 @@ async function updateCompsetSummary(
     avg_prior_ttm_adr: avg(comps.map(c => c.prior_ttm_adr)),
     avg_prior_ttm_occupancy: avg(comps.map(c => c.prior_ttm_occupancy)),
     avg_prior_ttm_revpar: avg(comps.map(c => c.prior_ttm_revpar)),
+    monthly_averages: monthlyAverages,
     selected_comparables_count: comps.length,
     calculated_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -163,7 +210,7 @@ async function updateCompsetSummary(
   if (upsertError) {
     console.error(`Failed to upsert compset summary: ${upsertError.message}`);
   } else {
-    console.log(`Updated compset summary for listing ${listingId} with ${comps.length} comparables`);
+    console.log(`Updated compset summary for listing ${listingId} with ${comps.length} comparables and ${monthlyAverages.length} monthly averages`);
   }
 }
 
