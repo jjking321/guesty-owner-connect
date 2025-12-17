@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { ComparablesMap } from "./ComparablesMap";
 import { ComparableMetricsDialog } from "./ComparableMetricsDialog";
 interface ComparablesModuleProps {
@@ -76,6 +76,16 @@ interface Comparable {
   selected_at: string | null;
   historical_metrics: unknown | null;
   metrics_fetched_at: string | null;
+  // TTM rollup columns from database
+  ttm_revenue?: number | null;
+  ttm_adr?: number | null;
+  ttm_occupancy?: number | null;
+  ttm_revpar?: number | null;
+  prior_ttm_revenue?: number | null;
+  prior_ttm_adr?: number | null;
+  prior_ttm_occupancy?: number | null;
+  prior_ttm_revpar?: number | null;
+  rollups_calculated_at?: string | null;
 }
 
 const AMENITY_OPTIONS = [
@@ -880,41 +890,133 @@ function ComparableCard({
 
           {/* Performance Metrics */}
           <div className="flex flex-wrap gap-4 mt-3">
-            {metrics?.ttm_revenue !== undefined && (
-              <div className="bg-muted rounded px-2 py-1">
-                <span className="text-xs text-muted-foreground block">TTM Revenue</span>
-                <span className="font-semibold text-green-600 dark:text-green-400">
-                  {formatCurrency(metrics.ttm_revenue)}
-                </span>
-              </div>
-            )}
-            {metrics?.ttm_occupancy !== undefined && (
-              <div className="bg-muted rounded px-2 py-1">
-                <span className="text-xs text-muted-foreground block">Occupancy</span>
-                <span className="font-semibold">
-                  {formatPercent(metrics.ttm_occupancy)}
-                </span>
-              </div>
-            )}
-            {metrics?.ttm_adr !== undefined && (
-              <div className="bg-muted rounded px-2 py-1">
-                <span className="text-xs text-muted-foreground block">ADR</span>
-                <span className="font-semibold">
-                  {formatCurrency(metrics.ttm_adr)}
-                </span>
-              </div>
-            )}
-            {metrics?.ttm_revpar !== undefined && (
-              <div className="bg-muted rounded px-2 py-1">
-                <span className="text-xs text-muted-foreground block">RevPAR</span>
-                <span className="font-semibold">
-                  {formatCurrency(metrics.ttm_revpar)}
-                </span>
-              </div>
+            {/* Show calculated TTM rollups with YoY in selected mode, otherwise show API metrics */}
+            {isInSelectedMode && comparable.rollups_calculated_at ? (
+              <>
+                <MetricWithYoY
+                  label="TTM Revenue"
+                  current={comparable.ttm_revenue}
+                  prior={comparable.prior_ttm_revenue}
+                  formatValue={formatCurrency}
+                  isPositiveGood={true}
+                  highlightCurrent={true}
+                />
+                <MetricWithYoY
+                  label="Occupancy"
+                  current={comparable.ttm_occupancy}
+                  prior={comparable.prior_ttm_occupancy}
+                  formatValue={(v) => v != null ? `${(v * 100).toFixed(0)}%` : 'N/A'}
+                  isPositiveGood={true}
+                />
+                <MetricWithYoY
+                  label="ADR"
+                  current={comparable.ttm_adr}
+                  prior={comparable.prior_ttm_adr}
+                  formatValue={formatCurrency}
+                  isPositiveGood={true}
+                />
+                <MetricWithYoY
+                  label="RevPAR"
+                  current={comparable.ttm_revpar}
+                  prior={comparable.prior_ttm_revpar}
+                  formatValue={formatCurrency}
+                  isPositiveGood={true}
+                />
+              </>
+            ) : (
+              <>
+                {metrics?.ttm_revenue !== undefined && (
+                  <div className="bg-muted rounded px-2 py-1">
+                    <span className="text-xs text-muted-foreground block">TTM Revenue</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">
+                      {formatCurrency(metrics.ttm_revenue)}
+                    </span>
+                  </div>
+                )}
+                {metrics?.ttm_occupancy !== undefined && (
+                  <div className="bg-muted rounded px-2 py-1">
+                    <span className="text-xs text-muted-foreground block">Occupancy</span>
+                    <span className="font-semibold">
+                      {formatPercent(metrics.ttm_occupancy)}
+                    </span>
+                  </div>
+                )}
+                {metrics?.ttm_adr !== undefined && (
+                  <div className="bg-muted rounded px-2 py-1">
+                    <span className="text-xs text-muted-foreground block">ADR</span>
+                    <span className="font-semibold">
+                      {formatCurrency(metrics.ttm_adr)}
+                    </span>
+                  </div>
+                )}
+                {metrics?.ttm_revpar !== undefined && (
+                  <div className="bg-muted rounded px-2 py-1">
+                    <span className="text-xs text-muted-foreground block">RevPAR</span>
+                    <span className="font-semibold">
+                      {formatCurrency(metrics.ttm_revpar)}
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Helper component for displaying metric with YoY comparison
+interface MetricWithYoYProps {
+  label: string;
+  current?: number | null;
+  prior?: number | null;
+  formatValue: (value?: number | null) => string;
+  isPositiveGood?: boolean;
+  highlightCurrent?: boolean;
+}
+
+function MetricWithYoY({ 
+  label, 
+  current, 
+  prior, 
+  formatValue, 
+  isPositiveGood = true,
+  highlightCurrent = false 
+}: MetricWithYoYProps) {
+  const calculateYoY = (): { change: number | null; isPositive: boolean } => {
+    if (current == null || prior == null || prior === 0) {
+      return { change: null, isPositive: true };
+    }
+    const change = ((current - prior) / prior) * 100;
+    return { change, isPositive: change >= 0 };
+  };
+
+  const { change, isPositive } = calculateYoY();
+  const isGood = isPositiveGood ? isPositive : !isPositive;
+
+  return (
+    <div className="bg-muted rounded px-2 py-1 min-w-[80px]">
+      <span className="text-xs text-muted-foreground block">{label}</span>
+      <span className={`font-semibold ${highlightCurrent ? 'text-green-600 dark:text-green-400' : ''}`}>
+        {formatValue(current)}
+      </span>
+      {change !== null && (
+        <div className={`flex items-center gap-0.5 text-xs ${isGood ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+          {isPositive ? (
+            <TrendingUp className="h-3 w-3" />
+          ) : (
+            <TrendingDown className="h-3 w-3" />
+          )}
+          <span>{isPositive ? '+' : ''}{change.toFixed(1)}%</span>
+        </div>
+      )}
+      {change === null && prior == null && current != null && (
+        <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
+          <Minus className="h-3 w-3" />
+          <span>No prior</span>
+        </div>
+      )}
     </div>
   );
 }
