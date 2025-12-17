@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,7 +7,7 @@ import { LineChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, Responsive
 import { Target, TrendingUp, TrendingDown } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
+import { format, parseISO, getDaysInMonth, addDays } from "date-fns";
 
 interface GoalsComparisonProps {
   listingId?: string | null;
@@ -28,6 +28,13 @@ interface GoalData {
   compsetAverage?: number;
 }
 
+interface TrendDataPoint {
+  month: string;
+  monthKey: string;
+  currentYear: number;
+  lastYear: number;
+}
+
 interface CompsetMonthlyAverage {
   month: string;
   revenue: number;
@@ -39,12 +46,14 @@ interface CompsetMonthlyAverage {
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function GoalsComparison({ listingId, reservations, goals: externalGoals, forecasts: externalForecasts }: GoalsComparisonProps) {
+  const [activeMetric, setActiveMetric] = useState<'revenue' | 'occupancy' | 'revpar'>('revenue');
   const [activeTab, setActiveTab] = useState<'monthly' | 'cumulative'>('monthly');
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
   const [cumulativeData, setCumulativeData] = useState<GoalData[]>([]);
   const [showForecast, setShowForecast] = useState(false);
   const [showGoals, setShowGoals] = useState(true);
   const [showCompset, setShowCompset] = useState(false);
+  const [showComparison, setShowComparison] = useState(true);
   const [compsetMonthlyAverages, setCompsetMonthlyAverages] = useState<CompsetMonthlyAverage[]>([]);
   const { toast } = useToast();
 
@@ -59,6 +68,162 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   
   // Available years for selection
   const availableYears = [2024, 2025, 2026];
+
+  // Calculate year-over-year occupancy data
+  const occupancyData = useMemo((): TrendDataPoint[] => {
+    if (reservations.length === 0) return [];
+
+    const lastYear = currentYear - 1;
+
+    // Initialize data structures for both years
+    const currentYearData = new Map<string, { nightsBooked: number; totalDays: number }>();
+    const lastYearData = new Map<string, { nightsBooked: number; totalDays: number }>();
+
+    // Get all 12 months for both years
+    for (let month = 0; month < 12; month++) {
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      currentYearData.set(currentKey, { nightsBooked: 0, totalDays: getDaysInMonth(currentDate) });
+      lastYearData.set(lastKey, { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
+    }
+
+    // Process each reservation (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
+      if (!reservation.check_in || !reservation.check_out) return;
+
+      const checkIn = parseISO(reservation.check_in);
+      const checkOut = parseISO(reservation.check_out);
+      
+      // Iterate through each night of the reservation
+      let currentNight = checkIn;
+      while (currentNight < checkOut) {
+        const monthKey = format(currentNight, 'yyyy-MM');
+        const year = currentNight.getFullYear();
+        
+        if (year === currentYear && currentYearData.has(monthKey)) {
+          const data = currentYearData.get(monthKey)!;
+          data.nightsBooked++;
+        } else if (year === lastYear && lastYearData.has(monthKey)) {
+          const data = lastYearData.get(monthKey)!;
+          data.nightsBooked++;
+        }
+        
+        currentNight = addDays(currentNight, 1);
+      }
+    });
+
+    // Combine data by month name
+    const result = [];
+    for (let month = 0; month < 12; month++) {
+      const monthName = format(new Date(2000, month, 1), 'MMM');
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      const currentData = currentYearData.get(currentKey) || { nightsBooked: 0, totalDays: getDaysInMonth(currentDate) };
+      const lastData = lastYearData.get(lastKey) || { nightsBooked: 0, totalDays: getDaysInMonth(lastDate) };
+      
+      result.push({
+        month: monthName,
+        monthKey: currentKey,
+        currentYear: (currentData.nightsBooked / currentData.totalDays) * 100,
+        lastYear: (lastData.nightsBooked / lastData.totalDays) * 100,
+      });
+    }
+
+    return result;
+  }, [reservations, currentYear]);
+
+  // Calculate year-over-year RevPAR data
+  const revparData = useMemo((): TrendDataPoint[] => {
+    if (reservations.length === 0) return [];
+
+    const lastYear = currentYear - 1;
+
+    // Initialize data structures for both years - tracking revenue and nights
+    const currentYearData = new Map<string, { revenue: number; nightsBooked: number; totalDays: number }>();
+    const lastYearData = new Map<string, { revenue: number; nightsBooked: number; totalDays: number }>();
+
+    // Get all 12 months for both years
+    for (let month = 0; month < 12; month++) {
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      currentYearData.set(currentKey, { revenue: 0, nightsBooked: 0, totalDays: getDaysInMonth(currentDate) });
+      lastYearData.set(lastKey, { revenue: 0, nightsBooked: 0, totalDays: getDaysInMonth(lastDate) });
+    }
+
+    // Process each reservation (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
+      if (!reservation.check_in || !reservation.check_out) return;
+
+      const resCheckIn = parseISO(reservation.check_in);
+      const resCheckOut = parseISO(reservation.check_out);
+      const resRevenue = parseFloat(reservation.fare_accommodation_adjusted || 0);
+      const resNightsCount = reservation.nights_count || 0;
+      const resRevenuePerNight = resNightsCount > 0 ? resRevenue / resNightsCount : 0;
+      
+      // Allocate revenue and count nights for each day
+      let nightCursor = resCheckIn;
+      while (nightCursor < resCheckOut) {
+        const monthKey = format(nightCursor, 'yyyy-MM');
+        const year = nightCursor.getFullYear();
+        
+        if (year === currentYear && currentYearData.has(monthKey)) {
+          const data = currentYearData.get(monthKey)!;
+          data.revenue += resRevenuePerNight;
+          data.nightsBooked++;
+        } else if (year === lastYear && lastYearData.has(monthKey)) {
+          const data = lastYearData.get(monthKey)!;
+          data.revenue += resRevenuePerNight;
+          data.nightsBooked++;
+        }
+        
+        nightCursor = addDays(nightCursor, 1);
+      }
+    });
+
+    // Calculate RevPAR for each month
+    const result = [];
+    for (let month = 0; month < 12; month++) {
+      const monthName = format(new Date(2000, month, 1), 'MMM');
+      const currentDate = new Date(currentYear, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      const currentData = currentYearData.get(currentKey)!;
+      const lastData = lastYearData.get(lastKey)!;
+      
+      // Calculate ADR and Occupancy, then RevPAR = ADR × Occupancy
+      const currentADR = currentData.nightsBooked > 0 ? currentData.revenue / currentData.nightsBooked : 0;
+      const currentOccupancy = (currentData.nightsBooked / currentData.totalDays) * 100;
+      const currentRevPAR = currentADR * (currentOccupancy / 100);
+      
+      const lastADR = lastData.nightsBooked > 0 ? lastData.revenue / lastData.nightsBooked : 0;
+      const lastOccupancy = (lastData.nightsBooked / lastData.totalDays) * 100;
+      const lastRevPAR = lastADR * (lastOccupancy / 100);
+      
+      result.push({
+        month: monthName,
+        monthKey: currentKey,
+        currentYear: currentRevPAR,
+        lastYear: lastRevPAR,
+      });
+    }
+
+    return result;
+  }, [reservations, currentYear]);
 
   useEffect(() => {
     loadGoalsComparison();
@@ -252,7 +417,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     }
   };
 
-  const CustomTooltip = ({ active, payload }: any) => {
+  const RevenueTooltip = ({ active, payload }: any) => {
     if (!active || !payload || !payload.length) return null;
 
     const data = payload[0].payload;
@@ -295,6 +460,41 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     );
   };
 
+  const TrendTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    
+    const isOccupancy = activeMetric === 'occupancy';
+    const isRevPAR = activeMetric === 'revpar';
+    
+    return (
+      <div className="bg-popover border border-border rounded-lg shadow-lg p-4">
+        <p className="font-medium text-sm mb-2">{label}</p>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm">
+            <div className="w-3 h-3 rounded-full bg-primary" />
+            <span className="text-muted-foreground">Current Year:</span>
+            <span className="font-medium">
+              {isOccupancy
+                ? `${payload[0].value.toFixed(1)}%`
+                : `$${payload[0].value.toFixed(2)}`}
+            </span>
+          </div>
+          {showComparison && payload[1] && (
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: 'hsl(var(--muted-foreground))' }} />
+              <span className="text-muted-foreground">Last Year:</span>
+              <span className="font-medium">
+                {isOccupancy
+                  ? `${payload[1].value.toFixed(1)}%`
+                  : `$${payload[1].value.toFixed(2)}`}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const calculateYTDComparison = () => {
     const currentMonth = new Date().getMonth();
     const ytdData = activeTab === 'cumulative' ? cumulativeData[currentMonth] : 
@@ -315,81 +515,100 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
 
   const ytdComparison = calculateYTDComparison();
 
+  // Get chart title based on active metric
+  const getChartTitle = () => {
+    switch (activeMetric) {
+      case 'revenue': return `Revenue Performance - ${year}`;
+      case 'occupancy': return `Occupancy Performance - ${currentYear}`;
+      case 'revpar': return `RevPAR Performance - ${currentYear}`;
+    }
+  };
+
+  const getChartDescription = () => {
+    switch (activeMetric) {
+      case 'revenue': return 'Track actual revenue against goals';
+      case 'occupancy': return 'Monthly occupancy rates year-over-year';
+      case 'revpar': return 'Revenue per available room year-over-year';
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-2xl font-bold tracking-tight">Goals vs Actuals</h3>
+        <h3 className="text-2xl font-bold tracking-tight">Performance Metrics</h3>
         <p className="text-muted-foreground mt-1">
-          Compare actual revenue performance against Budget, Projection, and Goal targets
+          Track revenue, occupancy, and RevPAR performance
         </p>
       </div>
 
-      {/* YTD Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Target className="h-4 w-4 text-muted-foreground" />
-              vs Budget (Low)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsBudget >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-              {ytdComparison.vsBudget >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-              {Math.abs(ytdComparison.vsBudget).toFixed(1)}%
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {ytdComparison.vsBudget >= 0 ? 'Above' : 'Below'} budget target
-            </p>
-          </CardContent>
-        </Card>
+      {/* YTD Summary Cards - Only show for revenue metric */}
+      {activeMetric === 'revenue' && (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Target className="h-4 w-4 text-muted-foreground" />
+                vs Budget (Low)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsBudget >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                {ytdComparison.vsBudget >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+                {Math.abs(ytdComparison.vsBudget).toFixed(1)}%
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {ytdComparison.vsBudget >= 0 ? 'Above' : 'Below'} budget target
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Target className="h-4 w-4 text-muted-foreground" />
-              vs Projection (Expected)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsProjection >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-              {ytdComparison.vsProjection >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-              {Math.abs(ytdComparison.vsProjection).toFixed(1)}%
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {ytdComparison.vsProjection >= 0 ? 'Above' : 'Below'} projection
-            </p>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Target className="h-4 w-4 text-muted-foreground" />
+                vs Projection (Expected)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsProjection >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                {ytdComparison.vsProjection >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+                {Math.abs(ytdComparison.vsProjection).toFixed(1)}%
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {ytdComparison.vsProjection >= 0 ? 'Above' : 'Below'} projection
+              </p>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Target className="h-4 w-4 text-muted-foreground" />
-              vs Goal (High)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsGoal >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-              {ytdComparison.vsGoal >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-              {Math.abs(ytdComparison.vsGoal).toFixed(1)}%
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {ytdComparison.vsGoal >= 0 ? 'Above' : 'Below'} goal target
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Target className="h-4 w-4 text-muted-foreground" />
+                vs Goal (High)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsGoal >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                {ytdComparison.vsGoal >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+                {Math.abs(ytdComparison.vsGoal).toFixed(1)}%
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                {ytdComparison.vsGoal >= 0 ? 'Above' : 'Below'} goal target
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Chart */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <div>
-            <CardTitle>Revenue Performance - {year}</CardTitle>
-            <CardDescription>Track actual revenue against goals</CardDescription>
+            <CardTitle>{getChartTitle()}</CardTitle>
+            <CardDescription>{getChartDescription()}</CardDescription>
           </div>
-          {/* Year selector - only show when viewing single property (not group/owner view) */}
-          {!externalGoals && listingId && (
+          {/* Year selector - only show for revenue metric when viewing single property */}
+          {activeMetric === 'revenue' && !externalGoals && listingId && (
             <Tabs value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
               <TabsList>
                 {availableYears.map((yr) => (
@@ -402,194 +621,269 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           )}
         </CardHeader>
         <CardContent>
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'monthly' | 'cumulative')}>
-            <div className="flex items-center justify-between mb-6">
-              <TabsList className="grid w-full max-w-md grid-cols-2">
-                <TabsTrigger value="monthly">Monthly</TabsTrigger>
-                <TabsTrigger value="cumulative">Cumulative</TabsTrigger>
-              </TabsList>
-              
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="show-goals"
-                    checked={showGoals}
-                    onCheckedChange={(checked) => setShowGoals(checked as boolean)}
-                  />
-                  <Label htmlFor="show-goals" className="text-sm cursor-pointer">
-                    Show Goals
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="show-forecast"
-                    checked={showForecast}
-                    onCheckedChange={(checked) => setShowForecast(checked as boolean)}
-                  />
-                  <Label htmlFor="show-forecast" className="text-sm cursor-pointer">
-                    Show Forecast Range
-                  </Label>
-                </div>
-                {listingId && !externalGoals && (
+          {/* Metric selector tabs */}
+          <Tabs value={activeMetric} onValueChange={(v) => setActiveMetric(v as 'revenue' | 'occupancy' | 'revpar')}>
+            <TabsList className="mb-4">
+              <TabsTrigger value="revenue">Revenue</TabsTrigger>
+              <TabsTrigger value="occupancy">Occupancy</TabsTrigger>
+              <TabsTrigger value="revpar">RevPAR</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {activeMetric === 'revenue' ? (
+            // Revenue chart with existing functionality
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'monthly' | 'cumulative')}>
+              <div className="flex items-center justify-between mb-6">
+                <TabsList className="grid w-full max-w-md grid-cols-2">
+                  <TabsTrigger value="monthly">Monthly</TabsTrigger>
+                  <TabsTrigger value="cumulative">Cumulative</TabsTrigger>
+                </TabsList>
+                
+                <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      id="show-compset"
-                      checked={showCompset}
-                      onCheckedChange={(checked) => setShowCompset(checked as boolean)}
-                      disabled={compsetMonthlyAverages.length === 0}
+                      id="show-goals"
+                      checked={showGoals}
+                      onCheckedChange={(checked) => setShowGoals(checked as boolean)}
                     />
-                    <Label 
-                      htmlFor="show-compset" 
-                      className={`text-sm cursor-pointer ${compsetMonthlyAverages.length === 0 ? 'text-muted-foreground' : ''}`}
-                      title={compsetMonthlyAverages.length === 0 ? 'No compset data available. Fetch historical metrics from selected comparables first.' : ''}
-                    >
-                      Show Compset Average
+                    <Label htmlFor="show-goals" className="text-sm cursor-pointer">
+                      Show Goals
                     </Label>
                   </div>
-                )}
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="show-forecast"
+                      checked={showForecast}
+                      onCheckedChange={(checked) => setShowForecast(checked as boolean)}
+                    />
+                    <Label htmlFor="show-forecast" className="text-sm cursor-pointer">
+                      Show Forecast Range
+                    </Label>
+                  </div>
+                  {listingId && !externalGoals && (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="show-compset"
+                        checked={showCompset}
+                        onCheckedChange={(checked) => setShowCompset(checked as boolean)}
+                        disabled={compsetMonthlyAverages.length === 0}
+                      />
+                      <Label 
+                        htmlFor="show-compset" 
+                        className={`text-sm cursor-pointer ${compsetMonthlyAverages.length === 0 ? 'text-muted-foreground' : ''}`}
+                        title={compsetMonthlyAverages.length === 0 ? 'No compset data available. Fetch historical metrics from selected comparables first.' : ''}
+                      >
+                        Show Compset Average
+                      </Label>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              <TabsContent value="monthly">
+                <ResponsiveContainer width="100%" height={400}>
+                  <LineChart data={monthlyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="month" 
+                      className="text-xs"
+                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                    />
+                    <YAxis 
+                      className="text-xs"
+                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                    />
+                    <Tooltip content={<RevenueTooltip />} />
+                    <Legend />
+                    <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
+                    {showGoals && (
+                      <>
+                        <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
+                        <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
+                        <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                      </>
+                    )}
+                    {showForecast && (
+                      <>
+                        <Area 
+                          type="monotone" 
+                          dataKey="forecastP75" 
+                          stroke="none" 
+                          fill="#0ea5e9" 
+                          fillOpacity={0.25}
+                          name="Forecast Range"
+                          connectNulls={false}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="forecastP25" 
+                          stroke="none" 
+                          fill="#ffffff" 
+                          fillOpacity={1}
+                          legendType="none"
+                          connectNulls={false}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="forecastP50" 
+                          stroke="#0ea5e9" 
+                          strokeWidth={2} 
+                          strokeDasharray="4 4"
+                          name="Forecast"
+                          connectNulls={false}
+                        />
+                      </>
+                    )}
+                    {showCompset && (
+                      <Line 
+                        type="monotone" 
+                        dataKey="compsetAverage" 
+                        stroke="#8b5cf6" 
+                        strokeWidth={2} 
+                        strokeDasharray="3 3"
+                        name="Compset Avg"
+                        connectNulls={false}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </TabsContent>
+
+              <TabsContent value="cumulative">
+                <ResponsiveContainer width="100%" height={400}>
+                  <LineChart data={cumulativeData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis 
+                      dataKey="month" 
+                      className="text-xs"
+                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                    />
+                    <YAxis 
+                      className="text-xs"
+                      tick={{ fill: 'hsl(var(--muted-foreground))' }}
+                      tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                    />
+                    <Tooltip content={<RevenueTooltip />} />
+                    <Legend />
+                    <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
+                    {showGoals && (
+                      <>
+                        <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
+                        <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
+                        <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
+                      </>
+                    )}
+                    {showForecast && (
+                      <>
+                        <Area 
+                          type="monotone" 
+                          dataKey="forecastP75" 
+                          stroke="none" 
+                          fill="#0ea5e9" 
+                          fillOpacity={0.25}
+                          name="Forecast Range"
+                          connectNulls={false}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="forecastP25" 
+                          stroke="none" 
+                          fill="#ffffff" 
+                          fillOpacity={1}
+                          legendType="none"
+                          connectNulls={false}
+                        />
+                        <Line 
+                          type="monotone" 
+                          dataKey="forecastP50" 
+                          stroke="#0ea5e9" 
+                          strokeWidth={2} 
+                          strokeDasharray="4 4"
+                          name="Forecast"
+                          connectNulls={false}
+                        />
+                      </>
+                    )}
+                    {showCompset && (
+                      <Line 
+                        type="monotone" 
+                        dataKey="compsetAverage" 
+                        stroke="#8b5cf6" 
+                        strokeWidth={2} 
+                        strokeDasharray="3 3"
+                        name="Compset Avg"
+                        connectNulls={false}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </TabsContent>
+            </Tabs>
+          ) : (
+            // Occupancy or RevPAR chart
+            <div>
+              <div className="flex items-center justify-end mb-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="compare-yoy"
+                    checked={showComparison}
+                    onCheckedChange={(checked) => setShowComparison(checked as boolean)}
+                  />
+                  <Label htmlFor="compare-yoy" className="text-sm cursor-pointer">
+                    Compare with Last Year
+                  </Label>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={400}>
+                <LineChart 
+                  data={activeMetric === 'occupancy' ? occupancyData : revparData} 
+                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis
+                    dataKey="month"
+                    stroke="hsl(var(--muted-foreground))"
+                    fontSize={12}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    stroke="hsl(var(--muted-foreground))"
+                    fontSize={12}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value) =>
+                      activeMetric === 'occupancy' ? `${value}%` : `$${value.toFixed(0)}`
+                    }
+                  />
+                  <Tooltip content={<TrendTooltip />} />
+                  <Legend />
+                  <Line
+                    type="monotone"
+                    dataKey="currentYear"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={2.5}
+                    dot={{ fill: "hsl(var(--primary))", r: 4 }}
+                    activeDot={{ r: 6 }}
+                    name="Current Year"
+                    connectNulls
+                  />
+                  {showComparison && (
+                    <Line
+                      type="monotone"
+                      dataKey="lastYear"
+                      stroke="hsl(var(--muted-foreground))"
+                      strokeWidth={2.5}
+                      dot={{ fill: "hsl(var(--muted-foreground))", r: 4 }}
+                      activeDot={{ r: 6 }}
+                      name="Last Year"
+                      connectNulls
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
             </div>
-
-            <TabsContent value="monthly">
-              <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={monthlyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis 
-                    dataKey="month" 
-                    className="text-xs"
-                    tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                  />
-                  <YAxis 
-                    className="text-xs"
-                    tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend />
-                  <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
-                  {showGoals && (
-                    <>
-                      <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
-                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
-                      <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
-                    </>
-                  )}
-                  {showForecast && (
-                    <>
-                      <Area 
-                        type="monotone" 
-                        dataKey="forecastP75" 
-                        stroke="none" 
-                        fill="#0ea5e9" 
-                        fillOpacity={0.25}
-                        name="Forecast Range"
-                        connectNulls={false}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="forecastP25" 
-                        stroke="none" 
-                        fill="#ffffff" 
-                        fillOpacity={1}
-                        legendType="none"
-                        connectNulls={false}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="forecastP50" 
-                        stroke="#0ea5e9" 
-                        strokeWidth={2} 
-                        strokeDasharray="4 4"
-                        name="Forecast"
-                        connectNulls={false}
-                      />
-                    </>
-                  )}
-                  {showCompset && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="compsetAverage" 
-                      stroke="#8b5cf6" 
-                      strokeWidth={2} 
-                      strokeDasharray="3 3"
-                      name="Compset Avg"
-                      connectNulls={false}
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </TabsContent>
-
-            <TabsContent value="cumulative">
-              <ResponsiveContainer width="100%" height={400}>
-                <LineChart data={cumulativeData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis 
-                    dataKey="month" 
-                    className="text-xs"
-                    tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                  />
-                  <YAxis 
-                    className="text-xs"
-                    tick={{ fill: 'hsl(var(--muted-foreground))' }}
-                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend />
-                  <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
-                  {showGoals && (
-                    <>
-                      <Line type="monotone" dataKey="budget" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 5" name="Budget" />
-                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
-                      <Line type="monotone" dataKey="goal" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
-                    </>
-                  )}
-                  {showForecast && (
-                    <>
-                      <Area 
-                        type="monotone" 
-                        dataKey="forecastP75" 
-                        stroke="none" 
-                        fill="#0ea5e9" 
-                        fillOpacity={0.25}
-                        name="Forecast Range"
-                        connectNulls={false}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="forecastP25" 
-                        stroke="none" 
-                        fill="#ffffff" 
-                        fillOpacity={1}
-                        legendType="none"
-                        connectNulls={false}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="forecastP50" 
-                        stroke="#0ea5e9" 
-                        strokeWidth={2} 
-                        strokeDasharray="4 4"
-                        name="Forecast"
-                        connectNulls={false}
-                      />
-                    </>
-                  )}
-                  {showCompset && (
-                    <Line 
-                      type="monotone" 
-                      dataKey="compsetAverage" 
-                      stroke="#8b5cf6" 
-                      strokeWidth={2} 
-                      strokeDasharray="3 3"
-                      name="Compset Avg"
-                      connectNulls={false}
-                    />
-                  )}
-                </LineChart>
-              </ResponsiveContainer>
-            </TabsContent>
-          </Tabs>
+          )}
         </CardContent>
       </Card>
     </div>
