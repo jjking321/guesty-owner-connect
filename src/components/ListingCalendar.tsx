@@ -1,11 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, ChevronLeft, ChevronRight, Moon } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday, isBefore, parseISO, differenceInDays, isSameDay } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday, isBefore } from "date-fns";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 interface ListingCalendarProps {
@@ -24,15 +24,6 @@ interface CalendarDay {
   ctd: boolean | null;
   block_reason: string | null;
   synced_from_guesty_at: string | null;
-}
-
-interface Reservation {
-  id: string;
-  check_in: string | null;
-  check_out: string | null;
-  confirmation_code: string | null;
-  source: string | null;
-  status: string | null;
 }
 
 export function ListingCalendar({ listingId }: ListingCalendarProps) {
@@ -58,24 +49,6 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
       
       if (error) throw error;
       return data as CalendarDay[];
-    },
-  });
-
-  // Fetch reservations for this month
-  const { data: reservations } = useQuery({
-    queryKey: ['listing-reservations', listingId, format(currentMonth, 'yyyy-MM')],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('reservations')
-        .select('id, check_in, check_out, confirmation_code, source, status')
-        .eq('listing_id', listingId)
-        .lte('check_in', format(monthEnd, 'yyyy-MM-dd'))
-        .gte('check_out', format(monthStart, 'yyyy-MM-dd'))
-        .in('status', ['confirmed', 'reserved', 'checked_in', 'inquiry'])
-        .order('check_in');
-      
-      if (error) throw error;
-      return data as Reservation[];
     },
   });
 
@@ -114,122 +87,40 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
     calendarMap.set(day.date, day);
   });
 
-  // Calculate reservation bars for each row
-  const reservationBars = useMemo(() => {
-    if (!reservations) return [];
-    
-    const bars: Array<{
-      reservation: Reservation;
-      startCol: number;
-      endCol: number;
-      row: number;
-      label: string;
-    }> = [];
-
-    reservations.forEach(res => {
-      if (!res.check_in || !res.check_out) return;
-      
-      const checkIn = parseISO(res.check_in);
-      const checkOut = parseISO(res.check_out);
-      
-      // Find which days of the month this reservation covers
-      daysInMonth.forEach((date, index) => {
-        const dayPosition = index + startDayOfWeek;
-        const row = Math.floor(dayPosition / 7);
-        const col = dayPosition % 7;
-        
-        // Check if this is the check-in day or first day of the month for ongoing reservation
-        const isCheckInDay = isSameDay(date, checkIn);
-        const isFirstDayOfMonthAndOngoing = index === 0 && isBefore(checkIn, monthStart);
-        
-        if (isCheckInDay || isFirstDayOfMonthAndOngoing) {
-          // Calculate how many days this bar spans in this row
-          let endDate = checkOut;
-          let barEndCol = col;
-          
-          // Find the end of this bar (either end of row or checkout)
-          for (let d = col; d < 7; d++) {
-            const dayIndex = row * 7 + d - startDayOfWeek;
-            if (dayIndex >= daysInMonth.length) break;
-            
-            const currentDate = daysInMonth[dayIndex];
-            if (!currentDate) break;
-            
-            // Check if we've reached checkout (exclusive - checkout day is not included)
-            if (isSameDay(currentDate, checkOut) || isBefore(checkOut, currentDate)) {
-              break;
-            }
-            
-            barEndCol = d;
-          }
-          
-          bars.push({
-            reservation: res,
-            startCol: col,
-            endCol: barEndCol,
-            row,
-            label: res.confirmation_code || res.source || 'Booked',
-          });
-        }
-        
-        // Handle bars that continue to next row
-        if (col === 0 && !isCheckInDay && !isFirstDayOfMonthAndOngoing) {
-          // Check if there's an ongoing reservation
-          if (isBefore(checkIn, date) && isBefore(date, checkOut)) {
-            let barEndCol = 0;
-            
-            for (let d = 0; d < 7; d++) {
-              const dayIndex = row * 7 + d - startDayOfWeek;
-              if (dayIndex >= daysInMonth.length) break;
-              
-              const currentDate = daysInMonth[dayIndex];
-              if (!currentDate) break;
-              
-              if (isSameDay(currentDate, checkOut) || isBefore(checkOut, currentDate)) {
-                break;
-              }
-              
-              barEndCol = d;
-            }
-            
-            bars.push({
-              reservation: res,
-              startCol: 0,
-              endCol: barEndCol,
-              row,
-              label: res.confirmation_code || res.source || 'Booked',
-            });
-          }
-        }
-      });
-    });
-
-    return bars;
-  }, [reservations, daysInMonth, monthStart, startDayOfWeek]);
-
-  // Get status styling
+  // Get status styling - color-coded cells
   const getStatusStyle = (day: CalendarDay | undefined, date: Date) => {
     const isPast = isBefore(date, new Date()) && !isToday(date);
-    const baseStyle = isPast ? 'opacity-60' : '';
+    const baseStyle = isPast ? 'opacity-50' : '';
     
-    if (!day) return `bg-muted/50 border-border ${baseStyle}`;
+    if (!day) return `bg-muted/30 border-border ${baseStyle}`;
     
-    // Blocked (yellow)
-    if (day.status === 'unavailable' || (day.block_reason === 'blocked' && day.status !== 'booked')) {
-      return `bg-amber-100 dark:bg-amber-900/30 border-amber-300 dark:border-amber-700 ${baseStyle}`;
-    }
-    
-    // Booked - will show reservation bar overlay, so keep white/transparent
+    // Booked - solid teal/green background
     if (day.status === 'booked' || day.block_reason === 'reservation') {
-      return `bg-background border-border ${baseStyle}`;
+      return `bg-teal-500 dark:bg-teal-600 border-teal-600 dark:border-teal-700 ${baseStyle}`;
     }
     
-    // Available (white/background)
+    // Blocked - grey striped pattern
+    if (day.status === 'unavailable' || day.block_reason === 'blocked') {
+      return `blocked-stripe border-slate-300 dark:border-slate-600 ${baseStyle}`;
+    }
+    
+    // Available - white/light background
     if (day.is_available) {
-      return `bg-background border-border ${baseStyle}`;
+      return `bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 ${baseStyle}`;
     }
     
-    return `bg-muted/50 border-border ${baseStyle}`;
+    return `bg-muted/30 border-border ${baseStyle}`;
+  };
+
+  // Get text color based on status
+  const getTextColors = (day: CalendarDay | undefined) => {
+    if (!day) return { day: 'text-muted-foreground', price: 'text-muted-foreground' };
+    
+    if (day.status === 'booked' || day.block_reason === 'reservation') {
+      return { day: 'text-white/80', price: 'text-white' };
+    }
+    
+    return { day: 'text-slate-500 dark:text-slate-400', price: 'text-emerald-600 dark:text-emerald-400' };
   };
 
   // Format price
@@ -251,17 +142,6 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   // Go to today
   const goToToday = () => {
     setCurrentMonth(new Date());
-  };
-
-  // Check if a day has a reservation bar
-  const getDayReservation = (date: Date) => {
-    if (!reservations) return null;
-    return reservations.find(res => {
-      if (!res.check_in || !res.check_out) return false;
-      const checkIn = parseISO(res.check_in);
-      const checkOut = parseISO(res.check_out);
-      return !isBefore(date, checkIn) && isBefore(date, checkOut);
-    });
   };
 
   return (
@@ -326,20 +206,16 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
           <CollapsibleContent className="mt-2">
             <div className="flex flex-wrap gap-4 text-sm p-3 bg-muted/30 rounded-lg">
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-background border border-border" />
-                <span className="text-muted-foreground">Available</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-4 rounded bg-emerald-500 dark:bg-emerald-600" />
+                <div className="w-4 h-4 rounded bg-teal-500" />
                 <span className="text-muted-foreground">Booked</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700" />
-                <span className="text-muted-foreground">Blocked</span>
+                <div className="w-4 h-4 rounded bg-white border border-slate-200" />
+                <span className="text-muted-foreground">Available</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded bg-muted/50 border border-border" />
-                <span className="text-muted-foreground">No data</span>
+                <div className="w-4 h-4 rounded blocked-stripe border border-slate-300" />
+                <span className="text-muted-foreground">Blocked</span>
               </div>
               <div className="flex items-center gap-2">
                 <Moon className="h-3 w-3 text-muted-foreground" />
@@ -370,13 +246,10 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
               ))}
               
               {/* Calendar days */}
-              {daysInMonth.map((date, index) => {
+              {daysInMonth.map((date) => {
                 const dateStr = format(date, 'yyyy-MM-dd');
                 const dayData = calendarMap.get(dateStr);
-                const reservation = getDayReservation(date);
-                const isCheckIn = reservation && isSameDay(date, parseISO(reservation.check_in!));
-                const isLastNight = reservation && isSameDay(date, parseISO(reservation.check_out!)) === false && 
-                  differenceInDays(parseISO(reservation.check_out!), date) === 1;
+                const textColors = getTextColors(dayData);
                 
                 return (
                   <div
@@ -387,44 +260,23 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                       ${isToday(date) ? 'ring-2 ring-primary ring-inset' : ''}
                     `}
                   >
-                    {/* Content area with bottom padding for bar */}
-                    <div className="flex flex-col flex-1 pb-4">
-                      {/* Day number */}
-                      <div className="text-xs text-muted-foreground font-medium">
-                        {format(date, 'd')}
-                      </div>
-                      
-                      {/* Price - larger */}
-                      {dayData?.price && (
-                        <div className="text-sm font-bold text-foreground mt-auto">
-                          {formatPrice(dayData.price, dayData.currency)}
-                        </div>
-                      )}
-                      
-                      {/* Min nights with moon icon */}
-                      {dayData?.min_nights && dayData.min_nights > 1 && (
-                        <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                          <Moon className="h-3 w-3" />
-                          <span>{dayData.min_nights}</span>
-                        </div>
-                      )}
+                    {/* Day number - top left */}
+                    <div className={`text-xs font-medium ${textColors.day}`}>
+                      {format(date, 'd')}
                     </div>
                     
-                    {/* Reservation bar overlay - at bottom */}
-                    {reservation && (
-                      <div 
-                        className={`
-                          absolute bottom-0 h-4 bg-emerald-500 dark:bg-emerald-600 
-                          flex items-center text-white text-[10px] font-medium overflow-hidden z-10
-                          ${isCheckIn ? 'left-1 rounded-l' : 'left-0'}
-                          ${isLastNight ? 'right-1 rounded-r' : 'right-0'}
-                        `}
-                      >
-                        {isCheckIn && (
-                          <span className="px-1 truncate">
-                            {reservation.confirmation_code || reservation.source || 'Booked'}
-                          </span>
-                        )}
+                    {/* Price - centered, large */}
+                    {dayData?.price && (
+                      <div className={`text-base font-bold ${textColors.price} flex-1 flex items-center justify-center`}>
+                        {formatPrice(dayData.price, dayData.currency)}
+                      </div>
+                    )}
+                    
+                    {/* Min nights - bottom right */}
+                    {dayData?.min_nights && dayData.min_nights > 1 && (
+                      <div className={`absolute bottom-1 right-1 flex items-center gap-0.5 text-xs ${textColors.day}`}>
+                        <Moon className="h-3 w-3" />
+                        <span>{dayData.min_nights}</span>
                       </div>
                     )}
                   </div>
