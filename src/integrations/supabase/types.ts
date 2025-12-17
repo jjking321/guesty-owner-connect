@@ -617,7 +617,7 @@ export type Database = {
       }
       property_comparables: {
         Row: {
-          airroi_listing_id: number
+          airroi_listing_id: string
           booking_settings: Json | null
           cover_photo_url: string | null
           created_at: string | null
@@ -641,7 +641,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
-          airroi_listing_id: number
+          airroi_listing_id: string
           booking_settings?: Json | null
           cover_photo_url?: string | null
           created_at?: string | null
@@ -665,7 +665,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
-          airroi_listing_id?: number
+          airroi_listing_id?: string
           booking_settings?: Json | null
           cover_photo_url?: string | null
           created_at?: string | null
