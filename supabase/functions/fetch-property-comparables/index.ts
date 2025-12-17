@@ -122,7 +122,13 @@ serve(async (req) => {
 
     let airroiData;
     try {
-      airroiData = JSON.parse(responseText);
+      // Pre-process the response to convert large listing_ids to strings
+      // This prevents JavaScript from losing precision on BigInt values
+      const processedText = responseText.replace(
+        /"listing_id"\s*:\s*(\d{16,})/g,
+        '"listing_id": "$1"'
+      );
+      airroiData = JSON.parse(processedText);
     } catch (parseError) {
       console.error('Failed to parse API response as JSON:', parseError);
       throw new Error(`Failed to parse Air ROI response: ${responseText.substring(0, 200)}`);

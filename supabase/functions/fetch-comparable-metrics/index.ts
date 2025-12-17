@@ -34,9 +34,10 @@ serve(async (req) => {
     console.log(`Fetching historical metrics for ${comparable_ids.length} comparables`);
 
     // Fetch the comparables to get their airroi_listing_ids
+    // Cast airroi_listing_id to text to avoid JavaScript BigInt precision loss
     const { data: comparables, error: fetchError } = await supabase
       .from('property_comparables')
-      .select('id, airroi_listing_id')
+      .select('id, airroi_listing_id::text')
       .in('id', comparable_ids);
 
     if (fetchError) {
