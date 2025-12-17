@@ -48,7 +48,7 @@ interface CompsetMonthlyAverage {
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function GoalsComparison({ listingId, reservations, goals: externalGoals, forecasts: externalForecasts }: GoalsComparisonProps) {
-  const [activeMetric, setActiveMetric] = useState<'revenue' | 'occupancy' | 'revpar'>('revenue');
+  const [activeMetric, setActiveMetric] = useState<'revenue' | 'occupancy' | 'revpar' | 'adr'>('revenue');
   const [activeTab, setActiveTab] = useState<'monthly' | 'cumulative'>('monthly');
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
   const [cumulativeData, setCumulativeData] = useState<GoalData[]>([]);
@@ -240,6 +240,96 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         monthKey: currentKey,
         currentYear: currentRevPAR,
         lastYear: lastRevPAR,
+        compsetAverage: compsetAvg,
+      });
+    }
+
+    return result;
+  }, [reservations, year, compsetMonthlyAverages]);
+
+  // Calculate year-over-year ADR data
+  const adrData = useMemo((): TrendDataPoint[] => {
+    if (reservations.length === 0) return [];
+
+    const lastYear = year - 1;
+
+    // Initialize data structures for both years - tracking revenue and nights
+    const currentYearData = new Map<string, { revenue: number; nightsBooked: number }>();
+    const lastYearData = new Map<string, { revenue: number; nightsBooked: number }>();
+
+    // Get all 12 months for both years
+    for (let month = 0; month < 12; month++) {
+      const currentDate = new Date(year, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      currentYearData.set(currentKey, { revenue: 0, nightsBooked: 0 });
+      lastYearData.set(lastKey, { revenue: 0, nightsBooked: 0 });
+    }
+
+    // Process each reservation (excluding owner reservations)
+    reservations.filter(r => r.source !== 'owner').forEach((reservation) => {
+      if (!reservation.check_in || !reservation.check_out) return;
+
+      const resCheckIn = parseISO(reservation.check_in);
+      const resCheckOut = parseISO(reservation.check_out);
+      const resRevenue = parseFloat(reservation.fare_accommodation_adjusted || 0);
+      const resNightsCount = reservation.nights_count || 0;
+      const resRevenuePerNight = resNightsCount > 0 ? resRevenue / resNightsCount : 0;
+      
+      // Allocate revenue and count nights for each day
+      let nightCursor = resCheckIn;
+      while (nightCursor < resCheckOut) {
+        const monthKey = format(nightCursor, 'yyyy-MM');
+        const nightYear = nightCursor.getFullYear();
+        
+        if (nightYear === year && currentYearData.has(monthKey)) {
+          const data = currentYearData.get(monthKey)!;
+          data.revenue += resRevenuePerNight;
+          data.nightsBooked++;
+        } else if (nightYear === lastYear && lastYearData.has(monthKey)) {
+          const data = lastYearData.get(monthKey)!;
+          data.revenue += resRevenuePerNight;
+          data.nightsBooked++;
+        }
+        
+        nightCursor = addDays(nightCursor, 1);
+      }
+    });
+
+    // Create compset ADR map
+    const compsetAdrMap = new Map<string, number>();
+    compsetMonthlyAverages.forEach(avg => {
+      compsetAdrMap.set(avg.month, avg.adr);
+    });
+
+    // Calculate ADR for each month
+    const result = [];
+    for (let month = 0; month < 12; month++) {
+      const monthName = format(new Date(2000, month, 1), 'MMM');
+      const currentDate = new Date(year, month, 1);
+      const lastDate = new Date(lastYear, month, 1);
+      
+      const currentKey = format(currentDate, 'yyyy-MM');
+      const lastKey = format(lastDate, 'yyyy-MM');
+      
+      const currentData = currentYearData.get(currentKey)!;
+      const lastData = lastYearData.get(lastKey)!;
+      
+      // Calculate ADR = revenue / nights booked
+      const currentADR = currentData.nightsBooked > 0 ? currentData.revenue / currentData.nightsBooked : 0;
+      const lastADR = lastData.nightsBooked > 0 ? lastData.revenue / lastData.nightsBooked : 0;
+      
+      // Get compset average for this month
+      const compsetAvg = compsetAdrMap.get(currentKey);
+      
+      result.push({
+        month: monthName,
+        monthKey: currentKey,
+        currentYear: currentADR,
+        lastYear: lastADR,
         compsetAverage: compsetAvg,
       });
     }
@@ -527,6 +617,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     if (!active || !payload || !payload.length) return null;
     
     const isOccupancy = activeMetric === 'occupancy';
+    const isCurrency = activeMetric === 'revpar' || activeMetric === 'adr';
     
     // Find values by dataKey to handle variable ordering
     const currentYearValue = payload.find((p: any) => p.dataKey === 'currentYear')?.value;
@@ -599,8 +690,9 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const getChartTitle = () => {
     switch (activeMetric) {
       case 'revenue': return `Revenue Performance - ${year}`;
-      case 'occupancy': return `Occupancy Performance - ${currentYear}`;
-      case 'revpar': return `RevPAR Performance - ${currentYear}`;
+      case 'occupancy': return `Occupancy Performance - ${year}`;
+      case 'revpar': return `RevPAR Performance - ${year}`;
+      case 'adr': return `ADR Performance - ${year}`;
     }
   };
 
@@ -609,6 +701,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       case 'revenue': return 'Track actual revenue against goals';
       case 'occupancy': return 'Monthly occupancy rates year-over-year';
       case 'revpar': return 'Revenue per available room year-over-year';
+      case 'adr': return 'Average daily rate year-over-year';
     }
   };
 
@@ -702,11 +795,12 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         </CardHeader>
         <CardContent>
           {/* Metric selector tabs */}
-          <Tabs value={activeMetric} onValueChange={(v) => setActiveMetric(v as 'revenue' | 'occupancy' | 'revpar')}>
+          <Tabs value={activeMetric} onValueChange={(v) => setActiveMetric(v as 'revenue' | 'occupancy' | 'revpar' | 'adr')}>
             <TabsList className="mb-4">
               <TabsTrigger value="revenue">Revenue</TabsTrigger>
               <TabsTrigger value="occupancy">Occupancy</TabsTrigger>
               <TabsTrigger value="revpar">RevPAR</TabsTrigger>
+              <TabsTrigger value="adr">ADR</TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -962,7 +1056,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
               </div>
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart 
-                  data={activeMetric === 'occupancy' ? occupancyData : revparData} 
+                  data={activeMetric === 'occupancy' ? occupancyData : activeMetric === 'revpar' ? revparData : adrData} 
                   margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
