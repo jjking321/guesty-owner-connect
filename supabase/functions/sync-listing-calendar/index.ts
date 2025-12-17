@@ -225,16 +225,61 @@ Deno.serve(async (req) => {
     // Fetch calendar data
     const calendarData = await fetchCalendarData(accessToken, listingId, startDateStr, endDateStr);
 
+    // Log the response structure for debugging
+    console.log('Calendar API response keys:', Object.keys(calendarData));
+    console.log('Calendar API response sample:', JSON.stringify(calendarData).substring(0, 500));
+
     // Process and upsert calendar data
     const calendarRecords: any[] = [];
     const syncedAt = new Date().toISOString();
 
-    if (calendarData.data && calendarData.data[listingId] && calendarData.data[listingId].days) {
+    // Handle different response formats
+    // Format 1: Array of day objects
+    if (Array.isArray(calendarData)) {
+      console.log(`Processing array format with ${calendarData.length} days`);
+      for (const day of calendarData) {
+        if (day.listingId === listingId || !day.listingId) {
+          calendarRecords.push({
+            listing_id: listingId,
+            date: day.date,
+            price: day.price || null,
+            currency: day.currency || 'USD',
+            min_nights: day.minNights || null,
+            status: day.status || null,
+            is_available: day.status === 'available',
+            cta: day.cta || false,
+            ctd: day.ctd || false,
+            block_reason: day.status === 'booked' ? 'reservation' : (day.status === 'unavailable' ? 'blocked' : null),
+            synced_from_guesty_at: syncedAt,
+          });
+        }
+      }
+    }
+    // Format 2: Object with data.days array
+    else if (calendarData.data && Array.isArray(calendarData.data)) {
+      console.log(`Processing data array format with ${calendarData.data.length} days`);
+      for (const day of calendarData.data) {
+        calendarRecords.push({
+          listing_id: listingId,
+          date: day.date,
+          price: day.price || null,
+          currency: day.currency || 'USD',
+          min_nights: day.minNights || null,
+          status: day.status || null,
+          is_available: day.status === 'available',
+          cta: day.cta || false,
+          ctd: day.ctd || false,
+          block_reason: day.status === 'booked' ? 'reservation' : (day.status === 'unavailable' ? 'blocked' : null),
+          synced_from_guesty_at: syncedAt,
+        });
+      }
+    }
+    // Format 3: Object keyed by listing ID with days
+    else if (calendarData.data && calendarData.data[listingId] && calendarData.data[listingId].days) {
       const days = calendarData.data[listingId].days;
-      
+      console.log(`Processing nested format with ${Object.keys(days).length} days`);
       for (const [dateStr, dayData] of Object.entries(days)) {
         const day = dayData as any;
-        
         calendarRecords.push({
           listing_id: listingId,
           date: dateStr,
@@ -249,6 +294,48 @@ Deno.serve(async (req) => {
           synced_from_guesty_at: syncedAt,
         });
       }
+    }
+    // Format 4: Direct object keyed by listing ID (no data wrapper)
+    else if (calendarData[listingId]) {
+      const listingData = calendarData[listingId];
+      if (Array.isArray(listingData)) {
+        console.log(`Processing direct listing array format with ${listingData.length} days`);
+        for (const day of listingData) {
+          calendarRecords.push({
+            listing_id: listingId,
+            date: day.date,
+            price: day.price || null,
+            currency: day.currency || 'USD',
+            min_nights: day.minNights || null,
+            status: day.status || null,
+            is_available: day.status === 'available',
+            cta: day.cta || false,
+            ctd: day.ctd || false,
+            block_reason: day.status === 'booked' ? 'reservation' : (day.status === 'unavailable' ? 'blocked' : null),
+            synced_from_guesty_at: syncedAt,
+          });
+        }
+      } else if (listingData.days) {
+        console.log(`Processing direct listing days format`);
+        for (const [dateStr, dayData] of Object.entries(listingData.days)) {
+          const day = dayData as any;
+          calendarRecords.push({
+            listing_id: listingId,
+            date: dateStr,
+            price: day.price || null,
+            currency: day.currency || 'USD',
+            min_nights: day.minNights || null,
+            status: day.status || null,
+            is_available: day.status === 'available',
+            cta: day.cta || false,
+            ctd: day.ctd || false,
+            block_reason: day.status === 'booked' ? 'reservation' : (day.status === 'unavailable' ? 'blocked' : null),
+            synced_from_guesty_at: syncedAt,
+          });
+        }
+      }
+    } else {
+      console.log('Unknown response format, dumping full structure:', JSON.stringify(calendarData).substring(0, 1000));
     }
 
     console.log(`Processing ${calendarRecords.length} calendar days...`);
