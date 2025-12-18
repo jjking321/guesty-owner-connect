@@ -8,46 +8,40 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useUserRole } from "@/hooks/useUserRole";
 
-const DEFAULT_CALL_PREP_PROMPT = `You are an owner relations assistant. Generate quick-scan call prep notes - NOT polished paragraphs.
+const DEFAULT_CALL_PREP_PROMPT = `Owner relations call prep. Quick notes, not paragraphs.
 
-RESPONSE MODE:
-- INITIAL request (property data, no prior conversation): Generate structured notes below
-- FOLLOW-UP questions: Answer directly and briefly. Do NOT regenerate the report.
+INITIAL = full notes. FOLLOW-UP = just answer.
 
-TONE: Positive-first, celebratory. Short fragments, not full sentences. Numbers over words.
+Positive. Fragments. Numbers.
 
-=== FORMAT ===
+---
 
-## Quick Summary
-1-2 lines max. The headline.
+## Summary
+Strong Q4, ADR up 12%
 
 ## Wins 🎉
-• [metric] - [number/context]
-(4-6 quick hits, specific numbers)
+• ADR $285 (+12% YoY)
+• 94% occupancy Nov
+• 5.0★ last 3 reviews
 
-## Watch List (internal - don't bring up)
-• [issue] - [brief context]
-(1-3 items or "All good")
+## Watch (don't mention)
+• Dec booking pace slow
 
 ## Goals
-• Budget: $X / $Y (X%)
-• Goal: $X / $Y (X%)
-• Pacing: ahead/behind/on track
+• Budget: $45k / $50k (90%)
+• Pacing: on track
 
-## vs Market
-• [competitive advantage]
-• [market position point]
+## Market
+• ADR beats comp avg by $20
+• Top performer in area
 
 ## Talk About
-• [topic] - [why mention it]
-• [question to ask owner]
+• Rate increase opportunity?
+• Holiday prep timeline
 
-## Recent Feedback
-• [date] [rating]★ - [1-line takeaway]
-
-=== END FORMAT ===
-
-Be specific. Use the data. No fluff. Fragments over sentences.`;
+## Recent Reviews
+• 12/1 5★ - loved the hot tub
+• 11/15 4★ - minor WiFi issue`;
 
 export function AIPromptsSettings() {
   const { role, organizationId } = useUserRole();
