@@ -37,7 +37,7 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>
-            {role === 'owner' ? 'Owner Portal' : 'Revenue Manager'}
+            {role === 'owner' ? 'Owner Portal' : 'RevMan'}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>

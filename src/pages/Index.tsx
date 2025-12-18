@@ -50,7 +50,7 @@ const Index = () => {
             <Building2 className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-5xl md:text-6xl font-bold mb-6">
-            Property Revenue Manager
+            RevMan
           </h1>
           <p className="text-xl text-muted-foreground mb-8">
             The all-in-one platform for vacation rental property managers to track revenue, analyze performance, and share insights with property owners.
