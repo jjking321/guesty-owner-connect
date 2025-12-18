@@ -18,6 +18,7 @@ import { ReviewsTable } from "@/components/ReviewsTable";
 import { ComparablesModule } from "@/components/ComparablesModule";
 import { ListingCalendar } from "@/components/ListingCalendar";
 import { CallPrepDialog } from "@/components/CallPrepDialog";
+import { RevenueActionsDialog } from "@/components/RevenueActionsDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -424,10 +425,16 @@ export default function PropertyDetail() {
           </div>
           <div className="flex items-center gap-2">
             {role && role !== 'owner' && (
-              <CallPrepDialog 
-                listingId={id!} 
-                propertyName={listing.nickname || "Property"} 
-              />
+              <>
+                <CallPrepDialog 
+                  listingId={id!} 
+                  propertyName={listing.nickname || "Property"} 
+                />
+                <RevenueActionsDialog 
+                  listingId={id!} 
+                  propertyName={listing.nickname || "Property"} 
+                />
+              </>
             )}
             <PropertySettings listingId={id!} />
           </div>
