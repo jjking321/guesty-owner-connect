@@ -65,7 +65,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   const queryClient = useQueryClient();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [legendOpen, setLegendOpen] = useState(false);
-  const [compareToCompset, setCompareToCompset] = useState(false);
+  const [compareToCompset, setCompareToCompset] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedComparableId, setSelectedComparableId] = useState<string | null>(null);
   const [metricsDialogOpen, setMetricsDialogOpen] = useState(false);
