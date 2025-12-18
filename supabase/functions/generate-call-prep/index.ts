@@ -76,13 +76,14 @@ serve(async (req) => {
     ];
 
     if (isFollowUp) {
-      // For follow-ups, modify the first message (data context) to indicate it's for reference only
-      // This signals to the AI that it should NOT regenerate the full report
+      // For follow-ups, strip the generation instruction and mark as reference only
       const modifiedMessages = messages.map((msg: Message, index: number) => {
         if (index === 0 && msg.role === 'user') {
+          // Remove the "INSTRUCTION: generate report" line that was added during initial generation
+          const cleanedContent = msg.content.replace(/---\s*\*\*INSTRUCTION:.*$/s, '').trim();
           return {
             role: 'user',
-            content: `[PROPERTY DATA FOR REFERENCE - DO NOT REGENERATE REPORT]\n\n${msg.content}`
+            content: `[REFERENCE DATA - just answer the question in 1-3 sentences]\n\n${cleanedContent}`
           };
         }
         return msg;
