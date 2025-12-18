@@ -76,9 +76,18 @@ serve(async (req) => {
     ];
 
     if (isFollowUp) {
-      // For follow-ups, use the existing conversation history
-      // The first message in history should contain the data context
-      aiMessages = aiMessages.concat(messages);
+      // For follow-ups, modify the first message (data context) to indicate it's for reference only
+      // This signals to the AI that it should NOT regenerate the full report
+      const modifiedMessages = messages.map((msg: Message, index: number) => {
+        if (index === 0 && msg.role === 'user') {
+          return {
+            role: 'user',
+            content: `[PROPERTY DATA FOR REFERENCE - DO NOT REGENERATE REPORT]\n\n${msg.content}`
+          };
+        }
+        return msg;
+      });
+      aiMessages = aiMessages.concat(modifiedMessages);
     } else {
       // For initial generation, fetch all property data and build context
       const dataContext = await buildInitialContext(supabase, listing, listingId);
@@ -413,6 +422,12 @@ Recent Review Highlights:
 No reviews in the last 6 months.
 `;
   }
+
+  // Add explicit instruction for initial report generation
+  context += `
+---
+**INSTRUCTION: Please generate the full call prep report based on the data above.**
+`;
 
   return context;
 }
