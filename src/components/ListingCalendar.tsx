@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, ChevronLeft, ChevronRight, Moon } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, Moon, Users } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -9,6 +9,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMont
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { CalendarDateDetail } from "./CalendarDateDetail";
 
 interface ListingCalendarProps {
   listingId: string;
@@ -34,8 +35,27 @@ interface FutureRate {
   rate: number;
 }
 
-interface ComparableFutureRates {
+interface ComparableWithRates {
+  listing_name: string | null;
+  cover_photo_url: string | null;
+  airroi_listing_id: string;
   future_rates: { rates: FutureRate[] } | null;
+}
+
+interface CompsetDayDetail {
+  name: string;
+  thumbnail: string | null;
+  rate: number;
+  available: boolean;
+  diffFromYou: number | null;
+  diffPercent: number | null;
+}
+
+interface CompsetDailyInfo {
+  totalCount: number;
+  bookedCount: number;
+  avgRate: number;
+  comparables: CompsetDayDetail[];
 }
 
 export function ListingCalendar({ listingId }: ListingCalendarProps) {
@@ -44,6 +64,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [legendOpen, setLegendOpen] = useState(false);
   const [compareToCompset, setCompareToCompset] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -65,19 +86,19 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
     },
   });
 
-  // Fetch selected comparables' future rates
+  // Fetch selected comparables' future rates with names and thumbnails
   const { data: compsetData } = useQuery({
     queryKey: ['compset-future-rates', listingId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('property_comparables')
-        .select('future_rates')
+        .select('listing_name, cover_photo_url, airroi_listing_id, future_rates')
         .eq('listing_id', listingId)
         .eq('is_selected', true)
         .not('future_rates', 'is', null);
       
       if (error) throw error;
-      return data as unknown as ComparableFutureRates[];
+      return data as unknown as ComparableWithRates[];
     },
     enabled: compareToCompset,
   });
@@ -110,6 +131,70 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
 
   // Check if compset data is available
   const hasCompsetData = compsetData && compsetData.length > 0 && compsetAverages.size > 0;
+
+  // Calculate detailed compset info per date (for flyout and booked count)
+  const compsetDailyDetails = useMemo(() => {
+    if (!compsetData || compsetData.length === 0) return new Map<string, CompsetDailyInfo>();
+    
+    const details = new Map<string, CompsetDailyInfo>();
+    
+    // Build a map of date -> array of comp details
+    const dateToComps = new Map<string, CompsetDayDetail[]>();
+    
+    compsetData.forEach(comp => {
+      if (comp.future_rates?.rates) {
+        comp.future_rates.rates.forEach(rate => {
+          if (rate.rate > 0) {
+            const existing = dateToComps.get(rate.date) || [];
+            existing.push({
+              name: comp.listing_name || 'Unknown Property',
+              thumbnail: comp.cover_photo_url,
+              rate: rate.rate,
+              available: rate.available,
+              diffFromYou: null, // Will be calculated when we have myPrice
+              diffPercent: null,
+            });
+            dateToComps.set(rate.date, existing);
+          }
+        });
+      }
+    });
+    
+    // Now aggregate into CompsetDailyInfo
+    dateToComps.forEach((comps, date) => {
+      const bookedCount = comps.filter(c => !c.available).length;
+      const avgRate = comps.reduce((sum, c) => sum + c.rate, 0) / comps.length;
+      
+      details.set(date, {
+        totalCount: comps.length,
+        bookedCount,
+        avgRate,
+        comparables: comps.sort((a, b) => b.rate - a.rate), // Sort by rate desc
+      });
+    });
+    
+    return details;
+  }, [compsetData]);
+
+  // Get compset info for a specific date with price differences calculated
+  const getCompsetInfoForDate = (dateStr: string, myPrice: number | null): CompsetDailyInfo | undefined => {
+    const info = compsetDailyDetails.get(dateStr);
+    if (!info) return undefined;
+    
+    // Calculate price differences if we have myPrice
+    if (myPrice) {
+      return {
+        ...info,
+        comparables: info.comparables.map(comp => ({
+          ...comp,
+          diffFromYou: comp.rate - myPrice,
+          diffPercent: ((comp.rate - myPrice) / myPrice) * 100,
+        })),
+      };
+    }
+    
+    return info;
+  };
 
   // Sync calendar mutation
   const syncMutation = useMutation({
@@ -360,6 +445,10 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                     <div className="w-4 h-4 rounded bg-white ring-2 ring-red-500 ring-inset" />
                     <span className="text-muted-foreground">Above market (10%+)</span>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <Users className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">Comps booked</span>
+                  </div>
                 </>
               )}
             </div>
@@ -393,12 +482,14 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                 const textColors = getTextColors(dayData);
                 const compsetAvg = compsetAverages.get(dateStr);
                 const showComparison = compareToCompset && hasCompsetData && dayData?.price && dayData.is_available && compsetAvg;
+                const compsetInfo = compsetDailyDetails.get(dateStr);
                 
                 return (
                   <div
                     key={dateStr}
+                    onClick={() => setSelectedDate(dateStr)}
                     className={`
-                      relative h-20 p-1.5 border flex flex-col
+                      relative h-20 p-1.5 border flex flex-col cursor-pointer hover:opacity-90 transition-opacity
                       ${getStatusStyle(dayData, date)}
                       ${isToday(date) && !showComparison ? 'ring-2 ring-primary ring-inset' : ''}
                       ${showComparison ? getComparisonStyle(dayData?.price ?? null, compsetAvg) : ''}
@@ -419,6 +510,14 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                             avg {formatPrice(compsetAvg, dayData.currency)}
                           </div>
                         )}
+                      </div>
+                    )}
+                    
+                    {/* Compset booked count - bottom left */}
+                    {compareToCompset && compsetInfo && compsetInfo.totalCount > 0 && (
+                      <div className={`absolute bottom-1 left-1 flex items-center gap-0.5 text-[10px] ${textColors.day}`}>
+                        <Users className="h-2.5 w-2.5" />
+                        <span>{compsetInfo.bookedCount}/{compsetInfo.totalCount}</span>
                       </div>
                     )}
                     
@@ -503,6 +602,15 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
           </div>
         )}
       </CardContent>
+
+      {/* Date Detail Flyout */}
+      <CalendarDateDetail
+        selectedDate={selectedDate}
+        onClose={() => setSelectedDate(null)}
+        myDayData={selectedDate ? calendarMap.get(selectedDate) : undefined}
+        compsetInfo={selectedDate ? getCompsetInfoForDate(selectedDate, calendarMap.get(selectedDate)?.price ?? null) : undefined}
+        compareToCompset={compareToCompset}
+      />
     </Card>
   );
 }
