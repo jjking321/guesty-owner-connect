@@ -212,7 +212,7 @@ export function CallPrepDialog({ listingId, propertyName }: CallPrepDialogProps)
               </div>
             </div>
             
-            <ScrollArea className="flex-1 min-h-0 max-h-[calc(85vh-220px)] pr-4" ref={scrollAreaRef}>
+            <ScrollArea className="h-[calc(85vh-220px)] pr-4" ref={scrollAreaRef}>
               <div className="space-y-4">
                 {messages.map((message, index) => (
                   <div
