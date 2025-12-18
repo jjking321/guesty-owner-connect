@@ -12,7 +12,15 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw, Download, Search, Sparkles, Filter, ArrowUpDown, ArrowUp, ArrowDown, Upload } from "lucide-react";
+import { RefreshCw, Download, Search, Sparkles, Filter, ArrowUpDown, ArrowUp, ArrowDown, Upload, ChevronDown, MoreHorizontal } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
@@ -644,46 +652,66 @@ export default function PropertiesBulkEdit() {
               size="sm"
             >
               <Upload className="h-4 w-4 mr-2" />
-              Upload Projections from CSV
+              Upload Projections
             </Button>
-            <Button 
-              onClick={handleGenerateMissingGoals} 
-              variant="outline"
-              size="sm"
-              disabled={isGeneratingBulk}
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              {isGeneratingBulk ? "Generating..." : "Generate Missing Goals"}
-            </Button>
-            <Button 
-              onClick={handleRecalculateGoals} 
-              variant="outline"
-              size="sm"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Recalculate Goals
-            </Button>
-            <Button 
-              onClick={handleGenerateBulkGoals} 
-              variant="outline"
-              size="sm"
-              disabled={isGeneratingBulk}
-            >
-              <Sparkles className="h-4 w-4 mr-2" />
-              {isGeneratingBulk ? "Generating..." : "Regenerate All"}
-            </Button>
-            <Button onClick={handleGenerateMissingForecasts} variant="outline" size="sm">
-              <Sparkles className="h-4 w-4 mr-2" />
-              Generate Missing Forecasts
-            </Button>
-            <Button onClick={handleRefreshForecasts} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh All Forecasts
-            </Button>
-            <Button onClick={handleExportCSV} variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Goals
+                  <ChevronDown className="h-4 w-4 ml-2" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-popover">
+                <DropdownMenuItem 
+                  onClick={handleGenerateMissingGoals}
+                  disabled={isGeneratingBulk}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Generate Missing Goals
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleRecalculateGoals}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Recalculate Goals
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={handleGenerateBulkGoals}
+                  disabled={isGeneratingBulk}
+                >
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Regenerate All Goals
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <MoreHorizontal className="h-4 w-4 mr-2" />
+                  More
+                  <ChevronDown className="h-4 w-4 ml-2" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-popover">
+                <DropdownMenuLabel>Forecasts</DropdownMenuLabel>
+                <DropdownMenuItem onClick={handleGenerateMissingForecasts}>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Generate Missing Forecasts
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleRefreshForecasts}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh All Forecasts
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Export</DropdownMenuLabel>
+                <DropdownMenuItem onClick={handleExportCSV}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
