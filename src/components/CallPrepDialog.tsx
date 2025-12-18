@@ -186,7 +186,7 @@ export function CallPrepDialog({ listingId, propertyName }: CallPrepDialogProps)
             <p className="text-muted-foreground">Analyzing property data and generating talking points...</p>
           </div>
         ) : messages.length > 0 ? (
-          <div className="flex flex-col flex-1 min-h-0 gap-4">
+          <div className="flex flex-col flex-1 min-h-0 gap-4 overflow-hidden">
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
                 Generated: {generatedAt ? new Date(generatedAt).toLocaleString() : 'Just now'}
@@ -212,7 +212,7 @@ export function CallPrepDialog({ listingId, propertyName }: CallPrepDialogProps)
               </div>
             </div>
             
-            <ScrollArea className="flex-1 pr-4" ref={scrollAreaRef}>
+            <ScrollArea className="flex-1 min-h-0 pr-4" ref={scrollAreaRef}>
               <div className="space-y-4">
                 {messages.map((message, index) => (
                   <div
