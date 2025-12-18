@@ -6,6 +6,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -13,7 +18,7 @@ serve(async (req) => {
   }
 
   try {
-    const { listingId } = await req.json();
+    const { listingId, messages } = await req.json();
     
     if (!listingId) {
       throw new Error('listingId is required');
@@ -28,7 +33,8 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log('Generating call prep for listing:', listingId);
+    const isFollowUp = messages && messages.length > 0;
+    console.log(`${isFollowUp ? 'Follow-up' : 'Initial'} call prep for listing:`, listingId);
 
     // Fetch listing details
     const { data: listing, error: listingError } = await supabase
@@ -64,83 +70,22 @@ serve(async (req) => {
 
     const systemPrompt = promptConfig?.system_prompt || getDefaultSystemPrompt();
 
-    // Fetch owner info if available
-    let owner = null;
-    if (listing.owner_id) {
-      const { data: ownerData } = await supabase
-        .from('owners')
-        .select('*')
-        .eq('id', listing.owner_id)
-        .single();
-      owner = ownerData;
+    // Build messages array for AI
+    let aiMessages: { role: string; content: string }[] = [
+      { role: "system", content: systemPrompt }
+    ];
+
+    if (isFollowUp) {
+      // For follow-ups, use the existing conversation history
+      // The first message in history should contain the data context
+      aiMessages = aiMessages.concat(messages);
+    } else {
+      // For initial generation, fetch all property data and build context
+      const dataContext = await buildInitialContext(supabase, listing, listingId);
+      aiMessages.push({ role: "user", content: dataContext });
     }
 
-    // Fetch current year goals
-    const currentYear = new Date().getFullYear();
-    const { data: goals } = await supabase
-      .from('property_goals')
-      .select('*')
-      .eq('listing_id', listingId)
-      .eq('year', currentYear)
-      .order('month');
-
-    // Fetch revenue forecast
-    const { data: forecast } = await supabase
-      .from('revenue_forecasts')
-      .select('*')
-      .eq('listing_id', listingId)
-      .eq('year', currentYear)
-      .order('generated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    // Fetch YTD reservations
-    const startOfYear = `${currentYear}-01-01`;
-    const today = new Date().toISOString().split('T')[0];
-    const { data: reservations } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('listing_id', listingId)
-      .in('status', ['confirmed', 'checked_in', 'checked_out'])
-      .gte('check_in', startOfYear)
-      .lte('check_in', today)
-      .order('check_in', { ascending: false });
-
-    // Fetch recent reviews (last 6 months)
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const { data: reviews } = await supabase
-      .from('reviews')
-      .select('*')
-      .eq('listing_id', listingId)
-      .eq('is_removed', false)
-      .gte('review_date', sixMonthsAgo.toISOString())
-      .order('review_date', { ascending: false })
-      .limit(10);
-
-    // Fetch compset summary
-    const { data: compsetSummary } = await supabase
-      .from('property_compset_summary')
-      .select('*')
-      .eq('listing_id', listingId)
-      .maybeSingle();
-
-    // Calculate YTD metrics from reservations
-    const ytdMetrics = calculateYTDMetrics(reservations || [], currentYear);
-
-    // Build the data context for the AI
-    const dataContext = buildDataContext({
-      listing,
-      owner,
-      goals: goals || [],
-      forecast,
-      ytdMetrics,
-      reviews: reviews || [],
-      compsetSummary,
-      currentYear,
-    });
-
-    console.log('Calling Lovable AI with data context...');
+    console.log('Calling Lovable AI...');
 
     // Call Lovable AI
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -151,10 +96,7 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: dataContext }
-        ],
+        messages: aiMessages,
       }),
     });
 
@@ -185,10 +127,18 @@ serve(async (req) => {
 
     console.log('Successfully generated call prep');
 
-    return new Response(JSON.stringify({ 
+    // For initial generation, also return the data context so client can use it for follow-ups
+    const responseData: any = { 
       content: callPrepContent,
       generatedAt: new Date().toISOString(),
-    }), {
+    };
+
+    if (!isFollowUp) {
+      const dataContext = await buildInitialContext(supabase, listing, listingId);
+      responseData.dataContext = dataContext;
+    }
+
+    return new Response(JSON.stringify(responseData), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
@@ -203,35 +153,124 @@ serve(async (req) => {
   }
 });
 
-function getDefaultSystemPrompt(): string {
-  return `You are an expert owner relations consultant for a vacation rental management company. Your job is to prepare talking points for a call with a property owner.
+async function buildInitialContext(supabase: any, listing: any, listingId: string): Promise<string> {
+  const currentYear = new Date().getFullYear();
 
-Analyze the provided data and generate a concise, actionable call prep document with the following sections:
+  // Fetch owner info if available
+  let owner = null;
+  if (listing.owner_id) {
+    const { data: ownerData } = await supabase
+      .from('owners')
+      .select('*')
+      .eq('id', listing.owner_id)
+      .single();
+    owner = ownerData;
+  }
+
+  // Fetch current year goals
+  const { data: goals } = await supabase
+    .from('property_goals')
+    .select('*')
+    .eq('listing_id', listingId)
+    .eq('year', currentYear)
+    .order('month');
+
+  // Fetch revenue forecast
+  const { data: forecast } = await supabase
+    .from('revenue_forecasts')
+    .select('*')
+    .eq('listing_id', listingId)
+    .eq('year', currentYear)
+    .order('generated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Fetch YTD reservations
+  const startOfYear = `${currentYear}-01-01`;
+  const today = new Date().toISOString().split('T')[0];
+  const { data: reservations } = await supabase
+    .from('reservations')
+    .select('*')
+    .eq('listing_id', listingId)
+    .in('status', ['confirmed', 'checked_in', 'checked_out'])
+    .gte('check_in', startOfYear)
+    .lte('check_in', today)
+    .order('check_in', { ascending: false });
+
+  // Fetch recent reviews (last 6 months)
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const { data: reviews } = await supabase
+    .from('reviews')
+    .select('*')
+    .eq('listing_id', listingId)
+    .eq('is_removed', false)
+    .gte('review_date', sixMonthsAgo.toISOString())
+    .order('review_date', { ascending: false })
+    .limit(10);
+
+  // Fetch compset summary
+  const { data: compsetSummary } = await supabase
+    .from('property_compset_summary')
+    .select('*')
+    .eq('listing_id', listingId)
+    .maybeSingle();
+
+  // Calculate YTD metrics from reservations
+  const ytdMetrics = calculateYTDMetrics(reservations || [], currentYear);
+
+  // Build the data context for the AI
+  return buildDataContext({
+    listing,
+    owner,
+    goals: goals || [],
+    forecast,
+    ytdMetrics,
+    reviews: reviews || [],
+    compsetSummary,
+    currentYear,
+  });
+}
+
+function getDefaultSystemPrompt(): string {
+  return `You are an expert owner relations consultant for a vacation rental management company. Your job is to prepare talking points for a call with a property owner. Your approach should be positive and celebratory, focusing on wins and opportunities.
+
+IMPORTANT GUIDANCE:
+- Lead every conversation with positivity and celebration of wins
+- Be aware of improvement opportunities internally, but do NOT proactively bring them up unless the owner asks
+- Frame challenges as "opportunities" only if directly relevant to a positive recommendation
+- The goal is to build owner confidence and highlight the good work being done
+
+Analyze the provided data and generate a concise call prep document with the following sections:
 
 ## Performance Summary
-A 2-3 sentence overview of how the property is performing.
+A 2-3 sentence positive overview focusing on what's going well.
 
-## Key Wins
-- Bullet points highlighting positive performance metrics, recent wins, or good trends (3-5 items)
+## Key Wins 🎉
+- Bullet points celebrating positive performance metrics, recent wins, and good trends (4-6 items)
+- Be specific with numbers and comparisons
 
-## Areas of Concern
-- Bullet points noting any issues, declining metrics, or areas needing attention (2-4 items, or "None" if property is performing well)
+## Awareness Notes (Internal - Do Not Proactively Discuss)
+- Brief notes on any metrics that could be improved, for YOUR awareness only
+- Only discuss these if the owner specifically asks about challenges or concerns
+- Keep this section brief (1-3 items max, or "Nothing significant" if performing well)
 
 ## Goals & Pacing
-How the property is tracking against its goals. Include specific numbers.
+How the property is tracking against its goals. Lead with positive momentum where possible.
 
 ## Market Position
-How this property compares to similar properties in the market based on compset data.
+How this property compares favorably to similar properties. Highlight competitive advantages.
 
 ## Suggested Talking Points
-- Specific topics to discuss with the owner
-- Questions to ask
-- Recommendations to propose
+- Topics that celebrate success with the owner
+- Forward-looking opportunities and exciting possibilities
+- Questions to understand owner's goals and satisfaction
+- Avoid leading with problems - only address if owner brings them up
 
 ## Recent Reviews
-Highlight any notable guest feedback (positive or negative) that should be discussed.
+Highlight positive guest feedback. Only mention concerning reviews if the owner asks.
 
-Keep responses concise and action-oriented. Use specific numbers from the data provided. Do not make up data - only use what is provided.`;
+Keep responses positive, celebratory, and action-oriented. Use specific numbers from the data provided. Do not make up data - only use what is provided.`;
 }
 
 function calculateYTDMetrics(reservations: any[], currentYear: number) {
