@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { CalendarDateDetail } from "./CalendarDateDetail";
+import { ComparableMetricsDialog } from "./ComparableMetricsDialog";
 
 interface ListingCalendarProps {
   listingId: string;
@@ -43,6 +44,7 @@ interface ComparableWithRates {
 }
 
 interface CompsetDayDetail {
+  airroi_listing_id: string;
   name: string;
   thumbnail: string | null;
   rate: number;
@@ -65,6 +67,8 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   const [legendOpen, setLegendOpen] = useState(false);
   const [compareToCompset, setCompareToCompset] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedComparableId, setSelectedComparableId] = useState<string | null>(null);
+  const [metricsDialogOpen, setMetricsDialogOpen] = useState(false);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -147,6 +151,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
           if (rate.rate > 0) {
             const existing = dateToComps.get(rate.date) || [];
             existing.push({
+              airroi_listing_id: comp.airroi_listing_id,
               name: comp.listing_name || 'Unknown Property',
               thumbnail: comp.cover_photo_url,
               rate: rate.rate,
@@ -194,6 +199,52 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
     }
     
     return info;
+  };
+
+  // Fetch full comparable data for the metrics dialog
+  const { data: selectedComparableForMetrics } = useQuery({
+    queryKey: ['comparable-for-metrics', listingId, selectedComparableId],
+    queryFn: async () => {
+      if (!selectedComparableId) return null;
+      const { data, error } = await supabase
+        .from('property_comparables')
+        .select('*')
+        .eq('listing_id', listingId)
+        .eq('airroi_listing_id', selectedComparableId)
+        .single();
+      
+      if (error) throw error;
+      // Cast JSON fields to the expected types for ComparableMetricsDialog
+      return {
+        ...data,
+        id: data.id,
+        listing_name: data.listing_name,
+        cover_photo_url: data.cover_photo_url,
+        superhost: data.superhost ?? false,
+        location_info: data.location_info as { locality?: string; region?: string } | null,
+        ratings: data.ratings as { rating_overall?: number; num_reviews?: number } | null,
+        historical_metrics: data.historical_metrics as { results?: Array<{ date: string; occupancy: number; average_daily_rate: number; rev_par: number; revenue: number }> } | null,
+        metrics_fetched_at: data.metrics_fetched_at,
+        ttm_revenue: data.ttm_revenue,
+        ttm_adr: data.ttm_adr,
+        ttm_occupancy: data.ttm_occupancy,
+        ttm_revpar: data.ttm_revpar,
+        prior_ttm_revenue: data.prior_ttm_revenue,
+        prior_ttm_adr: data.prior_ttm_adr,
+        prior_ttm_occupancy: data.prior_ttm_occupancy,
+        prior_ttm_revpar: data.prior_ttm_revpar,
+        rollups_calculated_at: data.rollups_calculated_at,
+        future_rates: data.future_rates as { rates?: Array<{ date: string; available: boolean; rate: number }> } | null,
+        future_rates_fetched_at: data.future_rates_fetched_at,
+      };
+    },
+    enabled: !!selectedComparableId,
+  });
+
+  // Handle comparable click from calendar date detail
+  const handleComparableClick = (airroiListingId: string) => {
+    setSelectedComparableId(airroiListingId);
+    setMetricsDialogOpen(true);
   };
 
   // Sync calendar mutation
@@ -610,6 +661,17 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
         myDayData={selectedDate ? calendarMap.get(selectedDate) : undefined}
         compsetInfo={selectedDate ? getCompsetInfoForDate(selectedDate, calendarMap.get(selectedDate)?.price ?? null) : undefined}
         compareToCompset={compareToCompset}
+        onComparableClick={handleComparableClick}
+      />
+
+      {/* Comparable Metrics Dialog */}
+      <ComparableMetricsDialog
+        comparable={selectedComparableForMetrics}
+        open={metricsDialogOpen}
+        onOpenChange={(open) => {
+          setMetricsDialogOpen(open);
+          if (!open) setSelectedComparableId(null);
+        }}
       />
     </Card>
   );

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 
 interface CompsetDayDetail {
+  airroi_listing_id: string;
   name: string;
   thumbnail: string | null;
   rate: number;
@@ -34,6 +35,7 @@ interface CalendarDateDetailProps {
   myDayData: CalendarDayData | undefined;
   compsetInfo: CompsetDailyInfo | undefined;
   compareToCompset: boolean;
+  onComparableClick?: (airroiListingId: string) => void;
 }
 
 export function CalendarDateDetail({
@@ -42,6 +44,7 @@ export function CalendarDateDetail({
   myDayData,
   compsetInfo,
   compareToCompset,
+  onComparableClick,
 }: CalendarDateDetailProps) {
   if (!selectedDate) return null;
 
@@ -145,7 +148,13 @@ export function CalendarDateDetail({
                 </h4>
                 <div className="space-y-3">
                   {compsetInfo.comparables.map((comp, idx) => (
-                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                    <div 
+                      key={idx} 
+                      className={`flex items-center gap-3 p-2 rounded-lg bg-muted/30 transition-colors ${
+                        onComparableClick ? 'cursor-pointer hover:bg-muted/60' : 'hover:bg-muted/50'
+                      }`}
+                      onClick={() => onComparableClick?.(comp.airroi_listing_id)}
+                    >
                       {comp.thumbnail ? (
                         <img 
                           src={comp.thumbnail} 
