@@ -14,6 +14,44 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_prompt_configs: {
+        Row: {
+          created_at: string
+          id: string
+          organization_id: string
+          prompt_key: string
+          prompt_name: string
+          system_prompt: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          organization_id: string
+          prompt_key: string
+          prompt_name: string
+          system_prompt: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          organization_id?: string
+          prompt_key?: string
+          prompt_name?: string
+          system_prompt?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_prompt_configs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_curves: {
         Row: {
           created_at: string

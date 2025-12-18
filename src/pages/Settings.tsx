@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays } from "lucide-react";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { TeamManagement } from "@/components/TeamManagement";
+import { AIPromptsSettings } from "@/components/AIPromptsSettings";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -606,6 +607,8 @@ export default function Settings() {
         </Card>
 
         <TeamManagement />
+
+        <AIPromptsSettings />
       </div>
     </DashboardLayout>
   );
