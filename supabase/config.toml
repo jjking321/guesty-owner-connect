@@ -50,3 +50,6 @@ verify_jwt = true
 
 [functions.backfill-compset-averages]
 verify_jwt = false
+
+[functions.generate-call-prep]
+verify_jwt = true

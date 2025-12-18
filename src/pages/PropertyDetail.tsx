@@ -17,10 +17,12 @@ import { ReviewsSummary } from "@/components/ReviewsSummary";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { ComparablesModule } from "@/components/ComparablesModule";
 import { ListingCalendar } from "@/components/ListingCalendar";
+import { CallPrepDialog } from "@/components/CallPrepDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useSmartNavigation } from "@/hooks/useSmartNavigation";
+import { useUserRole } from "@/hooks/useUserRole";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -35,6 +37,7 @@ export default function PropertyDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { navigateBack, getReferrer } = useSmartNavigation();
+  const { role } = useUserRole();
   const referrer = getReferrer();
   const [listing, setListing] = useState<any>(null);
   const [reservations, setReservations] = useState<any[]>([]);
@@ -419,7 +422,15 @@ export default function PropertyDetail() {
               </p>
             </div>
           </div>
-          <PropertySettings listingId={id!} />
+          <div className="flex items-center gap-2">
+            {role && role !== 'owner' && (
+              <CallPrepDialog 
+                listingId={id!} 
+                propertyName={listing.nickname || "Property"} 
+              />
+            )}
+            <PropertySettings listingId={id!} />
+          </div>
         </div>
 
         {/* Property Image and Details */}
