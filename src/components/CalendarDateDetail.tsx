@@ -117,15 +117,15 @@ export function CalendarDateDetail({
                 </div>
                 {priceDiff !== null && (
                   <div className={`flex items-center gap-2 p-3 rounded-lg ${
-                    priceDiff > 10 ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400' :
-                    priceDiff < -10 ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400' :
-                    'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400'
+                    priceDiff > 10 ? 'bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-400' :
+                    priceDiff < -10 ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400' :
+                    'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400'
                   }`}>
                     <span className="text-sm">Your price is</span>
-                    <Badge variant="secondary" className={`${
-                      priceDiff > 10 ? 'bg-red-100 dark:bg-red-900/50' :
-                      priceDiff < -10 ? 'bg-emerald-100 dark:bg-emerald-900/50' :
-                      'bg-amber-100 dark:bg-amber-900/50'
+                    <Badge variant="secondary" className={`font-semibold ${
+                      priceDiff > 10 ? 'bg-red-600 text-white' :
+                      priceDiff < -10 ? 'bg-emerald-600 text-white' :
+                      'bg-amber-600 text-white'
                     }`}>
                       {priceDiff > 0 ? '+' : ''}{priceDiff.toFixed(1)}%
                     </Badge>
