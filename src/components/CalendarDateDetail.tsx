@@ -1,7 +1,7 @@
 import { format } from "date-fns";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { Separator } from "@/components/ui/separator";
 
 interface CompsetDayDetail {
@@ -143,46 +143,44 @@ export function CalendarDateDetail({
                 <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                   Comparables ({compsetInfo.comparables.length})
                 </h4>
-                <ScrollArea className="h-[300px] pr-4">
-                  <div className="space-y-3">
-                    {compsetInfo.comparables.map((comp, idx) => (
-                      <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-                        {comp.thumbnail ? (
-                          <img 
-                            src={comp.thumbnail} 
-                            alt={comp.name}
-                            className="w-12 h-12 rounded-md object-cover flex-shrink-0"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
-                            <span className="text-xs text-muted-foreground">No img</span>
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate">{comp.name}</div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className={`text-sm font-semibold ${comp.available ? 'text-emerald-600' : 'text-foreground'}`}>
-                              {formatPrice(comp.rate, myDayData?.currency)}
-                            </span>
-                            <Badge 
-                              variant={comp.available ? "outline" : "secondary"}
-                              className={`text-xs ${comp.available ? 'border-emerald-500 text-emerald-600' : 'bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-400'}`}
-                            >
-                              {comp.available ? 'Available' : 'Booked'}
-                            </Badge>
-                          </div>
+                <div className="space-y-3">
+                  {compsetInfo.comparables.map((comp, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                      {comp.thumbnail ? (
+                        <img 
+                          src={comp.thumbnail} 
+                          alt={comp.name}
+                          className="w-12 h-12 rounded-md object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-md bg-muted flex items-center justify-center flex-shrink-0">
+                          <span className="text-xs text-muted-foreground">No img</span>
                         </div>
-                        {comp.diffFromYou !== null && myPrice && (
-                          <div className={`text-sm font-medium ${
-                            comp.diffFromYou > 0 ? 'text-red-600' : 'text-emerald-600'
-                          }`}>
-                            {comp.diffFromYou > 0 ? '+' : ''}{formatPrice(comp.diffFromYou, myDayData?.currency)}
-                          </div>
-                        )}
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{comp.name}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-sm font-semibold ${comp.available ? 'text-emerald-600' : 'text-foreground'}`}>
+                            {formatPrice(comp.rate, myDayData?.currency)}
+                          </span>
+                          <Badge 
+                            variant={comp.available ? "outline" : "secondary"}
+                            className={`text-xs ${comp.available ? 'border-emerald-500 text-emerald-600' : 'bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-400'}`}
+                          >
+                            {comp.available ? 'Available' : 'Booked'}
+                          </Badge>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
+                      {comp.diffFromYou !== null && myPrice && (
+                        <div className={`text-sm font-medium ${
+                          comp.diffFromYou > 0 ? 'text-red-600' : 'text-emerald-600'
+                        }`}>
+                          {comp.diffFromYou > 0 ? '+' : ''}{formatPrice(comp.diffFromYou, myDayData?.currency)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             </>
           )}
