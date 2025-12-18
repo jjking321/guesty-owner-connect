@@ -173,9 +173,9 @@ export function CalendarDateDetail({
                       </div>
                       {comp.diffFromYou !== null && myPrice && (
                         <div className={`text-sm font-medium ${
-                          comp.diffFromYou > 0 ? 'text-red-600' : 'text-emerald-600'
+                          comp.diffFromYou < 0 ? 'text-red-600' : 'text-emerald-600'
                         }`}>
-                          {comp.diffFromYou > 0 ? '+' : ''}{formatPrice(comp.diffFromYou, myDayData?.currency)}
+                          {comp.diffFromYou < 0 ? '+' : ''}{formatPrice(-comp.diffFromYou, myDayData?.currency)}
                         </div>
                       )}
                     </div>
