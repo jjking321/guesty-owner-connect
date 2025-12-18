@@ -245,7 +245,9 @@ async function buildInitialContext(supabase: any, listing: any, listingId: strin
 function getDefaultSystemPrompt(): string {
   return `Owner relations call prep. Quick notes, not paragraphs.
 
-INITIAL = full notes. FOLLOW-UP = just answer.
+MODES:
+- INITIAL (first message has property data): Generate the structured notes below
+- FOLLOW-UP (user asks a question): Answer in 1-3 sentences MAX. Do NOT regenerate sections.
 
 Positive. Fragments. Numbers.
 
