@@ -15,12 +15,12 @@ import { useUserRole } from "@/hooks/useUserRole";
 
 const menuItems = [
   { title: "Portfolio View", url: "/properties/bulk-edit", icon: LayoutGrid, roles: ['super_admin', 'admin', 'member'] },
-  { title: "Comparables", url: "/comparables", icon: Building2, roles: ['super_admin', 'admin', 'member'] },
   { title: "Groups", url: "/groups", icon: FolderOpen, roles: ['super_admin', 'admin', 'member', 'owner'] },
   { title: "Owners", url: "/owners", icon: Users, roles: ['super_admin', 'admin', 'member'] },
   { title: "Reservations", url: "/reservations", icon: Calendar, roles: ['super_admin', 'admin', 'member'] },
   { title: "Reviews", url: "/reviews", icon: Star, roles: ['super_admin', 'admin', 'member'] },
   { title: "Forecast Admin", url: "/forecast-admin", icon: Wrench, roles: ['super_admin', 'admin'] },
+  { title: "Comparables", url: "/comparables", icon: Building2, roles: ['super_admin', 'admin'] },
   { title: "Settings", url: "/settings", icon: Settings, roles: ['super_admin', 'admin', 'member'] },
 ];
 
