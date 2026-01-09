@@ -17,11 +17,13 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const airroiApiKey = Deno.env.get('AIRROI_API_KEY');
+    const airroiApiKey = (Deno.env.get('AIRROI_API_KEY') ?? '').trim();
 
     if (!airroiApiKey) {
       throw new Error('AIRROI_API_KEY is not configured');
     }
+
+    console.log('AIRROI_API_KEY loaded (length):', airroiApiKey.length);
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
