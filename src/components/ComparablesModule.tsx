@@ -948,52 +948,18 @@ export function ComparablesModule({
                 <p className="text-xs text-muted-foreground mb-3">
                   These previously fetched comparables match your current filter criteria.
                 </p>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {(showAllCached ? cachedMatchingComps : cachedMatchingComps.slice(0, CACHED_PREVIEW_COUNT)).map((comp) => (
-                    <div
+                    <ComparableCard
                       key={comp.id}
-                      className="flex items-center justify-between p-2 bg-background rounded border hover:border-primary/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Checkbox
-                          checked={pendingSelections.has(comp.id)}
-                          onCheckedChange={() => toggleSelection(comp.id)}
-                        />
-                        {comp.cover_photo_url && (
-                          <img
-                            src={comp.cover_photo_url}
-                            alt=""
-                            className="w-10 h-10 object-cover rounded"
-                          />
-                        )}
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate max-w-[200px]">
-                            {comp.listing_name || 'Unnamed Property'}
-                          </p>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            {comp.property_details?.bedrooms !== undefined && (
-                              <span>{comp.property_details.bedrooms} bed{comp.property_details.bedrooms !== 1 ? 's' : ''}</span>
-                            )}
-                            {comp._distance !== null && (
-                              <span>• {comp._distance.toFixed(1)} mi</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {(comp.ttm_revenue || comp.performance_metrics?.ttm_revenue) && (
-                          <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                            {formatCurrency(comp.ttm_revenue || comp.performance_metrics?.ttm_revenue)}
-                          </span>
-                        )}
-                        {comp.ratings?.rating_overall && (
-                          <div className="flex items-center gap-1">
-                            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                            <span className="text-xs">{comp.ratings.rating_overall.toFixed(1)}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                      comparable={comp}
+                      mode="cached"
+                      isSelected={pendingSelections.has(comp.id)}
+                      onToggle={() => toggleSelection(comp.id)}
+                      distance={comp._distance}
+                      formatCurrency={formatCurrency}
+                      formatPercent={formatPercent}
+                    />
                   ))}
                 </div>
               </div>
@@ -1246,8 +1212,8 @@ export function ComparablesModule({
 
 interface ComparableCardProps {
   comparable: Comparable;
-  mode: 'search' | 'selected';
-  // Search mode props
+  mode: 'search' | 'selected' | 'cached';
+  // Search/Cached mode props
   isSelected?: boolean;
   onToggle?: () => void;
   // Selected mode props
@@ -1255,6 +1221,8 @@ interface ComparableCardProps {
   onMetricsToggle?: () => void;
   onRemove?: () => void;
   onClick?: () => void;
+  // Cached mode props
+  distance?: number | null;
   // Common props
   formatCurrency: (value?: number) => string;
   formatPercent: (value?: number) => string;
@@ -1269,6 +1237,7 @@ function ComparableCard({
   onMetricsToggle,
   onRemove,
   onClick,
+  distance,
   formatCurrency,
   formatPercent,
 }: ComparableCardProps) {
@@ -1277,6 +1246,7 @@ function ComparableCard({
   const ratings = comparable.ratings;
 
   const isInSelectedMode = mode === 'selected';
+  const isCachedMode = mode === 'cached';
   const cardSelected = isInSelectedMode || isSelected;
 
   const handleCardClick = (e: React.MouseEvent) => {
@@ -1289,7 +1259,11 @@ function ComparableCard({
   return (
     <div 
       className={`border rounded-lg p-4 transition-colors ${
-        cardSelected ? 'border-primary bg-primary/5' : 'hover:border-muted-foreground/50'
+        isCachedMode 
+          ? 'bg-muted/30 border-muted hover:border-primary/50' 
+          : cardSelected 
+            ? 'border-primary bg-primary/5' 
+            : 'hover:border-muted-foreground/50'
       } ${isInSelectedMode ? 'cursor-pointer hover:bg-primary/10' : ''}`}
       onClick={handleCardClick}
     >
@@ -1302,7 +1276,7 @@ function ComparableCard({
               onCheckedChange={onMetricsToggle}
               aria-label={`Select ${comparable.listing_name} for metrics fetch`}
             />
-          ) : (
+          ) : (isCachedMode || mode === 'search') && (
             <Checkbox
               checked={isSelected}
               onCheckedChange={onToggle}
@@ -1343,9 +1317,17 @@ function ComparableCard({
               </div>
               <p className="text-sm text-muted-foreground">
                 {comparable.location_info?.locality || comparable.location_info?.region || 'Unknown location'}
+                {distance != null && (
+                  <span className="ml-2">• {distance.toFixed(1)} mi</span>
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
+              {isCachedMode && (
+                <Badge variant="outline" className="text-xs bg-muted/50">
+                  Cached
+                </Badge>
+              )}
               {comparable.superhost && (
                 <Badge variant="secondary" className="text-xs">
                   Superhost
