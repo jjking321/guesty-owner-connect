@@ -103,7 +103,10 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
         .gte('date', format(monthStart, 'yyyy-MM-dd'))
         .lte('date', format(monthEnd, 'yyyy-MM-dd'));
       if (error) throw error;
-      return data as ProbabilityData[];
+      return (data || []).map(d => ({
+        ...d,
+        weights_used: d.weights_used as unknown as ProbabilityData['weights_used'],
+      })) as ProbabilityData[];
     },
     enabled: showProbability,
   });

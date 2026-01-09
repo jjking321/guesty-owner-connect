@@ -1,17 +1,22 @@
 import { useState, useMemo, useEffect } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { TrendingUp, TrendingDown, Target, Zap, DollarSign, Clock, AlertTriangle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { 
+  TrendingUp, TrendingDown, Target, Zap, DollarSign, Clock, 
+  AlertTriangle, Info, History, BarChart3 
+} from "lucide-react";
 import {
   ProbabilityData,
   recalculateProbability,
   generateRateSuggestions,
   getProbabilityColor,
   getBookingWindowStatus,
+  getModeDisplayInfo,
   RateSuggestion,
+  WeightMode,
 } from "@/lib/probabilityCalculator";
 
 interface RateSimulatorProps {
@@ -34,8 +39,8 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
   const minRate = Math.max(50, Math.round(avgAvailableRate * 0.5));
   const maxRate = Math.round(Math.max(currentRate, avgAvailableRate) * 1.5);
 
-  // Recalculate probability with simulated rate
-  const { probability: simulatedProbability, pricePositionScore: simulatedPriceScore, factors } = useMemo(
+  // Recalculate probability with simulated rate (now includes mode and weights)
+  const { probability: simulatedProbability, pricePositionScore: simulatedPriceScore, factors, mode, weights } = useMemo(
     () => recalculateProbability(simulatedRate, probabilityData),
     [simulatedRate, probabilityData]
   );
@@ -58,6 +63,9 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
     probabilityData.current_dba,
     probabilityData.expected_booking_window
   );
+
+  // Mode display info
+  const modeInfo = getModeDisplayInfo(mode);
 
   // Format price
   const formatPrice = (price: number) => {
@@ -92,8 +100,29 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
     ? ((simulatedRate - avgAvailableRate) / avgAvailableRate) * 100
     : 0;
 
+  // Mode icon
+  const ModeIcon = mode === 'far_out' ? History : mode === 'close_in' ? Zap : BarChart3;
+
   return (
     <div className="space-y-5">
+      {/* Mode Indicator */}
+      {mode !== 'standard' && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${modeInfo.bgColor} ${modeInfo.color} cursor-help`}>
+                <ModeIcon className="h-4 w-4" />
+                <span>Based on {modeInfo.label}</span>
+                <Info className="h-3.5 w-3.5 opacity-60" />
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs">
+              <p className="text-sm">{modeInfo.description}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
+
       {/* Rate Simulator Section */}
       <div className="space-y-4">
         <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
@@ -209,16 +238,35 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
           </div>
         </div>
 
-        {/* Factor Breakdown at Simulated Rate */}
+        {/* Factor Breakdown with Dynamic Weights */}
         <div className="bg-muted/30 rounded-lg p-3 space-y-2">
-          <div className="text-xs font-medium text-muted-foreground mb-2">Breakdown at {formatPrice(simulatedRate)}:</div>
+          <div className="flex items-center justify-between text-xs font-medium text-muted-foreground mb-2">
+            <span>Breakdown at {formatPrice(simulatedRate)}</span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`flex items-center gap-1 cursor-help ${modeInfo.color}`}>
+                    <ModeIcon className="h-3 w-3" />
+                    {mode === 'far_out' ? 'Far Out' : mode === 'close_in' ? 'Close-In' : 'Standard'} weights
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="text-xs">{modeInfo.description}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Compset Demand:</span>
+              <span className="text-muted-foreground">
+                Compset <span className="text-xs opacity-60">({Math.round(weights.compsetDemand * 100)}%)</span>:
+              </span>
               <span className="font-medium">{Math.round(factors.compsetDemandScore)}%</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Price Position:</span>
+              <span className="text-muted-foreground">
+                Price <span className="text-xs opacity-60">({Math.round(weights.pricePosition * 100)}%)</span>:
+              </span>
               <span className={`font-medium ${
                 simulatedPriceScore > probabilityData.price_position_score ? "text-emerald-600" :
                 simulatedPriceScore < probabilityData.price_position_score ? "text-red-600" : ""
@@ -226,17 +274,21 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
                 {Math.round(simulatedPriceScore)}%
                 {simulatedPriceScore !== probabilityData.price_position_score && (
                   <span className="text-xs ml-1">
-                    ({simulatedPriceScore > probabilityData.price_position_score ? "↑" : "↓"} was {Math.round(probabilityData.price_position_score)}%)
+                    ({simulatedPriceScore > probabilityData.price_position_score ? "↑" : "↓"})
                   </span>
                 )}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Historical:</span>
+              <span className="text-muted-foreground">
+                Historical <span className="text-xs opacity-60">({Math.round(weights.historical * 100)}%)</span>:
+              </span>
               <span className="font-medium">{Math.round(factors.historicalScore)}%</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Booking Window:</span>
+              <span className="text-muted-foreground">
+                Window <span className="text-xs opacity-60">({Math.round(weights.bookingWindow * 100)}%)</span>:
+              </span>
               <span className="font-medium">{Math.round(factors.bookingWindowScore)}%</span>
             </div>
           </div>
@@ -304,6 +356,16 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
             </span>
           </div>
           <div className="text-xs text-muted-foreground">{bookingWindowStatus.description}</div>
+
+          {/* Historical Monthly Occupancy (show in far_out mode) */}
+          {mode === 'far_out' && probabilityData.historical_monthly_occupancy !== undefined && (
+            <div className="pt-2 border-t border-border/50">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Last year's occupancy (this month):</span>
+                <span className="font-semibold">{probabilityData.historical_monthly_occupancy}%</span>
+              </div>
+            </div>
+          )}
 
           {/* Last Year Comparison */}
           {probabilityData.historical_date && (
