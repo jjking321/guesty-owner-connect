@@ -99,6 +99,89 @@ export type Database = {
           },
         ]
       }
+      booking_probabilities: {
+        Row: {
+          avg_available_rate: number | null
+          booking_window_score: number | null
+          calculated_at: string | null
+          compset_booked_count: number | null
+          compset_demand_score: number | null
+          compset_total_count: number | null
+          created_at: string | null
+          current_dba: number | null
+          date: string
+          expected_booking_window: number | null
+          historical_date: string | null
+          historical_dba: number | null
+          historical_rate: number | null
+          historical_score: number | null
+          historical_was_booked: boolean | null
+          id: string
+          is_dba_outlier: boolean | null
+          listing_id: string
+          price_position_score: number | null
+          probability: number | null
+          updated_at: string | null
+          your_price: number | null
+        }
+        Insert: {
+          avg_available_rate?: number | null
+          booking_window_score?: number | null
+          calculated_at?: string | null
+          compset_booked_count?: number | null
+          compset_demand_score?: number | null
+          compset_total_count?: number | null
+          created_at?: string | null
+          current_dba?: number | null
+          date: string
+          expected_booking_window?: number | null
+          historical_date?: string | null
+          historical_dba?: number | null
+          historical_rate?: number | null
+          historical_score?: number | null
+          historical_was_booked?: boolean | null
+          id?: string
+          is_dba_outlier?: boolean | null
+          listing_id: string
+          price_position_score?: number | null
+          probability?: number | null
+          updated_at?: string | null
+          your_price?: number | null
+        }
+        Update: {
+          avg_available_rate?: number | null
+          booking_window_score?: number | null
+          calculated_at?: string | null
+          compset_booked_count?: number | null
+          compset_demand_score?: number | null
+          compset_total_count?: number | null
+          created_at?: string | null
+          current_dba?: number | null
+          date?: string
+          expected_booking_window?: number | null
+          historical_date?: string | null
+          historical_dba?: number | null
+          historical_rate?: number | null
+          historical_score?: number | null
+          historical_was_booked?: boolean | null
+          id?: string
+          is_dba_outlier?: boolean | null
+          listing_id?: string
+          price_position_score?: number | null
+          probability?: number | null
+          updated_at?: string | null
+          your_price?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_probabilities_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       capacity_calendar: {
         Row: {
           block_reason: string | null
@@ -393,6 +476,53 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      listing_booking_stats: {
+        Row: {
+          avg_booking_window: number | null
+          calculated_at: string | null
+          created_at: string | null
+          id: string
+          listing_id: string
+          median_booking_window: number | null
+          monthly_avg_windows: Json | null
+          stddev_booking_window: number | null
+          total_bookings_analyzed: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          avg_booking_window?: number | null
+          calculated_at?: string | null
+          created_at?: string | null
+          id?: string
+          listing_id: string
+          median_booking_window?: number | null
+          monthly_avg_windows?: Json | null
+          stddev_booking_window?: number | null
+          total_bookings_analyzed?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          avg_booking_window?: number | null
+          calculated_at?: string | null
+          created_at?: string | null
+          id?: string
+          listing_id?: string
+          median_booking_window?: number | null
+          monthly_avg_windows?: Json | null
+          stddev_booking_window?: number | null
+          total_bookings_analyzed?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "listing_booking_stats_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: true
+            referencedRelation: "listings"
             referencedColumns: ["id"]
           },
         ]

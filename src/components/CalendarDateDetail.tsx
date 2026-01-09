@@ -1,8 +1,9 @@
 import { format } from "date-fns";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
-
 import { Separator } from "@/components/ui/separator";
+import { RateSimulator } from "./RateSimulator";
+import { ProbabilityData, getProbabilityColor } from "@/lib/probabilityCalculator";
 
 interface CompsetDayDetail {
   airroi_listing_id: string;
@@ -36,6 +37,7 @@ interface CalendarDateDetailProps {
   compsetInfo: CompsetDailyInfo | undefined;
   compareToCompset: boolean;
   onComparableClick?: (airroiListingId: string) => void;
+  probabilityData?: ProbabilityData;
 }
 
 export function CalendarDateDetail({
@@ -45,6 +47,7 @@ export function CalendarDateDetail({
   compsetInfo,
   compareToCompset,
   onComparableClick,
+  probabilityData,
 }: CalendarDateDetailProps) {
   if (!selectedDate) return null;
 
@@ -97,6 +100,30 @@ export function CalendarDateDetail({
         </SheetHeader>
 
         <div className="mt-6 space-y-6">
+          {/* Booking Probability Summary */}
+          {probabilityData && probabilityData.probability !== null && (
+            <>
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Booking Probability
+                </h4>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 bg-muted/30 rounded-full h-6 overflow-hidden">
+                    <div
+                      className={`h-full ${getProbabilityColor(probabilityData.probability).badge} transition-all flex items-center justify-center`}
+                      style={{ width: `${probabilityData.probability}%` }}
+                    >
+                      <span className="text-xs font-bold text-white">
+                        {Math.round(probabilityData.probability)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <Separator />
+            </>
+          )}
+
           {/* Compset Summary */}
           {compareToCompset && compsetInfo && compsetInfo.totalCount > 0 && (
             <>
@@ -201,10 +228,21 @@ export function CalendarDateDetail({
             </div>
           )}
 
-          {!compareToCompset && (
+          {!compareToCompset && !probabilityData && (
             <div className="p-4 bg-muted/30 rounded-lg text-center text-muted-foreground">
-              Enable "Compare to Compset" to see market data
+              Enable "Compare to Compset" or "Booking Probability" to see market data
             </div>
+          )}
+
+          {/* Rate Simulator - only for available dates with probability data */}
+          {probabilityData && myDayData?.is_available && (
+            <>
+              <Separator />
+              <RateSimulator 
+                probabilityData={probabilityData}
+                currency={myDayData?.currency || "USD"}
+              />
+            </>
           )}
         </div>
       </SheetContent>
