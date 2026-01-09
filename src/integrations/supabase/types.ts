@@ -158,6 +158,54 @@ export type Database = {
           },
         ]
       }
+      compset_templates: {
+        Row: {
+          airroi_listing_ids: string[]
+          created_at: string
+          created_by: string
+          description: string | null
+          guesty_account_id: string
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          airroi_listing_ids?: string[]
+          created_at?: string
+          created_by: string
+          description?: string | null
+          guesty_account_id: string
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          airroi_listing_ids?: string[]
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          guesty_account_id?: string
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "compset_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "compset_templates_guesty_account_id_fkey"
+            columns: ["guesty_account_id"]
+            isOneToOne: false
+            referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       forecast_accuracy: {
         Row: {
           absolute_error: number | null

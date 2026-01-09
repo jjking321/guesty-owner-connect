@@ -11,10 +11,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus, Trash2, Save, FolderInput } from "lucide-react";
 import { ComparablesMap } from "./ComparablesMap";
 import { ComparableMetricsDialog } from "./ComparableMetricsDialog";
+import { SaveCompsetTemplateDialog } from "./SaveCompsetTemplateDialog";
+import { ApplyCompsetTemplateDialog } from "./ApplyCompsetTemplateDialog";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ComparablesModuleProps {
   listingId: string;
@@ -147,13 +159,37 @@ export function ComparablesModule({
     selected_comparables_count: number | null;
     calculated_at: string | null;
   } | null>(null);
+  
+  // Delete and template state
+  const [deleteAllConfirmOpen, setDeleteAllConfirmOpen] = useState(false);
+  const [deleteComparableId, setDeleteComparableId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  const [applyTemplateOpen, setApplyTemplateOpen] = useState(false);
+  const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
 
   // Load existing comparables and mapbox token on mount
   useEffect(() => {
     loadExistingComparables();
     fetchMapboxToken();
     loadCompsetSummary();
+    fetchGuestyAccountId();
   }, [listingId]);
+
+  const fetchGuestyAccountId = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('listings')
+        .select('guesty_account_id')
+        .eq('id', listingId)
+        .single();
+      
+      if (error) throw error;
+      setGuestyAccountId(data?.guesty_account_id || null);
+    } catch (error) {
+      console.error('Error fetching guesty account:', error);
+    }
+  };
 
   const loadCompsetSummary = async () => {
     try {
@@ -487,6 +523,91 @@ export function ComparablesModule({
     });
   };
 
+  // Delete all comparables for this listing
+  const deleteAllComparables = async () => {
+    setDeleting(true);
+    try {
+      // Delete all comparables
+      const { error: compError } = await supabase
+        .from('property_comparables')
+        .delete()
+        .eq('listing_id', listingId);
+      
+      if (compError) throw compError;
+
+      // Delete compset summary
+      await supabase
+        .from('property_compset_summary')
+        .delete()
+        .eq('listing_id', listingId);
+
+      setComparables([]);
+      setPendingSelections(new Set());
+      setMetricsSelection(new Set());
+      setCompsetSummary(null);
+      setDeleteAllConfirmOpen(false);
+
+      toast({
+        title: "Comparables deleted",
+        description: "All comparables have been removed from this property.",
+      });
+    } catch (error: any) {
+      console.error('Error deleting comparables:', error);
+      toast({
+        title: "Error deleting comparables",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Delete a single comparable
+  const deleteComparable = async () => {
+    if (!deleteComparableId) return;
+    
+    setDeleting(true);
+    try {
+      const { error } = await supabase
+        .from('property_comparables')
+        .delete()
+        .eq('id', deleteComparableId);
+      
+      if (error) throw error;
+
+      setComparables(prev => prev.filter(c => c.id !== deleteComparableId));
+      setPendingSelections(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(deleteComparableId);
+        return newSet;
+      });
+      setMetricsSelection(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(deleteComparableId);
+        return newSet;
+      });
+      setDeleteComparableId(null);
+
+      toast({
+        title: "Comparable deleted",
+        description: "The comparable has been removed.",
+      });
+
+      // Reload compset summary if we deleted a selected comp
+      await loadCompsetSummary();
+    } catch (error: any) {
+      console.error('Error deleting comparable:', error);
+      toast({
+        title: "Error deleting comparable",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const openMetricsDialog = (comparable: Comparable) => {
     setSelectedComparableForMetrics(comparable);
     setMetricsDialogOpen(true);
@@ -580,14 +701,37 @@ export function ComparablesModule({
                     </SelectContent>
                   </Select>
                 </div>
-                <Button 
-                  onClick={fetchComparables} 
-                  disabled={loading || !hasCoordinates}
-                  size="sm"
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                  {loading ? 'Fetching...' : 'Fetch Comparables'}
-                </Button>
+                <div className="flex items-center gap-2">
+                  {guestyAccountId && (
+                    <Button 
+                      onClick={() => setApplyTemplateOpen(true)}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <FolderInput className="h-4 w-4 mr-2" />
+                      Apply Template
+                    </Button>
+                  )}
+                  <Button 
+                    onClick={fetchComparables} 
+                    disabled={loading || !hasCoordinates}
+                    size="sm"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                    {loading ? 'Fetching...' : 'Fetch Comparables'}
+                  </Button>
+                  {comparables.length > 0 && (
+                    <Button 
+                      onClick={() => setDeleteAllConfirmOpen(true)}
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Clear All
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {/* Bedroom Range Filter */}
@@ -826,6 +970,16 @@ export function ComparablesModule({
                       <TrendingUp className="h-4 w-4 mr-2" />
                       {fetchingFutureRates ? 'Fetching...' : `Fetch Future Rates (${metricsSelection.size})`}
                     </Button>
+                    {guestyAccountId && selectedComparables.length > 0 && (
+                      <Button 
+                        onClick={() => setSaveTemplateOpen(true)}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <Save className="h-4 w-4 mr-2" />
+                        Save as Template
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -865,6 +1019,72 @@ export function ComparablesModule({
           open={metricsDialogOpen}
           onOpenChange={setMetricsDialogOpen}
         />
+
+        {/* Delete All Confirmation Dialog */}
+        <AlertDialog open={deleteAllConfirmOpen} onOpenChange={setDeleteAllConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete All Comparables?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete all {comparables.length} comparables for this property. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={deleteAllComparables}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? "Deleting..." : "Delete All"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Delete Single Comparable Confirmation */}
+        <AlertDialog open={!!deleteComparableId} onOpenChange={(open) => !open && setDeleteComparableId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Comparable?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove this comparable from your property. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={deleteComparable}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Save Template Dialog */}
+        {guestyAccountId && (
+          <SaveCompsetTemplateDialog
+            open={saveTemplateOpen}
+            onOpenChange={setSaveTemplateOpen}
+            airroiListingIds={selectedComparables.map(c => String(c.airroi_listing_id))}
+            guestyAccountId={guestyAccountId}
+          />
+        )}
+
+        {/* Apply Template Dialog */}
+        {guestyAccountId && (
+          <ApplyCompsetTemplateDialog
+            open={applyTemplateOpen}
+            onOpenChange={setApplyTemplateOpen}
+            listingId={listingId}
+            guestyAccountId={guestyAccountId}
+            onApplied={() => {
+              loadExistingComparables();
+              loadCompsetSummary();
+            }}
+          />
+        )}
       </CardContent>
     </Card>
   );
