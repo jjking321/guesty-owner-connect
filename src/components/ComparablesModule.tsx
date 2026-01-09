@@ -11,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus, Trash2, Save, FolderInput } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus, Trash2, Save, FolderInput, ChevronDown } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 import { ComparablesMap } from "./ComparablesMap";
 import { ComparableMetricsDialog } from "./ComparableMetricsDialog";
 import { SaveCompsetTemplateDialog } from "./SaveCompsetTemplateDialog";
@@ -192,9 +194,10 @@ export function ComparablesModule({
   const [applyTemplateOpen, setApplyTemplateOpen] = useState(false);
   const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
   
-  // State for cached matches expansion
-  const [showAllCached, setShowAllCached] = useState(false);
-  const CACHED_PREVIEW_COUNT = 5;
+  // State for cached matches collapsible and pagination
+  const [cachedCollapsed, setCachedCollapsed] = useState(false);
+  const [cachedDisplayCount, setCachedDisplayCount] = useState(5);
+  const CACHED_LOAD_INCREMENT = 10;
 
   // Load existing comparables and mapbox token on mount
   useEffect(() => {
@@ -203,6 +206,11 @@ export function ComparablesModule({
     loadCompsetSummary();
     fetchGuestyAccountId();
   }, [listingId]);
+
+  // Reset cached display count when filters change
+  useEffect(() => {
+    setCachedDisplayCount(5);
+  }, [radiusMiles, bedroomMin, bedroomMax, minRevenue, maxRevenue, selectedAmenities]);
 
   const fetchGuestyAccountId = async () => {
     try {
@@ -925,44 +933,58 @@ export function ComparablesModule({
 
             {/* Cached Matching Comparables Section */}
             {cachedMatchingComps.length > 0 && (
-              <div className="mb-6 border rounded-lg p-4 bg-muted/30">
-                <div className="flex items-center justify-between mb-3">
+              <Collapsible 
+                open={!cachedCollapsed} 
+                onOpenChange={() => setCachedCollapsed(!cachedCollapsed)}
+                className="mb-6 border rounded-lg bg-muted/30"
+              >
+                <CollapsibleTrigger className="flex items-center justify-between w-full p-4 hover:bg-muted/50 transition-colors rounded-lg">
                   <div className="flex items-center gap-2">
+                    <ChevronDown className={cn("h-4 w-4 transition-transform", cachedCollapsed && "-rotate-90")} />
                     <Building className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium text-sm">
                       Matching Cached Comparables ({cachedMatchingComps.length})
                     </span>
                     <Badge variant="secondary" className="text-xs">Cached</Badge>
                   </div>
-                  {cachedMatchingComps.length > CACHED_PREVIEW_COUNT && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowAllCached(!showAllCached)}
-                      className="text-xs"
-                    >
-                      {showAllCached ? 'Show Less' : `Show All (${cachedMatchingComps.length})`}
-                    </Button>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mb-3">
-                  These previously fetched comparables match your current filter criteria.
-                </p>
-                <div className="space-y-3">
-                  {(showAllCached ? cachedMatchingComps : cachedMatchingComps.slice(0, CACHED_PREVIEW_COUNT)).map((comp) => (
-                    <ComparableCard
-                      key={comp.id}
-                      comparable={comp}
-                      mode="cached"
-                      isSelected={pendingSelections.has(comp.id)}
-                      onToggle={() => toggleSelection(comp.id)}
-                      distance={comp._distance}
-                      formatCurrency={formatCurrency}
-                      formatPercent={formatPercent}
-                    />
-                  ))}
-                </div>
-              </div>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="px-4 pb-4">
+                    <p className="text-xs text-muted-foreground mb-3">
+                      These previously fetched comparables match your current filter criteria.
+                    </p>
+                    <div className="space-y-3">
+                      {cachedMatchingComps.slice(0, cachedDisplayCount).map((comp) => (
+                        <ComparableCard
+                          key={comp.id}
+                          comparable={comp}
+                          mode="cached"
+                          isSelected={pendingSelections.has(comp.id)}
+                          onToggle={() => toggleSelection(comp.id)}
+                          distance={comp._distance}
+                          formatCurrency={formatCurrency}
+                          formatPercent={formatPercent}
+                        />
+                      ))}
+                    </div>
+                    {cachedDisplayCount < cachedMatchingComps.length && (
+                      <div className="flex justify-center pt-4">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCachedDisplayCount(prev => Math.min(prev + CACHED_LOAD_INCREMENT, cachedMatchingComps.length));
+                          }}
+                          className="text-xs"
+                        >
+                          Load More ({cachedMatchingComps.length - cachedDisplayCount} remaining)
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             )}
             {/* Map Display */}
             {showMap && comparables.length > 0 && latitude && longitude && mapboxToken && (
