@@ -83,7 +83,7 @@ export function CalendarDateDetail({
 
   return (
     <Sheet open={!!selectedDate} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="w-full sm:max-w-md">
+      <SheetContent className="w-full sm:max-w-md overflow-y-auto">
         <SheetHeader>
           <SheetTitle>
             {format(new Date(selectedDate), 'EEEE, MMMM d, yyyy')}
@@ -99,7 +99,7 @@ export function CalendarDateDetail({
           </SheetDescription>
         </SheetHeader>
 
-        <div className="mt-6 space-y-6">
+        <div className="mt-6 space-y-6 pb-8">
           {/* Booking Probability Summary */}
           {probabilityData && probabilityData.probability !== null && (
             <>
