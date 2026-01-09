@@ -108,7 +108,7 @@ serve(async (req) => {
     const airroiResponse = await fetch(AIRROI_API_URL, {
       method: 'POST',
       headers: {
-        'x-api-key': airroiApiKey,
+        'X-API-KEY': airroiApiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestBody),
