@@ -191,6 +191,10 @@ export function ComparablesModule({
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [applyTemplateOpen, setApplyTemplateOpen] = useState(false);
   const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
+  
+  // State for cached matches expansion
+  const [showAllCached, setShowAllCached] = useState(false);
+  const CACHED_PREVIEW_COUNT = 5;
 
   // Load existing comparables and mapbox token on mount
   useEffect(() => {
@@ -656,32 +660,7 @@ export function ComparablesModule({
   const selectedComparables = comparables.filter(c => pendingSelections.has(c.id));
   const unselectedComparables = comparables.filter(c => !pendingSelections.has(c.id));
 
-  if (initialLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Property Comparables</CardTitle>
-          <CardDescription>Loading...</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-20 w-full" />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const toggleAmenity = (amenity: string) => {
-    setSelectedAmenities(prev => 
-      prev.includes(amenity) 
-        ? prev.filter(a => a !== amenity)
-        : [...prev, amenity]
-    );
-  };
-
-  // Cached comparables that match current filter criteria
+  // Cached comparables that match current filter criteria (must be before early return)
   const cachedMatchingComps = useMemo(() => {
     if (!comparables.length || !latitude || !longitude) return [];
     
@@ -731,9 +710,30 @@ export function ComparablesModule({
     }).sort((a, b) => (a._distance || 999) - (b._distance || 999));
   }, [comparables, latitude, longitude, radiusMiles, bedroomMin, bedroomMax, selectedAmenities, minRevenue, maxRevenue, pendingSelections]);
 
-  // State to control cached results expansion
-  const [showAllCached, setShowAllCached] = useState(false);
-  const CACHED_PREVIEW_COUNT = 5;
+  if (initialLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Property Comparables</CardTitle>
+          <CardDescription>Loading...</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const toggleAmenity = (amenity: string) => {
+    setSelectedAmenities(prev => 
+      prev.includes(amenity) 
+        ? prev.filter(a => a !== amenity)
+        : [...prev, amenity]
+    );
+  };
 
   return (
     <Card>
