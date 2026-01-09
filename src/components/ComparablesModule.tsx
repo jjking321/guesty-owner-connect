@@ -119,7 +119,7 @@ export function ComparablesModule({
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [bedroomMin, setBedroomMin] = useState<number | null>(bedrooms ?? null);
   const [bedroomMax, setBedroomMax] = useState<number | null>(bedrooms ?? null);
-  const [minRevenue, setMinRevenue] = useState<string>('');
+  const [minRevenue, setMinRevenue] = useState<string>('1000'); // Default $1000 to filter zero performers
   const [maxRevenue, setMaxRevenue] = useState<string>('');
   const [showMap, setShowMap] = useState(false);
   const [mapboxToken, setMapboxToken] = useState<string | null>(null);

@@ -33,7 +33,11 @@ serve(async (req) => {
       throw new Error('listing_id is required');
     }
 
-    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles, amenities: ${JSON.stringify(amenities)}, bedroom_min: ${bedroom_min}, bedroom_max: ${bedroom_max}, min_revenue: ${min_revenue}, max_revenue: ${max_revenue}, offset: ${offset}, page_size: ${page_size}`);
+    // Apply default minimum revenue filter of $1000 to exclude zero/low performers
+    // This filters out long-term rentals, inactive listings, and blocked properties
+    const effectiveMinRevenue = min_revenue ?? 1000;
+
+    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles, amenities: ${JSON.stringify(amenities)}, bedroom_min: ${bedroom_min}, bedroom_max: ${bedroom_max}, min_revenue: ${effectiveMinRevenue}, max_revenue: ${max_revenue}, offset: ${offset}, page_size: ${page_size}`);
 
     // Fetch listing details from database
     const { data: listing, error: listingError } = await supabase
@@ -71,35 +75,31 @@ serve(async (req) => {
       }
     };
 
-    // Add filters if provided
-    if (amenities.length > 0 || bedroom_min !== null || bedroom_max !== null || min_revenue !== null || max_revenue !== null) {
-      requestBody.filter = {};
-      
-      // Amenities filter - use "all" to require all selected amenities
-      if (amenities.length > 0) {
-        requestBody.filter.amenities = { all: amenities };
-      }
-      
-      // Bedrooms filter - exact match if min === max, otherwise range
-      if (bedroom_min !== null || bedroom_max !== null) {
-        if (bedroom_min === bedroom_max && bedroom_min !== null) {
-          // Exact match when both values are the same
-          requestBody.filter.bedrooms = { eq: bedroom_min };
-        } else {
-          // Range filter
-          requestBody.filter.bedrooms = { 
-            range: [bedroom_min ?? 0, bedroom_max ?? 20] 
-          };
-        }
-      }
-      
-      // TTM Revenue range filter
-      if (min_revenue !== null || max_revenue !== null) {
-        requestBody.filter.ttm_revenue = { 
-          range: [min_revenue || 0, max_revenue || 10000000] 
+    // Add filters - always include minimum revenue filter to exclude zero performers
+    requestBody.filter = {};
+    
+    // Amenities filter - use "all" to require all selected amenities
+    if (amenities.length > 0) {
+      requestBody.filter.amenities = { all: amenities };
+    }
+    
+    // Bedrooms filter - exact match if min === max, otherwise range
+    if (bedroom_min !== null || bedroom_max !== null) {
+      if (bedroom_min === bedroom_max && bedroom_min !== null) {
+        // Exact match when both values are the same
+        requestBody.filter.bedrooms = { eq: bedroom_min };
+      } else {
+        // Range filter
+        requestBody.filter.bedrooms = { 
+          range: [bedroom_min ?? 0, bedroom_max ?? 20] 
         };
       }
     }
+    
+    // TTM Revenue range filter - always apply minimum to filter zero performers
+    requestBody.filter.ttm_revenue = { 
+      range: [effectiveMinRevenue, max_revenue || 10000000] 
+    };
 
     console.log(`Calling Air ROI API (POST): ${AIRROI_API_URL}`);
     console.log('Request body:', JSON.stringify(requestBody, null, 2));
