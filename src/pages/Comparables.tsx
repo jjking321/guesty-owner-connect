@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Loader2, RefreshCw, Trash2, Search, Database, TrendingUp, Calendar, Edit2, Check, X } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow, subDays } from "date-fns";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Link } from "react-router-dom";
 
@@ -45,6 +46,28 @@ interface Template {
   guesty_account_id: string;
 }
 
+type DateFilter = "all" | "never" | "7days" | "30days" | "90days";
+
+const getFilteredByDate = (
+  comparables: ComparableWithListing[], 
+  filter: DateFilter, 
+  dateField: 'metrics_fetched_at' | 'future_rates_fetched_at'
+): ComparableWithListing[] => {
+  const now = new Date();
+  return comparables.filter(c => {
+    if (!c.is_selected) return false;
+    const fetchedAt = c[dateField];
+    
+    switch (filter) {
+      case "never": return !fetchedAt;
+      case "7days": return !fetchedAt || (new Date(fetchedAt) < subDays(now, 7));
+      case "30days": return !fetchedAt || (new Date(fetchedAt) < subDays(now, 30));
+      case "90days": return !fetchedAt || (new Date(fetchedAt) < subDays(now, 90));
+      default: return true;
+    }
+  });
+};
+
 export default function Comparables() {
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
@@ -52,6 +75,8 @@ export default function Comparables() {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [metricsFilter, setMetricsFilter] = useState<DateFilter>("all");
+  const [futureRatesFilter, setFutureRatesFilter] = useState<DateFilter>("all");
 
   // Fetch all comparables with their associated listings
   const { data: comparables = [], isLoading: loadingComparables, refetch: refetchComparables } = useQuery({
@@ -104,21 +129,42 @@ export default function Comparables() {
     c.host_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Get filtered comparables for bulk actions
+  const filteredMetricsComparables = getFilteredByDate(comparables, metricsFilter, 'metrics_fetched_at');
+  const filteredFutureRatesComparables = getFilteredByDate(comparables, futureRatesFilter, 'future_rates_fetched_at');
+
+  // Calculate filter counts for display
+  const getFilterCounts = (dateField: 'metrics_fetched_at' | 'future_rates_fetched_at') => {
+    const now = new Date();
+    const selected = comparables.filter(c => c.is_selected);
+    return {
+      all: selected.length,
+      never: selected.filter(c => !c[dateField]).length,
+      days7: selected.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 7)).length,
+      days30: selected.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 30)).length,
+      days90: selected.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 90)).length,
+    };
+  };
+
+  const metricsCounts = getFilterCounts('metrics_fetched_at');
+  const futureRatesCounts = getFilterCounts('future_rates_fetched_at');
+
   // Bulk fetch historical metrics
   const fetchHistoricalsMutation = useMutation({
     mutationFn: async () => {
-      const selectedIds = selectedComparables.map(c => c.id);
-      if (selectedIds.length === 0) throw new Error("No selected comparables");
+      const targetComparables = filteredMetricsComparables;
+      const selectedIds = targetComparables.map(c => c.id);
+      if (selectedIds.length === 0) throw new Error("No comparables match the filter");
       
       const { data, error } = await supabase.functions.invoke('fetch-comparable-metrics', {
         body: { comparable_ids: selectedIds }
       });
       
       if (error) throw error;
-      return data;
+      return { ...data, targetCount: selectedIds.length };
     },
     onSuccess: (data) => {
-      toast.success(`Fetched historical metrics for ${data.processed || selectedComparables.length} comparables`);
+      toast.success(`Fetched historical metrics for ${data.processed || data.targetCount} comparables`);
       refetchComparables();
     },
     onError: (error) => {
@@ -129,18 +175,19 @@ export default function Comparables() {
   // Bulk fetch future rates
   const fetchFutureRatesMutation = useMutation({
     mutationFn: async () => {
-      const selectedIds = selectedComparables.map(c => c.id);
-      if (selectedIds.length === 0) throw new Error("No selected comparables");
+      const targetComparables = filteredFutureRatesComparables;
+      const selectedIds = targetComparables.map(c => c.id);
+      if (selectedIds.length === 0) throw new Error("No comparables match the filter");
       
       const { data, error } = await supabase.functions.invoke('fetch-comparable-future-rates', {
         body: { comparable_ids: selectedIds }
       });
       
       if (error) throw error;
-      return data;
+      return { ...data, targetCount: selectedIds.length };
     },
     onSuccess: (data) => {
-      toast.success(`Fetched future rates for ${data.processed || selectedComparables.length} comparables`);
+      toast.success(`Fetched future rates for ${data.processed || data.targetCount} comparables`);
       refetchComparables();
     },
     onError: (error) => {
@@ -463,13 +510,28 @@ export default function Comparables() {
                     Historical Metrics
                   </CardTitle>
                   <CardDescription>
-                    Fetch TTM revenue, ADR, occupancy, and RevPAR for all selected comparables
+                    Fetch TTM revenue, ADR, occupancy, and RevPAR for selected comparables
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Filter by last updated</label>
+                    <Select value={metricsFilter} onValueChange={(v) => setMetricsFilter(v as DateFilter)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Selected ({metricsCounts.all})</SelectItem>
+                        <SelectItem value="never">Never Fetched ({metricsCounts.never})</SelectItem>
+                        <SelectItem value="7days">Older than 7 days ({metricsCounts.days7})</SelectItem>
+                        <SelectItem value="30days">Older than 30 days ({metricsCounts.days30})</SelectItem>
+                        <SelectItem value="90days">Older than 90 days ({metricsCounts.days90})</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button 
                     onClick={() => fetchHistoricalsMutation.mutate()}
-                    disabled={fetchHistoricalsMutation.isPending || stats.totalSelected === 0}
+                    disabled={fetchHistoricalsMutation.isPending || filteredMetricsComparables.length === 0}
                     className="w-full"
                   >
                     {fetchHistoricalsMutation.isPending ? (
@@ -480,7 +542,7 @@ export default function Comparables() {
                     ) : (
                       <>
                         <Database className="h-4 w-4 mr-2" />
-                        Fetch Historicals for {stats.totalSelected} Comparables
+                        Fetch Historicals for {filteredMetricsComparables.length} Comparables
                       </>
                     )}
                   </Button>
@@ -494,13 +556,28 @@ export default function Comparables() {
                     Future Rates
                   </CardTitle>
                   <CardDescription>
-                    Fetch forward-looking daily rates for all selected comparables
+                    Fetch forward-looking daily rates for selected comparables
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Filter by last updated</label>
+                    <Select value={futureRatesFilter} onValueChange={(v) => setFutureRatesFilter(v as DateFilter)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Selected ({futureRatesCounts.all})</SelectItem>
+                        <SelectItem value="never">Never Fetched ({futureRatesCounts.never})</SelectItem>
+                        <SelectItem value="7days">Older than 7 days ({futureRatesCounts.days7})</SelectItem>
+                        <SelectItem value="30days">Older than 30 days ({futureRatesCounts.days30})</SelectItem>
+                        <SelectItem value="90days">Older than 90 days ({futureRatesCounts.days90})</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Button 
                     onClick={() => fetchFutureRatesMutation.mutate()}
-                    disabled={fetchFutureRatesMutation.isPending || stats.totalSelected === 0}
+                    disabled={fetchFutureRatesMutation.isPending || filteredFutureRatesComparables.length === 0}
                     className="w-full"
                   >
                     {fetchFutureRatesMutation.isPending ? (
@@ -511,7 +588,7 @@ export default function Comparables() {
                     ) : (
                       <>
                         <Calendar className="h-4 w-4 mr-2" />
-                        Fetch Future Rates for {stats.totalSelected} Comparables
+                        Fetch Future Rates for {filteredFutureRatesComparables.length} Comparables
                       </>
                     )}
                   </Button>
