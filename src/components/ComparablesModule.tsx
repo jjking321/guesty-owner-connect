@@ -103,6 +103,8 @@ interface Comparable {
   // Future rates data
   future_rates?: { rates: { date: string; available: boolean; rate: number }[] } | null;
   future_rates_fetched_at?: string | null;
+  // Computed distance for cached matching (optional)
+  _distance?: number | null;
 }
 
 const AMENITY_OPTIONS = [
@@ -113,6 +115,28 @@ const AMENITY_OPTIONS = [
   { value: 'patio_or_balcony', label: 'Patio/Balcony' },
   { value: 'pets_allowed', label: 'Pets Allowed' },
 ];
+
+// Haversine distance calculation (returns miles)
+const haversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 3959; // Earth's radius in miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+// Map filter amenity values to stored amenity strings
+const amenityMatchMap: Record<string, string[]> = {
+  'pool': ['pool'],
+  'hot_tub': ['hot tub', 'hot-tub', 'jacuzzi'],
+  'waterfront': ['waterfront'],
+  'beach_access': ['beach access', 'beach'],
+  'patio_or_balcony': ['patio', 'balcony'],
+  'pets_allowed': ['pets allowed', 'pet friendly', 'pet-friendly'],
+};
 
 export function ComparablesModule({ 
   listingId, 
@@ -657,6 +681,60 @@ export function ComparablesModule({
     );
   };
 
+  // Cached comparables that match current filter criteria
+  const cachedMatchingComps = useMemo(() => {
+    if (!comparables.length || !latitude || !longitude) return [];
+    
+    return comparables.filter(comp => {
+      // Skip already-selected comparables (they show in the Selected tab)
+      if (pendingSelections.has(comp.id)) return false;
+      
+      // Distance filter using haversine
+      const compLat = comp.location_info?.lat;
+      const compLng = comp.location_info?.lng;
+      if (!compLat || !compLng) return false;
+      
+      const distance = haversineDistance(latitude, longitude, compLat, compLng);
+      if (distance > radiusMiles) return false;
+      
+      // Bedroom filter
+      const compBedrooms = comp.property_details?.bedrooms;
+      if (bedroomMin !== null && (compBedrooms === undefined || compBedrooms < bedroomMin)) return false;
+      if (bedroomMax !== null && (compBedrooms === undefined || compBedrooms > bedroomMax)) return false;
+      
+      // Amenity filter
+      if (selectedAmenities.length > 0) {
+        const compAmenities = (comp.property_details?.amenities || []).map(a => a.toLowerCase());
+        const hasAllAmenities = selectedAmenities.every(filterAmenity => {
+          const matchTerms = amenityMatchMap[filterAmenity] || [filterAmenity];
+          return matchTerms.some(term => 
+            compAmenities.some(a => a.includes(term))
+          );
+        });
+        if (!hasAllAmenities) return false;
+      }
+      
+      // Revenue filter
+      const compRevenue = comp.ttm_revenue || comp.performance_metrics?.ttm_revenue;
+      const minRev = minRevenue ? parseInt(minRevenue) : null;
+      const maxRev = maxRevenue ? parseInt(maxRevenue) : null;
+      if (minRev && (!compRevenue || compRevenue < minRev)) return false;
+      if (maxRev && compRevenue && compRevenue > maxRev) return false;
+      
+      return true;
+    }).map(comp => {
+      // Add distance for display
+      const compLat = comp.location_info?.lat;
+      const compLng = comp.location_info?.lng;
+      const distance = compLat && compLng ? haversineDistance(latitude, longitude, compLat, compLng) : null;
+      return { ...comp, _distance: distance };
+    }).sort((a, b) => (a._distance || 999) - (b._distance || 999));
+  }, [comparables, latitude, longitude, radiusMiles, bedroomMin, bedroomMax, selectedAmenities, minRevenue, maxRevenue, pendingSelections]);
+
+  // State to control cached results expansion
+  const [showAllCached, setShowAllCached] = useState(false);
+  const CACHED_PREVIEW_COUNT = 5;
+
   return (
     <Card>
       <CardHeader>
@@ -844,6 +922,82 @@ export function ComparablesModule({
                 </p>
               )}
             </div>
+
+            {/* Cached Matching Comparables Section */}
+            {cachedMatchingComps.length > 0 && (
+              <div className="mb-6 border rounded-lg p-4 bg-muted/30">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Building className="h-4 w-4 text-muted-foreground" />
+                    <span className="font-medium text-sm">
+                      Matching Cached Comparables ({cachedMatchingComps.length})
+                    </span>
+                    <Badge variant="secondary" className="text-xs">Cached</Badge>
+                  </div>
+                  {cachedMatchingComps.length > CACHED_PREVIEW_COUNT && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowAllCached(!showAllCached)}
+                      className="text-xs"
+                    >
+                      {showAllCached ? 'Show Less' : `Show All (${cachedMatchingComps.length})`}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  These previously fetched comparables match your current filter criteria.
+                </p>
+                <div className="space-y-2">
+                  {(showAllCached ? cachedMatchingComps : cachedMatchingComps.slice(0, CACHED_PREVIEW_COUNT)).map((comp) => (
+                    <div
+                      key={comp.id}
+                      className="flex items-center justify-between p-2 bg-background rounded border hover:border-primary/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Checkbox
+                          checked={pendingSelections.has(comp.id)}
+                          onCheckedChange={() => toggleSelection(comp.id)}
+                        />
+                        {comp.cover_photo_url && (
+                          <img
+                            src={comp.cover_photo_url}
+                            alt=""
+                            className="w-10 h-10 object-cover rounded"
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate max-w-[200px]">
+                            {comp.listing_name || 'Unnamed Property'}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            {comp.property_details?.bedrooms !== undefined && (
+                              <span>{comp.property_details.bedrooms} bed{comp.property_details.bedrooms !== 1 ? 's' : ''}</span>
+                            )}
+                            {comp._distance !== null && (
+                              <span>• {comp._distance.toFixed(1)} mi</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {(comp.ttm_revenue || comp.performance_metrics?.ttm_revenue) && (
+                          <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                            {formatCurrency(comp.ttm_revenue || comp.performance_metrics?.ttm_revenue)}
+                          </span>
+                        )}
+                        {comp.ratings?.rating_overall && (
+                          <div className="flex items-center gap-1">
+                            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                            <span className="text-xs">{comp.ratings.rating_overall.toFixed(1)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Map Display */}
             {showMap && comparables.length > 0 && latitude && longitude && mapboxToken && (
               <div className="mb-6">
