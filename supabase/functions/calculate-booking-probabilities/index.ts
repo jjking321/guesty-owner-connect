@@ -37,13 +37,56 @@ interface BookingStats {
   total_bookings_analyzed: number;
 }
 
-// Weights for probability calculation
-const WEIGHTS = {
-  compsetDemand: 0.35,
-  pricePosition: 0.30,
-  historical: 0.20,
-  bookingWindow: 0.15,
-};
+type WeightMode = 'far_out' | 'standard' | 'close_in';
+
+interface DynamicWeights {
+  compsetDemand: number;
+  pricePosition: number;
+  historical: number;
+  bookingWindow: number;
+}
+
+/**
+ * Get dynamic weights based on Days To Arrival and compset data availability
+ */
+function getDynamicWeights(dta: number, hasCompsetBookings: boolean): { mode: WeightMode; weights: DynamicWeights } {
+  // FAR OUT MODE: DTA > 90 days OR no compset bookings available
+  if (dta > 90 || !hasCompsetBookings) {
+    return {
+      mode: 'far_out',
+      weights: {
+        compsetDemand: 0.10,   // Reduced from 35%
+        pricePosition: 0.10,   // Reduced from 30%
+        historical: 0.50,      // Increased to 50%
+        bookingWindow: 0.30,   // Increased to 30%
+      }
+    };
+  }
+  
+  // CLOSE-IN MODE: DTA < 30 days
+  if (dta < 30) {
+    return {
+      mode: 'close_in',
+      weights: {
+        compsetDemand: 0.45,   // Increased from 35%
+        pricePosition: 0.35,   // Increased from 30%
+        historical: 0.12,      // Reduced from 20%
+        bookingWindow: 0.08,   // Reduced from 15%
+      }
+    };
+  }
+  
+  // STANDARD MODE: 30-90 days
+  return {
+    mode: 'standard',
+    weights: {
+      compsetDemand: 0.35,
+      pricePosition: 0.30,
+      historical: 0.20,
+      bookingWindow: 0.15,
+    }
+  };
+}
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -125,6 +168,10 @@ Deno.serve(async (req) => {
 
     if (resError) throw resError;
 
+    // 6. Calculate historical monthly occupancy
+    const historicalMonthlyOccupancy = await calculateHistoricalMonthlyOccupancy(supabase, listingId);
+    console.log("Historical monthly occupancy:", historicalMonthlyOccupancy);
+
     // Build lookup maps
     const historicalNightsMap = new Map<string, number>();
     historicalNights?.forEach((night: ReservationNight) => {
@@ -156,7 +203,7 @@ Deno.serve(async (req) => {
     // Build compset rates map
     const compsetRatesMap = buildCompsetRatesMap(compsetData as ComparableWithRates[]);
 
-    // 6. Calculate probabilities for each future available date
+    // 7. Calculate probabilities for each future available date
     const probabilities: any[] = [];
 
     for (const day of calendarData || []) {
@@ -176,16 +223,12 @@ Deno.serve(async (req) => {
 
       const currentDba = Math.floor((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       const dateStr = day.date;
+      const month = date.getMonth() + 1;
 
-      // Factor 1: Compset Demand Score
-      const compsetInfo = compsetRatesMap.get(dateStr);
-      const { compsetDemandScore, bookedCount, totalCount, avgAvailableRate } = 
-        calculateCompsetDemandScore(compsetInfo);
+      // Get historical monthly occupancy for this month
+      const monthlyOccupancy = historicalMonthlyOccupancy[month] ?? 50;
 
-      // Factor 2: Price Position Score
-      const pricePositionScore = calculatePricePositionScore(day.price, avgAvailableRate);
-
-      // Factor 3: Historical Score
+      // Factor 3: Historical Score (calculate first for fallback use)
       const historicalDate = findEquivalentDateLastYear(date);
       const historicalDateStr = historicalDate.toISOString().split("T")[0];
       const historicalRate = historicalNightsMap.get(historicalDateStr);
@@ -197,25 +240,45 @@ Deno.serve(async (req) => {
         historicalDbaMap.get(historicalDateStr) || null
       );
 
-      // Factor 4: Booking Window Score
-      const expectedWindow = bookingStats.monthly_avg_windows[date.getMonth() + 1] || 
+      // Factor 1: Compset Demand Score with Fallback
+      const compsetInfo = compsetRatesMap.get(dateStr);
+      const { compsetDemandScore, bookedCount, totalCount, avgAvailableRate, usedFallback } = 
+        calculateCompsetDemandScoreWithFallback(
+          compsetInfo,
+          monthlyOccupancy,
+          historicalRate || null,
+          day.price
+        );
+
+      // Determine if we have actual compset booking data
+      const hasCompsetBookings = totalCount > 0 && bookedCount > 0;
+
+      // Get dynamic weights based on DTA and compset data
+      const { mode, weights } = getDynamicWeights(currentDba, hasCompsetBookings);
+
+      // Factor 2: Price Position Score
+      const pricePositionScore = calculatePricePositionScore(day.price, avgAvailableRate);
+
+      // Factor 4: Booking Window Score with Gate logic
+      const expectedWindow = bookingStats.monthly_avg_windows[month] || 
                              bookingStats.avg_booking_window || 30;
       const lastYearDba = historicalDbaMap.get(historicalDateStr);
       const isDbaOutlier = lastYearDba !== undefined && 
                            lastYearDba > (bookingStats.median_booking_window + 2 * bookingStats.stddev_booking_window);
-      const bookingWindowScore = calculateBookingWindowScore(
+      const { score: bookingWindowScore, isOutsideWindow } = calculateBookingWindowScoreWithGate(
         currentDba,
         expectedWindow,
         lastYearDba || null,
-        isDbaOutlier
+        isDbaOutlier,
+        mode
       );
 
-      // Calculate weighted probability
+      // Calculate weighted probability using dynamic weights
       const probability = 
-        WEIGHTS.compsetDemand * compsetDemandScore +
-        WEIGHTS.pricePosition * pricePositionScore +
-        WEIGHTS.historical * historicalScore +
-        WEIGHTS.bookingWindow * bookingWindowScore;
+        weights.compsetDemand * compsetDemandScore +
+        weights.pricePosition * pricePositionScore +
+        weights.historical * historicalScore +
+        weights.bookingWindow * bookingWindowScore;
 
       probabilities.push({
         listing_id: listingId,
@@ -236,13 +299,17 @@ Deno.serve(async (req) => {
         current_dba: currentDba,
         expected_booking_window: Math.round(expectedWindow),
         is_dba_outlier: isDbaOutlier,
+        // New dynamic weighting fields
+        probability_mode: mode,
+        historical_monthly_occupancy: monthlyOccupancy,
+        weights_used: weights,
         calculated_at: new Date().toISOString(),
       });
     }
 
     console.log(`Calculated ${probabilities.length} probabilities`);
 
-    // 7. Upsert probabilities
+    // 8. Upsert probabilities
     if (probabilities.length > 0) {
       // Batch upsert in chunks
       const chunkSize = 100;
@@ -259,6 +326,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Count modes for stats
+    const modeBreakdown = probabilities.reduce((acc, p) => {
+      acc[p.probability_mode] = (acc[p.probability_mode] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
     return new Response(
       JSON.stringify({
         success: true,
@@ -268,6 +341,7 @@ Deno.serve(async (req) => {
           avgProbability: probabilities.length > 0 
             ? Math.round(probabilities.reduce((sum, p) => sum + p.probability, 0) / probabilities.length)
             : 0,
+          modeBreakdown,
           bookingStats,
         },
       }),
@@ -282,6 +356,58 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+/**
+ * Calculate historical monthly occupancy for the listing (last year)
+ */
+async function calculateHistoricalMonthlyOccupancy(
+  supabase: any,
+  listingId: string
+): Promise<Record<number, number>> {
+  const lastYear = new Date().getFullYear() - 1;
+  const startOfLastYear = `${lastYear}-01-01`;
+  const endOfLastYear = `${lastYear}-12-31`;
+
+  const { data: nights, error } = await supabase
+    .from("reservation_nights")
+    .select("night_date")
+    .eq("listing_id", listingId)
+    .gte("night_date", startOfLastYear)
+    .lte("night_date", endOfLastYear);
+
+  if (error || !nights) {
+    console.log("No historical nights found for occupancy calculation");
+    return {};
+  }
+
+  // Count booked nights per month
+  const monthlyBooked: Record<number, number> = {};
+  for (const night of nights) {
+    const month = new Date(night.night_date).getMonth() + 1;
+    monthlyBooked[month] = (monthlyBooked[month] || 0) + 1;
+  }
+
+  // Days in each month (for last year)
+  const daysInMonth: Record<number, number> = {
+    1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30,
+    7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31
+  };
+
+  // Check if last year was a leap year
+  if (lastYear % 4 === 0 && (lastYear % 100 !== 0 || lastYear % 400 === 0)) {
+    daysInMonth[2] = 29;
+  }
+
+  // Calculate occupancy percentage per month
+  const monthlyOccupancy: Record<number, number> = {};
+  for (let month = 1; month <= 12; month++) {
+    const booked = monthlyBooked[month] || 0;
+    const days = daysInMonth[month];
+    monthlyOccupancy[month] = Math.round((booked / days) * 100);
+  }
+
+  return monthlyOccupancy;
+}
 
 /**
  * Calculate and cache booking stats for the listing
@@ -411,16 +537,30 @@ function buildCompsetRatesMap(compsetData: ComparableWithRates[]): Map<string, {
 }
 
 /**
- * Calculate Compset Demand Score
+ * Calculate Compset Demand Score with Fallback Logic
+ * When compset booked count is 0 or data is unavailable, use historical occupancy
  */
-function calculateCompsetDemandScore(compsetInfo: { rates: FutureRate[] } | undefined): {
+function calculateCompsetDemandScoreWithFallback(
+  compsetInfo: { rates: FutureRate[] } | undefined,
+  historicalMonthlyOccupancy: number,
+  historicalRate: number | null,
+  currentRate: number | null
+): {
   compsetDemandScore: number;
   bookedCount: number;
   totalCount: number;
   avgAvailableRate: number | null;
+  usedFallback: boolean;
 } {
   if (!compsetInfo || compsetInfo.rates.length === 0) {
-    return { compsetDemandScore: 50, bookedCount: 0, totalCount: 0, avgAvailableRate: null };
+    // FALLBACK: No compset data - use historical occupancy as baseline
+    return { 
+      compsetDemandScore: historicalMonthlyOccupancy || 50, 
+      bookedCount: 0, 
+      totalCount: 0, 
+      avgAvailableRate: null,
+      usedFallback: true,
+    };
   }
 
   const bookedCount = compsetInfo.rates.filter(r => !r.available).length;
@@ -432,10 +572,36 @@ function calculateCompsetDemandScore(compsetInfo: { rates: FutureRate[] } | unde
     ? availableRates.reduce((sum, r) => sum + r, 0) / availableRates.length
     : null;
 
-  // Compset demand score = percentage of comps booked
+  // If no comps are booked yet, use fallback instead of returning 0%
+  if (bookedCount === 0) {
+    // FALLBACK: Blend historical occupancy with historical rate comparison
+    let fallbackScore = historicalMonthlyOccupancy || 50;
+    
+    // Adjust based on rate comparison to last year
+    if (historicalRate && currentRate) {
+      const rateDiff = ((historicalRate - currentRate) / historicalRate) * 100;
+      if (rateDiff > 10) {
+        // Current rate is 10%+ lower than LY → boost score
+        fallbackScore = Math.min(90, fallbackScore + 15);
+      } else if (rateDiff < -10) {
+        // Current rate is 10%+ higher than LY → reduce score slightly
+        fallbackScore = Math.max(30, fallbackScore - 10);
+      }
+    }
+    
+    return {
+      compsetDemandScore: fallbackScore,
+      bookedCount: 0,
+      totalCount,
+      avgAvailableRate,
+      usedFallback: true,
+    };
+  }
+  
+  // Normal calculation - compset demand based on percentage booked
   const compsetDemandScore = (bookedCount / totalCount) * 100;
 
-  return { compsetDemandScore, bookedCount, totalCount, avgAvailableRate };
+  return { compsetDemandScore, bookedCount, totalCount, avgAvailableRate, usedFallback: false };
 }
 
 /**
@@ -532,20 +698,31 @@ function calculateHistoricalScore(
 }
 
 /**
- * Calculate Booking Window Score
+ * Calculate Booking Window Score with Gate logic for Far Out mode
+ * When in far out mode and outside the booking window, treat probability as "potential" rather than "low"
  */
-function calculateBookingWindowScore(
+function calculateBookingWindowScoreWithGate(
   currentDba: number,
   expectedWindow: number,
   lastYearDba: number | null,
-  isDbaOutlier: boolean
-): number {
+  isDbaOutlier: boolean,
+  mode: WeightMode
+): { score: number; isOutsideWindow: boolean } {
   let score = 50; // Default
+  let isOutsideWindow = false;
 
   // Score based on timing relative to expected window
   if (currentDba > expectedWindow * 1.5) {
-    // Too early, bookings typically come later
-    score = 40 + (expectedWindow / currentDba) * 20;
+    isOutsideWindow = true;
+    
+    if (mode === 'far_out') {
+      // In far out mode, treat "outside window" as neutral-positive
+      // because we expect bookings to come later
+      score = 60 + (expectedWindow / currentDba) * 20;
+    } else {
+      // Standard behavior - lower score for being too early
+      score = 40 + (expectedWindow / currentDba) * 20;
+    }
   } else if (currentDba >= expectedWindow * 0.8) {
     // Within prime booking window
     score = 80;
@@ -574,5 +751,5 @@ function calculateBookingWindowScore(
     }
   }
 
-  return score;
+  return { score, isOutsideWindow };
 }

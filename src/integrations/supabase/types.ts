@@ -113,6 +113,7 @@ export type Database = {
           expected_booking_window: number | null
           historical_date: string | null
           historical_dba: number | null
+          historical_monthly_occupancy: number | null
           historical_rate: number | null
           historical_score: number | null
           historical_was_booked: boolean | null
@@ -121,7 +122,9 @@ export type Database = {
           listing_id: string
           price_position_score: number | null
           probability: number | null
+          probability_mode: string | null
           updated_at: string | null
+          weights_used: Json | null
           your_price: number | null
         }
         Insert: {
@@ -137,6 +140,7 @@ export type Database = {
           expected_booking_window?: number | null
           historical_date?: string | null
           historical_dba?: number | null
+          historical_monthly_occupancy?: number | null
           historical_rate?: number | null
           historical_score?: number | null
           historical_was_booked?: boolean | null
@@ -145,7 +149,9 @@ export type Database = {
           listing_id: string
           price_position_score?: number | null
           probability?: number | null
+          probability_mode?: string | null
           updated_at?: string | null
+          weights_used?: Json | null
           your_price?: number | null
         }
         Update: {
@@ -161,6 +167,7 @@ export type Database = {
           expected_booking_window?: number | null
           historical_date?: string | null
           historical_dba?: number | null
+          historical_monthly_occupancy?: number | null
           historical_rate?: number | null
           historical_score?: number | null
           historical_was_booked?: boolean | null
@@ -169,7 +176,9 @@ export type Database = {
           listing_id?: string
           price_position_score?: number | null
           probability?: number | null
+          probability_mode?: string | null
           updated_at?: string | null
+          weights_used?: Json | null
           your_price?: number | null
         }
         Relationships: [
