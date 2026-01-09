@@ -1,4 +1,4 @@
-import { Calendar, Settings, FolderOpen, LayoutGrid, Users, Wrench, Star } from "lucide-react";
+import { Calendar, Settings, FolderOpen, LayoutGrid, Users, Wrench, Star, Building2 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
   Sidebar,
@@ -15,6 +15,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 
 const menuItems = [
   { title: "Portfolio View", url: "/properties/bulk-edit", icon: LayoutGrid, roles: ['super_admin', 'admin', 'member'] },
+  { title: "Comparables", url: "/comparables", icon: Building2, roles: ['super_admin', 'admin', 'member'] },
   { title: "Groups", url: "/groups", icon: FolderOpen, roles: ['super_admin', 'admin', 'member', 'owner'] },
   { title: "Owners", url: "/owners", icon: Users, roles: ['super_admin', 'admin', 'member'] },
   { title: "Reservations", url: "/reservations", icon: Calendar, roles: ['super_admin', 'admin', 'member'] },
