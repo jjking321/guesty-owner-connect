@@ -8,6 +8,7 @@ export interface ProbabilityFactors {
 }
 
 export interface ProbabilityData {
+  date: string;
   probability: number;
   compset_demand_score: number;
   price_position_score: number;

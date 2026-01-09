@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, ChevronLeft, ChevronRight, Moon, Users } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, Moon, Users, BarChart3 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { CalendarDateDetail } from "./CalendarDateDetail";
 import { ComparableMetricsDialog } from "./ComparableMetricsDialog";
+import { ProbabilityData, getProbabilityColor } from "@/lib/probabilityCalculator";
 
 interface ListingCalendarProps {
   listingId: string;
@@ -66,6 +67,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [legendOpen, setLegendOpen] = useState(false);
   const [compareToCompset, setCompareToCompset] = useState(true);
+  const [showProbability, setShowProbability] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedComparableId, setSelectedComparableId] = useState<string | null>(null);
   const [metricsDialogOpen, setMetricsDialogOpen] = useState(false);
@@ -89,6 +91,54 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
       return data as CalendarDay[];
     },
   });
+
+  // Fetch booking probabilities
+  const { data: probabilityData, isLoading: probabilitiesLoading } = useQuery({
+    queryKey: ['booking-probabilities', listingId, format(currentMonth, 'yyyy-MM')],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('booking_probabilities')
+        .select('*')
+        .eq('listing_id', listingId)
+        .gte('date', format(monthStart, 'yyyy-MM-dd'))
+        .lte('date', format(monthEnd, 'yyyy-MM-dd'));
+      if (error) throw error;
+      return data as ProbabilityData[];
+    },
+    enabled: showProbability,
+  });
+
+  // Calculate probabilities mutation
+  const calculateProbabilitiesMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('calculate-booking-probabilities', {
+        body: { listingId },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['booking-probabilities', listingId] });
+      toast({ title: "Probabilities calculated", description: "Booking probabilities updated successfully" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Calculation failed",
+        description: error.message || "Failed to calculate probabilities",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Build probability map for quick lookup
+  const probabilityMap = useMemo(() => {
+    if (!probabilityData) return new Map<string, ProbabilityData>();
+    const map = new Map<string, ProbabilityData>();
+    probabilityData.forEach(prob => {
+      map.set(prob.date, prob);
+    });
+    return map;
+  }, [probabilityData]);
 
   // Fetch selected comparables' future rates with names and thumbnails
   const { data: compsetData } = useQuery({
@@ -404,7 +454,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
               {lastSyncTime ? `Last synced: ${lastSyncTime}` : 'Not synced yet'}
             </CardDescription>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2">
               <Checkbox 
                 id="compareToCompset" 
@@ -415,6 +465,27 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                 Compare to Compset
               </Label>
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox 
+                id="showProbability" 
+                checked={showProbability}
+                onCheckedChange={(checked) => setShowProbability(checked === true)}
+              />
+              <Label htmlFor="showProbability" className="text-sm cursor-pointer">
+                Booking Probability
+              </Label>
+            </div>
+            {showProbability && (
+              <Button 
+                onClick={() => calculateProbabilitiesMutation.mutate()}
+                disabled={calculateProbabilitiesMutation.isPending}
+                variant="outline"
+                size="sm"
+              >
+                <BarChart3 className={`h-3 w-3 mr-1.5 ${calculateProbabilitiesMutation.isPending ? 'animate-pulse' : ''}`} />
+                {calculateProbabilitiesMutation.isPending ? 'Calculating...' : 'Calculate'}
+              </Button>
+            )}
             <Button 
               onClick={() => syncMutation.mutate()} 
               disabled={syncMutation.isPending}
@@ -502,6 +573,23 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                   </div>
                 </>
               )}
+              {showProbability && (
+                <>
+                  <div className="w-px h-4 bg-border" />
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded bg-emerald-500 flex items-center justify-center text-[8px] text-white font-bold">%</div>
+                    <span className="text-muted-foreground">High (70%+)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded bg-amber-500 flex items-center justify-center text-[8px] text-white font-bold">%</div>
+                    <span className="text-muted-foreground">Medium (40-69%)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded bg-red-500 flex items-center justify-center text-[8px] text-white font-bold">%</div>
+                    <span className="text-muted-foreground">Low (&lt;40%)</span>
+                  </div>
+                </>
+              )}
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -572,8 +660,20 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                       </div>
                     )}
                     
+                    {/* Probability badge - top right */}
+                    {showProbability && dayData?.is_available && (() => {
+                      const prob = probabilityMap.get(dateStr);
+                      if (!prob || prob.probability === null) return null;
+                      const colors = getProbabilityColor(prob.probability);
+                      return (
+                        <div className={`absolute top-1 right-1 px-1 py-0.5 rounded text-[9px] font-bold text-white ${colors.badge}`}>
+                          {Math.round(prob.probability)}%
+                        </div>
+                      );
+                    })()}
+                    
                     {/* Min nights - bottom right */}
-                    {dayData?.min_nights && dayData.min_nights > 1 && (
+                    {dayData?.min_nights && dayData.min_nights > 1 && !showProbability && (
                       <div className={`absolute bottom-1 right-1 flex items-center gap-0.5 text-xs ${textColors.day}`}>
                         <Moon className="h-3 w-3" />
                         <span>{dayData.min_nights}</span>
@@ -646,6 +746,41 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
           </div>
         )}
 
+        {/* Probability Summary Stats */}
+        {showProbability && probabilityData && probabilityData.length > 0 && (
+          <div className="mt-4 pt-4 border-t">
+            <h4 className="text-sm font-medium mb-3">Booking Probability Summary</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <div className="text-sm text-muted-foreground">High (70%+)</div>
+                <div className="text-lg font-semibold text-emerald-600">
+                  {probabilityData.filter(p => p.probability !== null && p.probability >= 70).length} days
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Medium (40-69%)</div>
+                <div className="text-lg font-semibold text-amber-500">
+                  {probabilityData.filter(p => p.probability !== null && p.probability >= 40 && p.probability < 70).length} days
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Low (&lt;40%)</div>
+                <div className="text-lg font-semibold text-red-500">
+                  {probabilityData.filter(p => p.probability !== null && p.probability < 40).length} days
+                </div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Avg Probability</div>
+                <div className="text-lg font-semibold">
+                  {probabilityData.length > 0 
+                    ? Math.round(probabilityData.filter(p => p.probability !== null).reduce((sum, p) => sum + (p.probability || 0), 0) / probabilityData.filter(p => p.probability !== null).length)
+                    : 0}%
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* No compset data message */}
         {compareToCompset && !hasCompsetData && (
           <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-400">
@@ -662,6 +797,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
         compsetInfo={selectedDate ? getCompsetInfoForDate(selectedDate, calendarMap.get(selectedDate)?.price ?? null) : undefined}
         compareToCompset={compareToCompset}
         onComparableClick={handleComparableClick}
+        probabilityData={selectedDate && showProbability ? probabilityMap.get(selectedDate) : undefined}
       />
 
       {/* Comparable Metrics Dialog */}
