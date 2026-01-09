@@ -117,7 +117,8 @@ export function ComparablesModule({
   const [radiusMiles, setRadiusMiles] = useState<number>(1);
   const [pendingSelections, setPendingSelections] = useState<Set<string>>(new Set());
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
-  const [matchBedrooms, setMatchBedrooms] = useState(true);
+  const [bedroomMin, setBedroomMin] = useState<number | null>(bedrooms ?? null);
+  const [bedroomMax, setBedroomMax] = useState<number | null>(bedrooms ?? null);
   const [minRevenue, setMinRevenue] = useState<string>('');
   const [maxRevenue, setMaxRevenue] = useState<string>('');
   const [showMap, setShowMap] = useState(false);
@@ -223,7 +224,8 @@ export function ComparablesModule({
           listing_id: listingId,
           radius_miles: radiusMiles,
           amenities: selectedAmenities,
-          bedrooms: matchBedrooms ? bedrooms : null,
+          bedroom_min: bedroomMin,
+          bedroom_max: bedroomMax,
           min_revenue: minRevenue ? parseInt(minRevenue) : null,
           max_revenue: maxRevenue ? parseInt(maxRevenue) : null,
           offset: 0,
@@ -271,7 +273,8 @@ export function ComparablesModule({
           listing_id: listingId,
           radius_miles: radiusMiles,
           amenities: selectedAmenities,
-          bedrooms: matchBedrooms ? bedrooms : null,
+          bedroom_min: bedroomMin,
+          bedroom_max: bedroomMax,
           min_revenue: minRevenue ? parseInt(minRevenue) : null,
           max_revenue: maxRevenue ? parseInt(maxRevenue) : null,
           offset: nextOffset,
@@ -587,19 +590,46 @@ export function ComparablesModule({
                 </Button>
               </div>
 
-              {/* Bedroom Filter */}
-              {bedrooms !== undefined && (
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="match-bedrooms"
-                    checked={matchBedrooms}
-                    onCheckedChange={(checked) => setMatchBedrooms(checked === true)}
+              {/* Bedroom Range Filter */}
+              <div>
+                <Label className="text-sm text-muted-foreground mb-2 block">
+                  Bedrooms: {bedrooms !== undefined && (
+                    <span className="text-xs ml-1">(this property: {bedrooms === 0 ? 'Studio' : bedrooms})</span>
+                  )}
+                </Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    min="0"
+                    max="20"
+                    placeholder="Min"
+                    value={bedroomMin ?? ''}
+                    onChange={(e) => setBedroomMin(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-20"
                   />
-                  <Label htmlFor="match-bedrooms" className="text-sm cursor-pointer">
-                    Same bedrooms only ({bedrooms} bed{bedrooms !== 1 ? 's' : ''})
-                  </Label>
+                  <span className="text-muted-foreground">to</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="20"
+                    placeholder="Max"
+                    value={bedroomMax ?? ''}
+                    onChange={(e) => setBedroomMax(e.target.value ? parseInt(e.target.value) : null)}
+                    className="w-20"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setBedroomMin(bedrooms ?? null);
+                      setBedroomMax(bedrooms ?? null);
+                    }}
+                    className="text-xs"
+                  >
+                    Reset
+                  </Button>
                 </div>
-              )}
+              </div>
 
               {/* Amenities Filter */}
               <div>

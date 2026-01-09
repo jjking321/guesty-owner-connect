@@ -25,13 +25,13 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { listing_id, radius_miles = 10, amenities = [], bedrooms = null, offset = 0, page_size = 10, min_revenue = null, max_revenue = null } = await req.json();
+    const { listing_id, radius_miles = 10, amenities = [], bedroom_min = null, bedroom_max = null, offset = 0, page_size = 10, min_revenue = null, max_revenue = null } = await req.json();
 
     if (!listing_id) {
       throw new Error('listing_id is required');
     }
 
-    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles, amenities: ${JSON.stringify(amenities)}, bedrooms: ${bedrooms}, min_revenue: ${min_revenue}, max_revenue: ${max_revenue}, offset: ${offset}, page_size: ${page_size}`);
+    console.log(`Fetching comparables for listing: ${listing_id}, radius: ${radius_miles} miles, amenities: ${JSON.stringify(amenities)}, bedroom_min: ${bedroom_min}, bedroom_max: ${bedroom_max}, min_revenue: ${min_revenue}, max_revenue: ${max_revenue}, offset: ${offset}, page_size: ${page_size}`);
 
     // Fetch listing details from database
     const { data: listing, error: listingError } = await supabase
@@ -70,7 +70,7 @@ serve(async (req) => {
     };
 
     // Add filters if provided
-    if (amenities.length > 0 || bedrooms !== null || min_revenue !== null || max_revenue !== null) {
+    if (amenities.length > 0 || bedroom_min !== null || bedroom_max !== null || min_revenue !== null || max_revenue !== null) {
       requestBody.filter = {};
       
       // Amenities filter - use "all" to require all selected amenities
@@ -78,9 +78,17 @@ serve(async (req) => {
         requestBody.filter.amenities = { all: amenities };
       }
       
-      // Bedrooms filter - exact match using 'eq' operator
-      if (bedrooms !== null) {
-        requestBody.filter.bedrooms = { eq: bedrooms };
+      // Bedrooms filter - exact match if min === max, otherwise range
+      if (bedroom_min !== null || bedroom_max !== null) {
+        if (bedroom_min === bedroom_max && bedroom_min !== null) {
+          // Exact match when both values are the same
+          requestBody.filter.bedrooms = { eq: bedroom_min };
+        } else {
+          // Range filter
+          requestBody.filter.bedrooms = { 
+            range: [bedroom_min ?? 0, bedroom_max ?? 20] 
+          };
+        }
       }
       
       // TTM Revenue range filter
