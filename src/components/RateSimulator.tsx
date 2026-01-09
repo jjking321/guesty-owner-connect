@@ -2,11 +2,13 @@ import { useState, useMemo, useEffect } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
   TrendingUp, TrendingDown, Target, Zap, DollarSign, Clock, 
-  AlertTriangle, Info, History, BarChart3 
+  AlertTriangle, Info, History, BarChart3, RotateCcw 
 } from "lucide-react";
 import {
   ProbabilityData,
@@ -35,9 +37,26 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
     setSimulatedRate(probabilityData.your_price || 0);
   }, [probabilityData.your_price]);
 
-  // Calculate min/max for slider
-  const minRate = Math.max(50, Math.round(avgAvailableRate * 0.5));
-  const maxRate = Math.round(Math.max(currentRate, avgAvailableRate) * 1.5);
+  // Calculate min/max for slider - more flexible range
+  const baseMin = Math.max(25, Math.round(Math.min(currentRate, avgAvailableRate) * 0.3));
+  const baseMax = Math.round(Math.max(currentRate, avgAvailableRate) * 2);
+  // Expand range if simulated rate is outside
+  const minRate = Math.min(baseMin, simulatedRate - 50);
+  const maxRate = Math.max(baseMax, simulatedRate + 50);
+
+  // Get currency symbol
+  const getCurrencySymbol = (curr: string) => {
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: curr,
+        minimumFractionDigits: 0,
+      }).format(0).replace(/\d/g, "").trim();
+    } catch {
+      return "$";
+    }
+  };
+  const currencySymbol = getCurrencySymbol(currency);
 
   // Recalculate probability with simulated rate (now includes mode and weights)
   const { probability: simulatedProbability, pricePositionScore: simulatedPriceScore, factors, mode, weights } = useMemo(
@@ -82,13 +101,21 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
     setSimulatedRate(value[0]);
   };
 
-  // Handle input change
+  // Handle input change - now accepts any positive number
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value.replace(/[^0-9]/g, ""), 10);
-    if (!isNaN(value) && value >= minRate && value <= maxRate) {
-      setSimulatedRate(value);
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value) && value > 0) {
+      setSimulatedRate(Math.round(value));
     }
   };
+
+  // Reset to current rate
+  const handleReset = () => {
+    setSimulatedRate(currentRate);
+  };
+
+  // Check if rate has been modified
+  const isModified = simulatedRate !== currentRate;
 
   // Apply suggestion
   const applySuggestion = (suggestion: RateSuggestion) => {
@@ -130,22 +157,45 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
           Rate Simulator
         </h4>
 
-        {/* Current vs Simulated Rate Display */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-muted/50 rounded-lg p-3">
-            <div className="text-xs text-muted-foreground">Current Rate</div>
-            <div className="text-xl font-bold">{formatPrice(currentRate)}</div>
+        {/* Current Rate Display */}
+        <div className="bg-muted/50 rounded-lg p-3">
+          <div className="text-xs text-muted-foreground">Current Rate</div>
+          <div className="text-xl font-bold">{formatPrice(currentRate)}</div>
+        </div>
+
+        {/* Test Rate Input */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="testRate" className="text-sm font-medium">
+              Test a different rate
+            </Label>
+            {isModified && (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={handleReset}
+                className="h-7 text-xs gap-1 text-muted-foreground hover:text-foreground"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset
+              </Button>
+            )}
           </div>
-          <div className="bg-primary/10 rounded-lg p-3 border border-primary/20">
-            <div className="text-xs text-primary">Simulated Rate</div>
-            <div className="flex items-center gap-2">
-              <Input
-                type="text"
-                value={formatPrice(simulatedRate)}
-                onChange={handleInputChange}
-                className="h-8 text-xl font-bold w-24 px-1 border-0 bg-transparent focus-visible:ring-0"
-              />
-            </div>
+          <div className={`flex items-center gap-2 p-3 rounded-lg border-2 transition-colors ${
+            isModified 
+              ? "border-primary bg-primary/5" 
+              : "border-border bg-background"
+          }`}>
+            <span className="text-lg text-muted-foreground font-medium">{currencySymbol}</span>
+            <Input
+              id="testRate"
+              type="number"
+              value={simulatedRate}
+              onChange={handleInputChange}
+              className="h-10 text-2xl font-bold border-0 bg-transparent focus-visible:ring-0 p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              min={1}
+              step={5}
+            />
           </div>
         </div>
 
