@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Calculator } from "lucide-react";
+import { Save, Copy, Sparkles, Lock, Unlock, LockOpen } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface GoalsInputProps {
@@ -14,9 +14,7 @@ interface GoalsInputProps {
 
 interface MonthlyGoal {
   month: number;
-  budget: number;
   projection: number;
-  goal: number;
   locked: boolean;
   locked_at?: string;
   locked_by?: string;
@@ -28,7 +26,7 @@ const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep
 export function GoalsInput({ listingId }: GoalsInputProps) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [goals, setGoals] = useState<MonthlyGoal[]>(
-    monthNames.map((_, index) => ({ month: index + 1, budget: 0, projection: 0, goal: 0, locked: false }))
+    monthNames.map((_, index) => ({ month: index + 1, projection: 0, locked: false }))
   );
   const [lockerProfiles, setLockerProfiles] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -76,9 +74,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           return {
             id: monthData?.id,
             month: index + 1,
-            budget: monthData?.budget_revenue || 0,
             projection: monthData?.projection_revenue || 0,
-            goal: monthData?.goal_revenue || 0,
             locked: monthData?.locked || false,
             locked_at: monthData?.locked_at,
             locked_by: monthData?.locked_by,
@@ -89,9 +85,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
         // Reset to empty goals when no data exists for this year
         setGoals(monthNames.map((_, index) => ({ 
           month: index + 1, 
-          budget: 0, 
           projection: 0, 
-          goal: 0, 
           locked: false 
         })));
         setLockerProfiles({});
@@ -115,9 +109,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           listing_id: listingId,
           year,
           month: g.month,
-          budget_revenue: g.budget,
           projection_revenue: g.projection,
-          goal_revenue: g.goal,
           locked: g.locked,
         };
         // Only include id if it exists (for updates)
@@ -167,9 +159,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           const monthData = data.find(g => g.month === index + 1);
           return {
             month: index + 1,
-            budget: monthData?.budget_revenue || 0,
             projection: monthData?.projection_revenue || 0,
-            goal: monthData?.goal_revenue || 0,
             locked: false, // Copied goals are unlocked by default
           };
         });
@@ -225,9 +215,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           const existingGoal = goals[index];
           return {
             month: index + 1,
-            budget: monthData?.budget || 0,
             projection: monthData?.projection || 0,
-            goal: monthData?.goal || 0,
             locked: existingGoal?.locked || false, // Preserve lock state
             locked_at: existingGoal?.locked_at,
             locked_by: existingGoal?.locked_by,
@@ -252,10 +240,10 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     }
   };
 
-  const updateGoal = (monthIndex: number, field: 'budget' | 'projection' | 'goal', value: string) => {
+  const updateGoal = (monthIndex: number, value: string) => {
     const numValue = parseFloat(value) || 0;
     setGoals(prev => prev.map((g, i) => 
-      i === monthIndex ? { ...g, [field]: numValue } : g
+      i === monthIndex ? { ...g, projection: numValue } : g
     ));
   };
 
@@ -273,42 +261,6 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     setGoals(prev => prev.map(g => ({ ...g, locked: false })));
   };
 
-  const autoCalculateFromProjections = () => {
-    let calculatedCount = 0;
-    let skippedLocked = 0;
-    let skippedMissing = 0;
-
-    const updatedGoals = goals.map(g => {
-      if (g.locked) {
-        skippedLocked++;
-        return g;
-      }
-      if (!g.projection || g.projection <= 0) {
-        skippedMissing++;
-        return g;
-      }
-      calculatedCount++;
-      return {
-        ...g,
-        budget: Math.round(g.projection * 0.8 * 100) / 100,
-        goal: Math.round(g.projection * 1.1 * 100) / 100,
-      };
-    });
-
-    setGoals(updatedGoals);
-
-    const skipMessages = [];
-    if (skippedLocked > 0) skipMessages.push(`${skippedLocked} locked`);
-    if (skippedMissing > 0) skipMessages.push(`${skippedMissing} missing projection`);
-    
-    toast({
-      title: "Goals Auto-Calculated",
-      description: `Calculated goals for ${calculatedCount} month${calculatedCount !== 1 ? 's' : ''}${
-        skipMessages.length > 0 ? `. Skipped ${skipMessages.join(', ')}.` : '.'
-      }`,
-    });
-  };
-
   if (isLoading) {
     return <div>Loading goals...</div>;
   }
@@ -319,7 +271,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>Revenue Goals</CardTitle>
-            <CardDescription>Set monthly revenue targets for Budget, Projection, and Goal</CardDescription>
+            <CardDescription>Set monthly revenue projections</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <Label htmlFor="year" className="text-sm">Year:</Label>
@@ -338,15 +290,6 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
               <Copy className="h-4 w-4 mr-2" />
               Copy from {year - 1}
             </Button>
-            <Button 
-              onClick={autoCalculateFromProjections} 
-              variant="outline" 
-              size="sm"
-              disabled={!goals.some(g => !g.locked && g.projection > 0)}
-            >
-              <Calculator className="h-4 w-4 mr-2" />
-              Auto Calculate from Projection
-            </Button>
           </div>
         </div>
       </CardHeader>
@@ -363,11 +306,9 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             </Button>
           </div>
 
-          <div className="grid grid-cols-5 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
+          <div className="grid grid-cols-3 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
             <div>Month</div>
-            <div>Budget (Low)</div>
-            <div>Projection (Expected)</div>
-            <div>Goal (High)</div>
+            <div>Projection</div>
             <div className="text-center">Lock</div>
           </div>
 
@@ -375,31 +316,15 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             {goals.map((goal, index) => (
               <div 
                 key={goal.month} 
-                className={`grid grid-cols-5 gap-4 items-center p-2 rounded ${
+                className={`grid grid-cols-3 gap-4 items-center p-2 rounded ${
                   goal.locked ? 'bg-muted/50' : ''
                 }`}
               >
                 <div className="font-medium">{monthNames[index]}</div>
                 <Input
                   type="number"
-                  value={goal.budget}
-                  onChange={(e) => updateGoal(index, 'budget', e.target.value)}
-                  placeholder="0"
-                  className="text-right"
-                  disabled={goal.locked}
-                />
-                <Input
-                  type="number"
                   value={goal.projection}
-                  onChange={(e) => updateGoal(index, 'projection', e.target.value)}
-                  placeholder="0"
-                  className="text-right"
-                  disabled={goal.locked}
-                />
-                <Input
-                  type="number"
-                  value={goal.goal}
-                  onChange={(e) => updateGoal(index, 'goal', e.target.value)}
+                  onChange={(e) => updateGoal(index, e.target.value)}
                   placeholder="0"
                   className="text-right"
                   disabled={goal.locked}

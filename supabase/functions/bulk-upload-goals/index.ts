@@ -63,16 +63,12 @@ Deno.serve(async (req) => {
 
       for (const [monthStr, projection] of Object.entries(monthlyProjections)) {
         const month = parseInt(monthStr);
-        const budget = Math.round(projection * 0.8 * 100) / 100;
-        const goal = Math.round(projection * 1.1 * 100) / 100;
 
         goalsToUpsert.push({
           listing_id: listingId,
           year,
           month,
           projection_revenue: projection,
-          budget_revenue: budget,
-          goal_revenue: goal,
           locked: true,
           locked_by: user.id,
           locked_at: new Date().toISOString(),

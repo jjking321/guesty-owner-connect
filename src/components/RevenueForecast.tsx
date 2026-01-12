@@ -30,14 +30,10 @@ interface ForecastData {
     confidence?: { lower: number; upper: number };
   };
   goalTargets: {
-    budget: number;
     projection: number;
-    goal: number;
   };
   goalProbabilities: {
-    budget: number;
     projection: number;
-    goal: number;
   };
   monthlyForecasts: Array<{
     month: string; // YYYY-MM
@@ -457,22 +453,12 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
             {/* Goal Probabilities */}
             <div>
-              <h4 className="text-sm font-medium mb-4">Probability of Hitting Targets</h4>
-              <div className="grid grid-cols-3 gap-4">
-                <ProbabilityGauge 
-                  label="Budget" 
-                  probability={forecast.goalProbabilities.budget} 
-                  target={forecast.goalTargets?.budget || 0}
-                />
+              <h4 className="text-sm font-medium mb-4">Probability of Hitting Projection</h4>
+              <div className="flex justify-center">
                 <ProbabilityGauge 
                   label="Projection" 
-                  probability={forecast.goalProbabilities.projection} 
+                  probability={forecast.goalProbabilities?.projection || 0} 
                   target={forecast.goalTargets?.projection || 0}
-                />
-                <ProbabilityGauge 
-                  label="Goal" 
-                  probability={forecast.goalProbabilities.goal} 
-                  target={forecast.goalTargets?.goal || 0}
                 />
               </div>
             </div>
