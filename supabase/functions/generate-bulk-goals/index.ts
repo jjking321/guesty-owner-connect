@@ -165,9 +165,7 @@ serve(async (req) => {
                   listing_id: listing.id,
                   year,
                   month: g.month,
-                  budget_revenue: g.budget,
                   projection_revenue: g.projection,
-                  goal_revenue: g.goal,
                   locked: false,
                 }));
 

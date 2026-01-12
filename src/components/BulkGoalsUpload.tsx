@@ -220,7 +220,7 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
         <DialogHeader>
           <DialogTitle>Upload 2025 Projections from CSV</DialogTitle>
           <DialogDescription>
-            Upload a CSV file to bulk update projection values and auto-calculate budget and goal for all properties.
+            Upload a CSV file to bulk update projection values for all properties.
             All updated goals will be locked.
           </DialogDescription>
         </DialogHeader>

@@ -109,14 +109,10 @@ serve(async (req) => {
     };
 
     const systemPrompt = `You are an expert revenue management consultant for vacation rental properties. 
-Analyze historical booking data and property characteristics to generate intelligent monthly revenue goals.
+Analyze historical booking data and property characteristics to generate intelligent monthly revenue projections.
 
-Generate three tiers of monthly goals:
-1. Budget (Conservative): 90th percentile of historical lows, accounting for worst-case scenarios
-2. Projection (Expected): Realistic target based on historical averages and growth trends
-3. Goal (Optimistic): Stretch target based on historical peaks and market opportunities
-
-Consider:
+Generate realistic monthly projection targets based on:
+- Historical averages and growth trends
 - Seasonal patterns and trends
 - Year-over-year growth rates
 - Property characteristics and location advantages
@@ -126,7 +122,7 @@ Consider:
 Return ONLY a valid JSON object with this exact structure (no markdown, no explanation):
 {
   "goals": [
-    {"month": 1, "budget": 5000, "projection": 7000, "goal": 9000},
+    {"month": 1, "projection": 7000},
     ... (12 months total)
   ],
   "reasoning": "Brief explanation of the overall strategy and key seasonal insights"
@@ -198,12 +194,9 @@ Target Year: ${year}`;
             .map((y) => monthlyData[y]?.[m]?.revenue || 0)
             .filter((v) => v > 0);
           const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-          const peak = vals.length ? Math.max(...vals) : 0;
           return {
             month: m,
-            budget: roundTo(avg * 0.9),
             projection: roundTo(avg * (1 + yoy)),
-            goal: roundTo(Math.max(peak * 1.05, avg * 1.2)),
           };
         });
 

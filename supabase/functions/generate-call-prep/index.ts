@@ -352,21 +352,17 @@ function buildDataContext(data: {
 `;
 
   if (goals && goals.length > 0) {
-    const totalGoal = goals.reduce((sum, g) => sum + parseFloat(g.goal_revenue || 0), 0);
-    const totalBudget = goals.reduce((sum, g) => sum + parseFloat(g.budget_revenue || 0), 0);
     const totalProjection = goals.reduce((sum, g) => sum + parseFloat(g.projection_revenue || 0), 0);
     
     const currentMonth = new Date().getMonth() + 1;
-    const ytdGoal = goals.filter(g => g.month <= currentMonth).reduce((sum, g) => sum + parseFloat(g.goal_revenue || 0), 0);
+    const ytdProjection = goals.filter(g => g.month <= currentMonth).reduce((sum, g) => sum + parseFloat(g.projection_revenue || 0), 0);
     
     context += `
 ## Goals (${currentYear})
-- Annual Goal: $${totalGoal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-- Annual Budget: $${totalBudget.toLocaleString(undefined, { maximumFractionDigits: 0 })}
 - Annual Projection: $${totalProjection.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-- YTD Goal (through current month): $${ytdGoal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+- YTD Projection (through current month): $${ytdProjection.toLocaleString(undefined, { maximumFractionDigits: 0 })}
 - YTD Actual: $${ytdMetrics.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-- YTD vs Goal: ${ytdGoal > 0 ? ((ytdMetrics.totalRevenue / ytdGoal) * 100).toFixed(1) : 'N/A'}%
+- YTD vs Projection: ${ytdProjection > 0 ? ((ytdMetrics.totalRevenue / ytdProjection) * 100).toFixed(1) : 'N/A'}%
 `;
   }
 

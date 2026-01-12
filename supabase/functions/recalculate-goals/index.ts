@@ -185,16 +185,11 @@ Deno.serve(async (req) => {
         let totalUpdated = 0;
         let errors = 0;
 
-        // Recalculate values for all goals in this batch
+        // Update all goals in this batch (just touch updated_at since we only use projection now)
         for (const goal of goals) {
-          const currentProjection = goal.projection_revenue || 0;
-          
           const { error: updateError } = await supabase
             .from('property_goals')
             .update({
-              goal_revenue: currentProjection,
-              projection_revenue: Math.round(currentProjection * 0.85),
-              budget_revenue: Math.round(currentProjection * 0.75),
               updated_at: new Date().toISOString(),
             })
             .eq('id', goal.id);

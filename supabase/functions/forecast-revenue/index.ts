@@ -487,18 +487,14 @@ serve(async (req) => {
       `\nP90: $${simResults.p90.toFixed(0)}\n`
     );
 
-    // Calculate goal probabilities
-    const totalBudget = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
+    // Calculate goal probabilities (projection only)
     const totalProjection = goals?.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0) || 0;
-    const totalGoal = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
 
     const goalProbabilities = {
-      budget: 0,
-      projection: 0,
-      goal: 0
+      projection: 0
     };
 
-    if (goals && goals.length > 0) {
+    if (goals && goals.length > 0 && totalProjection > 0) {
       // Run many simulations to calculate probabilities
       const simulations: number[] = [];
       for (let i = 0; i < simulationCount; i++) {
@@ -512,18 +508,12 @@ serve(async (req) => {
         simulations.push(Math.max(simTotal, forecastFloor));
       }
       
-      goalProbabilities.budget = 
-        (simulations.filter(s => s >= totalBudget).length / simulationCount) * 100;
       goalProbabilities.projection = 
         (simulations.filter(s => s >= totalProjection).length / simulationCount) * 100;
-      goalProbabilities.goal = 
-        (simulations.filter(s => s >= totalGoal).length / simulationCount) * 100;
       
       console.log(
         `Goal Probabilities:` +
-        `\n  Budget ($${totalBudget.toFixed(0)}): ${goalProbabilities.budget.toFixed(1)}%` +
-        `\n  Projection ($${totalProjection.toFixed(0)}): ${goalProbabilities.projection.toFixed(1)}%` +
-        `\n  Goal ($${totalGoal.toFixed(0)}): ${goalProbabilities.goal.toFixed(1)}%\n`
+        `\n  Projection ($${totalProjection.toFixed(0)}): ${goalProbabilities.projection.toFixed(1)}%\n`
       );
     }
 
@@ -649,9 +639,7 @@ serve(async (req) => {
       // Goals
       goal_probabilities: goalProbabilities,
       goal_targets: {
-        budget: totalBudget,
-        projection: totalProjection,
-        goal: totalGoal
+        projection: totalProjection
       },
       
       // Insights
