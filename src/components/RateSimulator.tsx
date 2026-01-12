@@ -40,8 +40,8 @@ export function RateSimulator({ probabilityData, currency = "USD", onRateChange 
   // Calculate min/max for slider - more flexible range
   const baseMin = Math.max(25, Math.round(Math.min(currentRate, avgAvailableRate) * 0.3));
   const baseMax = Math.round(Math.max(currentRate, avgAvailableRate) * 2);
-  // Expand range if simulated rate is outside
-  const minRate = Math.min(baseMin, simulatedRate - 50);
+  // Expand range if simulated rate is outside, but never below 1
+  const minRate = Math.max(1, Math.min(baseMin, simulatedRate - 50));
   const maxRate = Math.max(baseMax, simulatedRate + 50);
 
   // Get currency symbol
