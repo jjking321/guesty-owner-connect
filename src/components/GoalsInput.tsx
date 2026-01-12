@@ -367,6 +367,21 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             ))}
           </TooltipProvider>
 
+          <div className="pt-4 border-t">
+            <div className="grid grid-cols-3 gap-4 items-center py-2">
+              <div className="font-semibold text-base">Annual Total</div>
+              <div className="text-right font-bold text-lg text-primary">
+                {new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: "USD",
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0,
+                }).format(goals.reduce((sum, goal) => sum + goal.projection, 0))}
+              </div>
+              <div></div>
+            </div>
+          </div>
+
           <div className="pt-4 flex justify-end">
             <Button onClick={saveGoals} disabled={isSaving}>
               <Save className="h-4 w-4 mr-2" />
