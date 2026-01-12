@@ -389,16 +389,12 @@ export default function PropertiesBulkEdit() {
     return propertyMetrics.reduce(
       (acc, property) => ({
         actualRevenue: acc.actualRevenue + property.actualRevenue,
-        budgetTotal: acc.budgetTotal + property.budgetTotal,
         projectionTotal: acc.projectionTotal + property.projectionTotal,
-        goalTotal: acc.goalTotal + property.goalTotal,
         forecastedRevenue: acc.forecastedRevenue + property.forecastedRevenue,
       }),
       {
         actualRevenue: 0,
-        budgetTotal: 0,
         projectionTotal: 0,
-        goalTotal: 0,
         forecastedRevenue: 0,
       }
     );
@@ -717,9 +713,7 @@ export default function PropertiesBulkEdit() {
 
         <PropertyMetricsSummary
           totalActualRevenue={portfolioTotals.actualRevenue}
-          totalBudget={portfolioTotals.budgetTotal}
           totalProjection={portfolioTotals.projectionTotal}
-          totalGoal={portfolioTotals.goalTotal}
           totalForecast={portfolioTotals.forecastedRevenue}
           propertiesCount={propertyMetrics.length}
           onTrackCount={propertyMetrics.filter((p) => p.status === "on-track").length}
