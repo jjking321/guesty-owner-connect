@@ -10,6 +10,26 @@ interface ForecastSettings {
   simulation_runs: number;
 }
 
+interface BookingProbability {
+  date: string;
+  probability: number;
+  your_price: number | null;
+  current_dba: number | null;
+  compset_demand_score: number | null;
+  avg_available_rate: number | null;
+}
+
+interface CompsetSummary {
+  future_monthly_averages: Array<{
+    month: string;
+    avg_rate: number | null;
+    occupancy_rate: number | null;
+    revpar: number | null;
+    booked_count: number;
+    total_count: number;
+  }> | null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -22,7 +42,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    console.log(`\n=== RevPAR Velocity Forecast for listing ${listingId}, year ${year} ===\n`);
+    console.log(`\n=== Enhanced RevPAR Velocity + Probability Forecast for listing ${listingId}, year ${year} ===\n`);
 
     // Load forecast settings
     const { data: settings } = await supabase
@@ -52,6 +72,58 @@ serve(async (req) => {
       .select('*')
       .eq('listing_id', listingId)
       .eq('year', year);
+
+    // Fetch booking probabilities for future dates
+    const today = new Date();
+    const { data: bookingProbabilities, error: probError } = await supabase
+      .from('booking_probabilities')
+      .select('date, probability, your_price, current_dba, compset_demand_score, avg_available_rate')
+      .eq('listing_id', listingId)
+      .gte('date', today.toISOString().split('T')[0])
+      .lte('date', `${year}-12-31`);
+
+    if (probError) {
+      console.log('Warning: Could not fetch booking probabilities:', probError.message);
+    }
+
+    // Fetch compset summary for demand signals
+    const { data: compsetSummary, error: compsetError } = await supabase
+      .from('property_compset_summary')
+      .select('future_monthly_averages')
+      .eq('listing_id', listingId)
+      .maybeSingle();
+
+    if (compsetError) {
+      console.log('Warning: Could not fetch compset summary:', compsetError.message);
+    }
+
+    // Build lookup maps for probability data
+    const probabilityByDate = new Map<string, BookingProbability>();
+    if (bookingProbabilities) {
+      bookingProbabilities.forEach(bp => {
+        probabilityByDate.set(bp.date, bp);
+      });
+    }
+
+    // Build compset demand lookup by month
+    const compsetDemandByMonth = new Map<string, { occupancyRate: number; demandSignal: string; bookedCount: number; totalCount: number }>();
+    if (compsetSummary?.future_monthly_averages) {
+      (compsetSummary.future_monthly_averages as any[]).forEach(avg => {
+        const occupancyRate = avg.occupancy_rate ?? 0;
+        let demandSignal = 'Medium';
+        if (occupancyRate >= 70) demandSignal = 'High';
+        else if (occupancyRate < 30) demandSignal = 'Low';
+        
+        compsetDemandByMonth.set(avg.month, {
+          occupancyRate,
+          demandSignal,
+          bookedCount: avg.booked_count || 0,
+          totalCount: avg.total_count || 0
+        });
+      });
+    }
+
+    console.log(`Loaded ${probabilityByDate.size} booking probabilities and ${compsetDemandByMonth.size} compset demand signals`);
 
     // Build baseline from last year's actual monthly revenue
     const baselineByMonth: Record<number, number> = {};
@@ -111,7 +183,6 @@ serve(async (req) => {
     console.log(`YoY growth rate: ${yoyGrowthRate.toFixed(2)}x (capped to ${cappedGrowthRate.toFixed(2)}x)`);
     console.log(`Forecast floor: $${forecastFloor.toFixed(0)}\n`);
 
-    const today = new Date();
     const currentYear = year;
     const currentMonth = today.getMonth();
     const isFutureYear = currentYear > today.getFullYear();
@@ -315,14 +386,76 @@ serve(async (req) => {
       };
     }
 
-    // Main Forecast Function: Baseline × Velocity
-    function forecastBaselineVelocity(
+    // NEW: Calculate probability-weighted expected value for a month
+    function calculateProbabilityExpectedValue(
+      targetYear: number,
+      targetMonth: number,
+      probabilityByDate: Map<string, BookingProbability>,
+      bookedDates: Set<string>
+    ): { expectedValue: number; openNights: number; avgProbability: number; avgPrice: number } {
+      const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+      
+      let totalExpectedValue = 0;
+      let openNights = 0;
+      let totalProbability = 0;
+      let totalPrice = 0;
+      let priceCount = 0;
+      
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        
+        // Skip if already booked
+        if (bookedDates.has(dateStr)) continue;
+        
+        const probData = probabilityByDate.get(dateStr);
+        if (probData && probData.probability !== null && probData.your_price !== null) {
+          const probability = probData.probability / 100; // Convert to decimal
+          const price = probData.your_price;
+          
+          totalExpectedValue += price * probability;
+          openNights++;
+          totalProbability += probData.probability;
+          totalPrice += price;
+          priceCount++;
+        }
+      }
+      
+      return {
+        expectedValue: totalExpectedValue,
+        openNights,
+        avgProbability: openNights > 0 ? totalProbability / openNights : 0,
+        avgPrice: priceCount > 0 ? totalPrice / priceCount : 0
+      };
+    }
+
+    // Build set of booked dates for the target year
+    const bookedDates = new Set<string>();
+    reservations?.forEach(r => {
+      if (!r.check_in || !r.check_out) return;
+      if (!['confirmed', 'checked_in', 'checked_out'].includes(r.status)) return;
+      
+      let currentNight = new Date(r.check_in);
+      const checkOut = new Date(r.check_out);
+      
+      while (currentNight < checkOut) {
+        if (currentNight.getFullYear() === year) {
+          bookedDates.add(currentNight.toISOString().split('T')[0]);
+        }
+        currentNight.setDate(currentNight.getDate() + 1);
+      }
+    });
+
+    // Main Forecast Function: Baseline × Velocity + Probability Blending
+    function forecastEnhanced(
       targetYear: number,
       targetMonth: number,
       asOfDate: Date,
       baselineByMonth: Record<number, number>,
       annualAverage: number,
-      reservations: any[]
+      reservations: any[],
+      probabilityByDate: Map<string, BookingProbability>,
+      bookedDates: Set<string>,
+      compsetDemandByMonth: Map<string, { occupancyRate: number; demandSignal: string; bookedCount: number; totalCount: number }>
     ): any {
       
       // Step 1: Get baseline from last year
@@ -365,17 +498,85 @@ serve(async (req) => {
         }
       });
       
-      // Step 4: Apply velocity to baseline
-      const totalForecast = baseline * velocity.factor;
-      const additionalNeeded = Math.max(0, totalForecast - onBooks);
+      // Step 4: Calculate velocity-based forecast (existing approach)
+      const velocityForecast = baseline * velocity.factor;
       
+      // Step 5: Calculate probability-weighted expected value (new approach)
+      const probExpected = calculateProbabilityExpectedValue(
+        targetYear,
+        targetMonth,
+        probabilityByDate,
+        bookedDates
+      );
+      
+      // Probability forecast = On books + Expected value from open nights
+      const probabilityForecast = onBooks + probExpected.expectedValue;
+      
+      // Step 6: Determine blending weights based on time horizon
+      const monthStart = new Date(targetYear, targetMonth, 1);
+      const daysUntilMonth = Math.ceil(
+        (monthStart.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      
+      let velocityWeight: number;
+      let probabilityWeight: number;
+      let forecastConfidence: string;
+      
+      // Blend based on data quality and time horizon
+      const hasProbabilityData = probExpected.openNights > 0 && probExpected.avgProbability > 0;
+      
+      if (daysUntilMonth <= 0) {
+        // Past month - use actual (velocity = 1, prob = 0)
+        velocityWeight = 1.0;
+        probabilityWeight = 0.0;
+        forecastConfidence = 'actual';
+      } else if (daysUntilMonth <= 30 && hasProbabilityData) {
+        // Close-in with good probability data
+        velocityWeight = 0.30;
+        probabilityWeight = 0.70;
+        forecastConfidence = 'high';
+      } else if (daysUntilMonth <= 90 && hasProbabilityData) {
+        // Standard range with probability data
+        velocityWeight = 0.50;
+        probabilityWeight = 0.50;
+        forecastConfidence = 'medium';
+      } else if (daysUntilMonth <= 90) {
+        // Standard range without probability data
+        velocityWeight = 0.80;
+        probabilityWeight = 0.20;
+        forecastConfidence = 'medium';
+      } else {
+        // Far-out - lean heavily on velocity
+        velocityWeight = 0.85;
+        probabilityWeight = 0.15;
+        forecastConfidence = 'low';
+      }
+      
+      // Calculate blended forecast
+      let blendedForecast: number;
+      if (hasProbabilityData && probabilityWeight > 0) {
+        blendedForecast = (velocityForecast * velocityWeight) + (probabilityForecast * probabilityWeight);
+      } else {
+        blendedForecast = velocityForecast;
+      }
+      
+      // Ensure blended forecast is at least what's on books
+      blendedForecast = Math.max(blendedForecast, onBooks);
+      
+      const additionalNeeded = Math.max(0, blendedForecast - onBooks);
+      
+      // Step 7: Get compset demand signal for this month
       const yearMonth = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
+      const compsetDemand = compsetDemandByMonth.get(yearMonth);
       
       console.log(
-        `${yearMonth} - Baseline: $${baseline.toFixed(0)}, ` +
-        `Velocity: ${velocity.factor.toFixed(2)}x, ` +
-        `Total Forecast: $${totalForecast.toFixed(0)} ` +
-        `(On Books: $${onBooks.toFixed(0)}, Additional: $${additionalNeeded.toFixed(0)})`
+        `${yearMonth} - ` +
+        `Velocity Forecast: $${velocityForecast.toFixed(0)}, ` +
+        `Probability Forecast: $${probabilityForecast.toFixed(0)} ` +
+        `(${probExpected.openNights} open nights @ ${probExpected.avgProbability.toFixed(0)}% avg prob), ` +
+        `Blended: $${blendedForecast.toFixed(0)} ` +
+        `(${(velocityWeight * 100).toFixed(0)}%V/${(probabilityWeight * 100).toFixed(0)}%P), ` +
+        `Compset: ${compsetDemand?.demandSignal || 'N/A'}`
       );
       
       return {
@@ -387,15 +588,31 @@ serve(async (req) => {
         current_bookings: velocity.currentBookings,
         last_year_bookings: velocity.lastYearBookings,
         revenue_on_books: onBooks,
+        
+        // NEW: Enhanced forecast data
+        velocity_forecast: velocityForecast,
+        probability_forecast: probabilityForecast,
+        blended_forecast: blendedForecast,
+        open_nights: probExpected.openNights,
+        avg_open_probability: probExpected.avgProbability,
+        avg_open_price: probExpected.avgPrice,
+        expected_additional: probExpected.expectedValue,
+        velocity_weight: velocityWeight,
+        probability_weight: probabilityWeight,
+        forecast_confidence: forecastConfidence,
+        compset_demand: compsetDemand?.demandSignal || null,
+        compset_occupancy: compsetDemand?.occupancyRate || null,
+        
+        // Backwards compatible fields
         additional_forecast: additionalNeeded,
-        total_forecast_p50: totalForecast,
-        total_forecast_p25: totalForecast * 0.85,
-        total_forecast_p75: totalForecast * 1.15
+        total_forecast_p50: blendedForecast,
+        total_forecast_p25: blendedForecast * 0.85,
+        total_forecast_p75: blendedForecast * 1.15
       };
     }
 
-    // Monte Carlo Simulation with floor support
-    function simulateForecast(
+    // Monte Carlo Simulation with data-driven variance
+    function simulateForecastEnhanced(
       monthlyForecasts: any[],
       simulationCount: number,
       forecastFloor: number
@@ -407,9 +624,24 @@ serve(async (req) => {
         let simTotal = 0;
         
         for (const forecast of monthlyForecasts) {
-          // Add random noise: velocity can vary ±20%
-          const noise = 0.8 + (Math.random() * 0.4); // 0.8 to 1.2
-          const simMonthForecast = forecast.baseline * forecast.velocity_factor * noise;
+          // Data-driven variance based on forecast confidence
+          let varianceRange: number;
+          switch (forecast.forecast_confidence) {
+            case 'high':
+              varianceRange = 0.10; // ±10%
+              break;
+            case 'medium':
+              varianceRange = 0.20; // ±20%
+              break;
+            case 'low':
+              varianceRange = 0.30; // ±30%
+              break;
+            default:
+              varianceRange = 0.05; // ±5% for actual
+          }
+          
+          const noise = (1 - varianceRange) + (Math.random() * varianceRange * 2);
+          const simMonthForecast = forecast.blended_forecast * noise;
           
           // Take max of what's on books vs simulated forecast
           simTotal += Math.max(forecast.revenue_on_books, simMonthForecast);
@@ -437,46 +669,76 @@ serve(async (req) => {
     const asOfDate = today;
     const monthlyForecasts: any[] = [];
     let totalOnBooks = 0;
-    let totalAdditional = 0;
+    let totalVelocityForecast = 0;
+    let totalProbabilityForecast = 0;
+    let totalBlendedForecast = 0;
     let velocitySum = 0;
+    let totalOpenNights = 0;
+    let totalProbabilitySum = 0;
+    let monthsWithProbData = 0;
 
-    console.log(`\n=== Forecasting ${year} (as of ${asOfDate.toISOString().split('T')[0]}) ===\n`);
+    console.log(`\n=== Enhanced Forecasting ${year} (as of ${asOfDate.toISOString().split('T')[0]}) ===\n`);
 
     for (let month = 0; month < 12; month++) {
-      const forecast = forecastBaselineVelocity(
+      const forecast = forecastEnhanced(
         year,
         month,
         asOfDate,
         baselineByMonth,
         annualAverage,
-        reservations || []
+        reservations || [],
+        probabilityByDate,
+        bookedDates,
+        compsetDemandByMonth
       );
       
       monthlyForecasts.push(forecast);
       totalOnBooks += forecast.revenue_on_books;
-      totalAdditional += forecast.additional_forecast;
+      totalVelocityForecast += forecast.velocity_forecast;
+      totalProbabilityForecast += forecast.probability_forecast;
+      totalBlendedForecast += forecast.blended_forecast;
       velocitySum += forecast.velocity_factor;
+      totalOpenNights += forecast.open_nights;
+      
+      if (forecast.avg_open_probability > 0) {
+        totalProbabilitySum += forecast.avg_open_probability;
+        monthsWithProbData++;
+      }
     }
 
-    const calculatedForecast = totalOnBooks + totalAdditional;
     const avgVelocity = velocitySum / 12;
+    const avgOpenProbability = monthsWithProbData > 0 ? totalProbabilitySum / monthsWithProbData : 0;
+
+    // Calculate overall compset demand index
+    let compsetDemandIndex = 0;
+    let compsetMonthsWithData = 0;
+    compsetDemandByMonth.forEach(demand => {
+      compsetDemandIndex += demand.occupancyRate;
+      compsetMonthsWithData++;
+    });
+    const avgCompsetDemand = compsetMonthsWithData > 0 ? compsetDemandIndex / compsetMonthsWithData : 0;
 
     // Apply floor: forecast should not be below prior year without strong evidence
+    const calculatedForecast = totalBlendedForecast;
     const totalForecast = Math.max(calculatedForecast, forecastFloor);
     const floorApplied = totalForecast > calculatedForecast;
 
     console.log(
       `\n=== Annual Summary ===` +
       `\nOn Books: $${totalOnBooks.toFixed(0)}` +
-      `\nAdditional Needed: $${totalAdditional.toFixed(0)}` +
-      `\nCalculated Forecast: $${calculatedForecast.toFixed(0)}` +
+      `\nVelocity Forecast: $${totalVelocityForecast.toFixed(0)}` +
+      `\nProbability Forecast: $${totalProbabilityForecast.toFixed(0)}` +
+      `\nBlended Forecast: $${totalBlendedForecast.toFixed(0)}` +
       `\nForecast Floor: $${forecastFloor.toFixed(0)}` +
       `\nFinal Forecast: $${totalForecast.toFixed(0)}${floorApplied ? ' (floor applied)' : ''}` +
-      `\nAverage Velocity: ${avgVelocity.toFixed(2)}x\n`
+      `\nAverage Velocity: ${avgVelocity.toFixed(2)}x` +
+      `\nOpen Nights (remaining): ${totalOpenNights}` +
+      `\nAvg Open Night Probability: ${avgOpenProbability.toFixed(1)}%` +
+      `\nAvg Compset Demand: ${avgCompsetDemand.toFixed(1)}%\n`
     );
 
-    // Run simulations with floor
-    const simResults = simulateForecast(monthlyForecasts, simulationCount, forecastFloor);
+    // Run simulations with enhanced variance
+    const simResults = simulateForecastEnhanced(monthlyForecasts, simulationCount, forecastFloor);
 
     console.log(
       `Simulation Results (${simulationCount} runs):` +
@@ -500,8 +762,14 @@ serve(async (req) => {
       for (let i = 0; i < simulationCount; i++) {
         let simTotal = 0;
         for (const forecast of monthlyForecasts) {
-          const noise = 0.8 + (Math.random() * 0.4);
-          const simForecast = forecast.baseline * forecast.velocity_factor * noise;
+          let varianceRange = 0.20;
+          switch (forecast.forecast_confidence) {
+            case 'high': varianceRange = 0.10; break;
+            case 'medium': varianceRange = 0.20; break;
+            case 'low': varianceRange = 0.30; break;
+          }
+          const noise = (1 - varianceRange) + (Math.random() * varianceRange * 2);
+          const simForecast = forecast.blended_forecast * noise;
           simTotal += Math.max(forecast.revenue_on_books, simForecast);
         }
         // Apply floor to simulations for goal probability calculation
@@ -517,7 +785,7 @@ serve(async (req) => {
       );
     }
 
-    // Generate insights
+    // Generate insights (enhanced)
     const insights = {
       drivers: [] as string[],
       risks: [] as string[],
@@ -546,6 +814,57 @@ serve(async (req) => {
       insights.opportunities.push(
         'Consider promotional pricing or marketing push to accelerate bookings'
       );
+    }
+
+    // NEW: Probability-based insights
+    if (avgOpenProbability > 60 && totalOpenNights > 30) {
+      insights.drivers.push(
+        `High booking probability (${avgOpenProbability.toFixed(0)}% avg) across ${totalOpenNights} open nights`
+      );
+    }
+
+    if (avgOpenProbability < 40 && totalOpenNights > 30) {
+      insights.risks.push(
+        `Low booking probability (${avgOpenProbability.toFixed(0)}% avg) for remaining open nights`
+      );
+      insights.opportunities.push(
+        'Review pricing strategy - lower rates could improve booking probability'
+      );
+    }
+
+    // NEW: Compset demand insights
+    if (avgCompsetDemand > 70) {
+      insights.drivers.push(
+        `Strong market demand - compset averaging ${avgCompsetDemand.toFixed(0)}% occupancy`
+      );
+    } else if (avgCompsetDemand < 40 && avgCompsetDemand > 0) {
+      insights.risks.push(
+        `Weak market demand - compset only ${avgCompsetDemand.toFixed(0)}% occupied`
+      );
+    }
+
+    // Identify months with demand/velocity mismatch
+    const mismatchMonths = monthlyForecasts.filter(f => {
+      if (!f.compset_demand || f.velocity_factor === 1.0) return false;
+      const highDemandLowVelocity = f.compset_demand === 'High' && f.velocity_factor < 0.8;
+      const lowDemandHighVelocity = f.compset_demand === 'Low' && f.velocity_factor > 1.2;
+      return highDemandLowVelocity || lowDemandHighVelocity;
+    });
+
+    if (mismatchMonths.length > 0) {
+      const highDemandLow = mismatchMonths.filter(f => f.compset_demand === 'High');
+      const lowDemandHigh = mismatchMonths.filter(f => f.compset_demand === 'Low');
+      
+      if (highDemandLow.length > 0) {
+        insights.opportunities.push(
+          `${highDemandLow.map(f => f.month).join(', ')}: Market demand is high but you're pacing behind - pricing opportunity`
+        );
+      }
+      if (lowDemandHigh.length > 0) {
+        insights.risks.push(
+          `${lowDemandHigh.map(f => f.month).join(', ')}: You're ahead of pace but market demand is weak - may not sustain`
+        );
+      }
     }
 
     // Identify best and worst performing months
@@ -607,10 +926,14 @@ serve(async (req) => {
       );
     }
 
+    // Calculate probability-weighted revenue for storage
+    const probabilityWeightedRevenue = totalOnBooks + 
+      monthlyForecasts.reduce((sum, f) => sum + (f.expected_additional || 0), 0);
+
     const forecastData = {
       listing_id: listingId,
       year,
-      forecast_method: 'baseline_velocity',
+      forecast_method: 'baseline_velocity_probability',
       generated_at: today.toISOString(),
       
       // Summary
@@ -633,8 +956,15 @@ serve(async (req) => {
       // Velocity metrics
       pace_factor: avgVelocity,
       
-      // Monthly breakdown
+      // NEW: Enhanced metrics
+      probability_weighted_revenue: probabilityWeightedRevenue,
+      avg_open_night_probability: avgOpenProbability,
+      compset_demand_index: avgCompsetDemand,
+      forecast_confidence: avgOpenProbability > 50 ? 'high' : avgOpenProbability > 30 ? 'medium' : 'low',
+      
+      // Monthly breakdown (enhanced)
       monthly_forecasts: monthlyForecasts,
+      monthly_forecasts_enhanced: monthlyForecasts, // Same data, new column for compatibility
       
       // Goals
       goal_probabilities: goalProbabilities,
@@ -652,7 +982,7 @@ serve(async (req) => {
       .upsert({
         listing_id: listingId,
         year,
-        forecast_method: 'baseline_velocity',
+        forecast_method: 'baseline_velocity_probability',
         pace_factor: avgVelocity,
         generated_at: today.toISOString(),
         revenue_on_books: totalOnBooks,
@@ -661,7 +991,13 @@ serve(async (req) => {
         goal_targets: forecastData.goal_targets,
         goal_probabilities: goalProbabilities,
         monthly_forecasts: monthlyForecasts,
-        insights
+        insights,
+        // NEW columns
+        probability_weighted_revenue: probabilityWeightedRevenue,
+        avg_open_night_probability: avgOpenProbability,
+        compset_demand_index: avgCompsetDemand,
+        forecast_confidence: forecastData.forecast_confidence,
+        monthly_forecasts_enhanced: monthlyForecasts
       }, {
         onConflict: 'listing_id,year'
       });
@@ -669,7 +1005,7 @@ serve(async (req) => {
     if (saveError) {
       console.error('Error saving forecast:', saveError);
     } else {
-      console.log('RevPAR velocity forecast saved successfully');
+      console.log('Enhanced RevPAR velocity + probability forecast saved successfully');
     }
 
     return new Response(

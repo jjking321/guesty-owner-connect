@@ -1304,10 +1304,13 @@ export type Database = {
       }
       revenue_forecasts: {
         Row: {
+          avg_open_night_probability: number | null
           backtest_metrics: Json | null
           capacity_utilization: number | null
+          compset_demand_index: number | null
           created_at: string
           dba_breakdown: Json | null
+          forecast_confidence: string | null
           forecast_method: string | null
           forecasted_revenue: Json
           generated_at: string
@@ -1317,17 +1320,22 @@ export type Database = {
           insights: Json
           listing_id: string
           monthly_forecasts: Json
+          monthly_forecasts_enhanced: Json | null
           pace_factor: number | null
+          probability_weighted_revenue: number | null
           revenue_on_books: number
           total_forecast: Json
           updated_at: string
           year: number
         }
         Insert: {
+          avg_open_night_probability?: number | null
           backtest_metrics?: Json | null
           capacity_utilization?: number | null
+          compset_demand_index?: number | null
           created_at?: string
           dba_breakdown?: Json | null
+          forecast_confidence?: string | null
           forecast_method?: string | null
           forecasted_revenue: Json
           generated_at?: string
@@ -1337,17 +1345,22 @@ export type Database = {
           insights: Json
           listing_id: string
           monthly_forecasts: Json
+          monthly_forecasts_enhanced?: Json | null
           pace_factor?: number | null
+          probability_weighted_revenue?: number | null
           revenue_on_books: number
           total_forecast: Json
           updated_at?: string
           year: number
         }
         Update: {
+          avg_open_night_probability?: number | null
           backtest_metrics?: Json | null
           capacity_utilization?: number | null
+          compset_demand_index?: number | null
           created_at?: string
           dba_breakdown?: Json | null
+          forecast_confidence?: string | null
           forecast_method?: string | null
           forecasted_revenue?: Json
           generated_at?: string
@@ -1357,7 +1370,9 @@ export type Database = {
           insights?: Json
           listing_id?: string
           monthly_forecasts?: Json
+          monthly_forecasts_enhanced?: Json | null
           pace_factor?: number | null
+          probability_weighted_revenue?: number | null
           revenue_on_books?: number
           total_forecast?: Json
           updated_at?: string
