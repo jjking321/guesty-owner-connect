@@ -104,6 +104,10 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
       let yearTotal = 0;
 
       if (data) {
+        // Only count nights that have already occurred as "Actual" revenue
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
         data.forEach((row) => {
           if (row.check_in && row.check_out && row.fare_accommodation_adjusted) {
             const totalRevenue = parseFloat(row.fare_accommodation_adjusted.toString());
@@ -117,7 +121,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               const monthKey = currentNight.toISOString().substring(0, 7);
               const year = currentNight.getFullYear();
               
-              if (year === selectedYear) {
+              // Only count nights that are in the selected year AND have already passed
+              if (year === selectedYear && currentNight < today) {
                 monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + revenuePerNight;
                 yearTotal += revenuePerNight;
               }
