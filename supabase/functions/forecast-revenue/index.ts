@@ -111,8 +111,8 @@ serve(async (req) => {
       (compsetSummary.future_monthly_averages as any[]).forEach(avg => {
         const occupancyRate = avg.occupancy_rate ?? 0;
         let demandSignal = 'Medium';
-        if (occupancyRate >= 70) demandSignal = 'High';
-        else if (occupancyRate < 30) demandSignal = 'Low';
+        if (occupancyRate >= 0.70) demandSignal = 'High';
+        else if (occupancyRate < 0.30) demandSignal = 'Low';
         
         compsetDemandByMonth.set(avg.month, {
           occupancyRate,
