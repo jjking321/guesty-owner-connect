@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent } from "lucide-react";
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
+import { formatDateDisplay } from "@/lib/utils";
 
 import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
@@ -681,10 +682,10 @@ export default function PropertyDetail() {
                           return (
                             <TableRow key={reservation.id}>
                               <TableCell className="whitespace-nowrap">
-                                {new Date(reservation.check_in).toLocaleDateString()}
+                                {formatDateDisplay(reservation.check_in)}
                               </TableCell>
                               <TableCell className="whitespace-nowrap">
-                                {new Date(reservation.check_out).toLocaleDateString()}
+                                {formatDateDisplay(reservation.check_out)}
                               </TableCell>
                               <TableCell>{reservation.nights_count}</TableCell>
                               <TableCell>{reservation.guests_count}</TableCell>
