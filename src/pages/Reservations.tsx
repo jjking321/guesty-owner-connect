@@ -14,7 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, ArrowDown, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
+import { cn, formatDateDisplay } from "@/lib/utils";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
 
 export default function Reservations() {
@@ -956,12 +956,12 @@ export default function Reservations() {
                           )}
                           {visibleColumns.checkIn && (
                             <TableCell className="p-2 text-sm whitespace-nowrap">
-                              {new Date(reservation.check_in).toLocaleDateString()}
+                              {formatDateDisplay(reservation.check_in)}
                             </TableCell>
                           )}
                           {visibleColumns.checkOut && (
                             <TableCell className="p-2 text-sm whitespace-nowrap">
-                              {new Date(reservation.check_out).toLocaleDateString()}
+                              {formatDateDisplay(reservation.check_out)}
                             </TableCell>
                           )}
                           {visibleColumns.nights && (
