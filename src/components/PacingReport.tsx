@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, DollarSign, Moon, Percent } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
+import { parseLocalDate } from "@/lib/utils";
 
 interface PacingReportProps {
   reservations: any[];
@@ -39,8 +40,8 @@ export function PacingReport({ reservations }: PacingReportProps) {
       if (nightsCount === 0) return;
       
       const revenuePerNight = revenueTotal / nightsCount;
-      const checkIn = parseISO(r.check_in);
-      const checkOut = parseISO(r.check_out);
+      const checkIn = parseLocalDate(r.check_in)!;
+      const checkOut = parseLocalDate(r.check_out)!;
       const cutoffDate = new Date(targetYear, endMonth, endDay);
       
       // Iterate through each night

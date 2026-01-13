@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw, BarChart3, Target } from "lucide-react";
+import { parseLocalDate } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -116,8 +117,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
             const nightsCount = row.nights_count || 0;
             const revenuePerNight = nightsCount > 0 ? totalRevenue / nightsCount : 0;
             
-            let currentNight = new Date(row.check_in);
-            const checkOut = new Date(row.check_out);
+            let currentNight = parseLocalDate(row.check_in)!;
+            const checkOut = parseLocalDate(row.check_out)!;
             
             while (currentNight < checkOut) {
               const monthKey = currentNight.toISOString().substring(0, 7);
