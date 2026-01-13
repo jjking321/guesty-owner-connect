@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Database, BarChart3, AlertCircle, TrendingUp } from "lucide-react";
+import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Database, BarChart3, AlertCircle, TrendingUp, ChevronUp, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 
@@ -291,6 +291,18 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     setGoals(prev => prev.map(g => ({ ...g, locked: false })));
   };
 
+  const adjustGoalsUp = () => {
+    setGoals(prev => prev.map(g => 
+      g.locked ? g : { ...g, projection: Math.round(g.projection * 1.05) }
+    ));
+  };
+
+  const adjustGoalsDown = () => {
+    setGoals(prev => prev.map(g => 
+      g.locked ? g : { ...g, projection: Math.round(g.projection * 0.95) }
+    ));
+  };
+
   const getSourceIcon = (source?: string) => {
     switch (source) {
       case 'actuals':
@@ -328,6 +340,14 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           <div>
             <CardTitle>Revenue Goals</CardTitle>
             <CardDescription>Set monthly revenue projections</CardDescription>
+            <div className="mt-2 text-2xl font-bold text-primary">
+              {new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+              }).format(goals.reduce((sum, goal) => sum + goal.projection, 0))}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Label htmlFor="year" className="text-sm">Year:</Label>
@@ -385,6 +405,14 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
       <CardContent>
         <div className="space-y-4">
           <div className="flex justify-end gap-2 mb-4">
+            <Button onClick={adjustGoalsDown} variant="outline" size="sm">
+              <ChevronDown className="h-4 w-4 mr-1" />
+              -5%
+            </Button>
+            <Button onClick={adjustGoalsUp} variant="outline" size="sm">
+              <ChevronUp className="h-4 w-4 mr-1" />
+              +5%
+            </Button>
             <Button onClick={lockAllGoals} variant="outline" size="sm">
               <Lock className="h-4 w-4 mr-2" />
               Lock All
@@ -495,23 +523,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             ))}
           </TooltipProvider>
 
-          <div className="pt-4 border-t">
-            <div className="grid grid-cols-4 gap-4 items-center py-2">
-              <div className="font-semibold text-base">Annual Total</div>
-              <div className="text-right font-bold text-lg text-primary">
-                {new Intl.NumberFormat("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                  minimumFractionDigits: 0,
-                  maximumFractionDigits: 0,
-                }).format(goals.reduce((sum, goal) => sum + goal.projection, 0))}
-              </div>
-              <div></div>
-              <div></div>
-            </div>
-          </div>
-
-          <div className="pt-4 flex justify-end">
+          <div className="pt-4 border-t flex justify-end">
             <Button onClick={saveGoals} disabled={isSaving}>
               <Save className="h-4 w-4 mr-2" />
               {isSaving ? "Saving..." : "Save Goals"}
