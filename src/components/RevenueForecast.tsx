@@ -73,7 +73,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
   const [actualRevenue, setActualRevenue] = useState<{
     yearTotal: number;
     monthlyActuals: Record<string, number>;
-  }>({ yearTotal: 0, monthlyActuals: {} });
+    monthlyOnBooks: Record<string, number>;
+  }>({ yearTotal: 0, monthlyActuals: {}, monthlyOnBooks: {} });
   
   const currentYear = new Date().getFullYear();
   const lastYear = currentYear - 1;
@@ -101,10 +102,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
       if (error) throw error;
 
       const monthlyActuals: Record<string, number> = {};
+      const monthlyOnBooks: Record<string, number> = {};
       let yearTotal = 0;
 
       if (data) {
-        // Only count nights that have already occurred as "Actual" revenue
+        // Separate past nights (Actual) from future nights (On Books)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         
@@ -121,10 +123,15 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               const monthKey = currentNight.toISOString().substring(0, 7);
               const year = currentNight.getFullYear();
               
-              // Only count nights that are in the selected year AND have already passed
-              if (year === selectedYear && currentNight < today) {
-                monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + revenuePerNight;
-                yearTotal += revenuePerNight;
+              if (year === selectedYear) {
+                if (currentNight < today) {
+                  // Past night - Actual revenue
+                  monthlyActuals[monthKey] = (monthlyActuals[monthKey] || 0) + revenuePerNight;
+                  yearTotal += revenuePerNight;
+                } else {
+                  // Future night - On Books revenue
+                  monthlyOnBooks[monthKey] = (monthlyOnBooks[monthKey] || 0) + revenuePerNight;
+                }
               }
               
               currentNight.setDate(currentNight.getDate() + 1);
@@ -133,7 +140,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
         });
       }
 
-      setActualRevenue({ yearTotal, monthlyActuals });
+      setActualRevenue({ yearTotal, monthlyActuals, monthlyOnBooks });
     } catch (err) {
       console.error("Error loading actual revenue:", err);
     }
@@ -441,41 +448,56 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                       const monthLabel = monthDate.toLocaleString('en-US', { month: 'short' });
                       const today = new Date();
                       const monthStartThisRender = new Date(today.getFullYear(), today.getMonth(), 1);
-                      const isPast = monthDate <= monthStartThisRender && y <= today.getFullYear();
+                      const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+                      
+                      // Determine if this is a past month, current month, or future month
+                      const isPastMonth = monthDate < monthStartThisRender;
+                      const isCurrentMonth = monthDate >= monthStartThisRender && monthDate < nextMonthStart && y === today.getFullYear();
+                      const isFutureMonth = monthDate >= nextMonthStart || y > today.getFullYear();
+                      
                       const pace = m.velocity_factor;
                       const actualForMonth = actualRevenue.monthlyActuals[m.month] || 0;
+                      const onBooksForMonth = actualRevenue.monthlyOnBooks[m.month] || 0;
                       const avgProb = m.avg_open_probability;
                       
                       return (
                         <tr key={m.month} className="border-b">
                           <td className="py-2 font-medium">{monthLabel}</td>
                           <td className="py-2 text-right">
-                            {isPast && actualForMonth > 0 ? `$${Math.round(actualForMonth).toLocaleString()}` : <span className="text-muted-foreground">-</span>}
+                            {(isPastMonth || isCurrentMonth) && actualForMonth > 0 
+                              ? `$${Math.round(actualForMonth).toLocaleString()}` 
+                              : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-right">
-                            {!isPast ? `$${Math.round(Number(m.revenue_on_books || 0)).toLocaleString()}` : <span className="text-muted-foreground">-</span>}
+                            {isCurrentMonth && onBooksForMonth > 0
+                              ? `$${Math.round(onBooksForMonth).toLocaleString()}`
+                              : isFutureMonth 
+                                ? `$${Math.round(Number(m.revenue_on_books || 0)).toLocaleString()}`
+                                : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-right font-semibold">
-                            {isPast && actualForMonth > 0 
+                            {isPastMonth && actualForMonth > 0 
                               ? `$${Math.round(actualForMonth).toLocaleString()}`
-                              : `$${Math.round(Number(m.blended_forecast || m.total_forecast_p50 || 0)).toLocaleString()}`}
+                              : isCurrentMonth
+                                ? `$${Math.round(actualForMonth + (Number(m.blended_forecast || m.total_forecast_p50 || 0))).toLocaleString()}`
+                                : `$${Math.round(Number(m.blended_forecast || m.total_forecast_p50 || 0)).toLocaleString()}`}
                           </td>
                           <td className="py-2 text-center">
-                            {!isPast && pace !== undefined ? (
+                            {(isCurrentMonth || isFutureMonth) && pace !== undefined ? (
                               <span className={`text-xs font-medium ${pace > 1.1 ? 'text-green-600' : pace < 0.9 ? 'text-red-600' : 'text-muted-foreground'}`}>
                                 {(pace * 100).toFixed(0)}%
                               </span>
                             ) : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-center">
-                            {!isPast && avgProb !== undefined && avgProb > 0 ? (
+                            {(isCurrentMonth || isFutureMonth) && avgProb !== undefined && avgProb > 0 ? (
                               <span className={`text-xs font-medium ${avgProb > 50 ? 'text-green-600' : avgProb < 30 ? 'text-red-600' : 'text-yellow-600'}`}>
                                 {avgProb.toFixed(0)}%
                               </span>
                             ) : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-center">
-                            {!isPast ? getDemandBadge(m.compset_demand) : <span className="text-muted-foreground text-xs">-</span>}
+                            {(isCurrentMonth || isFutureMonth) ? getDemandBadge(m.compset_demand) : <span className="text-muted-foreground text-xs">-</span>}
                           </td>
                         </tr>
                       );
