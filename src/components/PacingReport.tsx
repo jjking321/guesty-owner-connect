@@ -47,7 +47,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       let currentNight = new Date(checkIn);
       while (currentNight < checkOut) {
         // Only count nights in target year up to cutoff date
-        if (currentNight.getFullYear() === targetYear && currentNight <= cutoffDate) {
+        if (currentNight.getFullYear() === targetYear && currentNight < cutoffDate) {
           totalRevenue += revenuePerNight;
           totalNights += 1;
         }
