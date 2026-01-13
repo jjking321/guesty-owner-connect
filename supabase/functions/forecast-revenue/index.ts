@@ -108,17 +108,27 @@ serve(async (req) => {
     // Build compset demand lookup by month
     const compsetDemandByMonth = new Map<string, { occupancyRate: number; demandSignal: string; bookedCount: number; totalCount: number }>();
     if (compsetSummary?.future_monthly_averages) {
-      (compsetSummary.future_monthly_averages as any[]).forEach(avg => {
-        const occupancyRate = avg.occupancy_rate ?? 0;
+      (compsetSummary.future_monthly_averages as any[]).forEach((avg) => {
+        const monthKey: string | undefined = avg.month ?? avg.year_month ?? avg.yearMonth;
+
+        let occupancyRate: number = avg.occupancy_rate ?? avg.occupancy ?? 0;
+        if (typeof occupancyRate === 'string') occupancyRate = Number(occupancyRate);
+        if (!Number.isFinite(occupancyRate)) occupancyRate = 0;
+
+        // Normalize to 0..1 (some sources may provide 0..100)
+        if (occupancyRate > 1) occupancyRate = occupancyRate / 100;
+
         let demandSignal = 'Medium';
         if (occupancyRate >= 0.70) demandSignal = 'High';
         else if (occupancyRate < 0.30) demandSignal = 'Low';
-        
-        compsetDemandByMonth.set(avg.month, {
+
+        if (!monthKey) return;
+
+        compsetDemandByMonth.set(monthKey, {
           occupancyRate,
           demandSignal,
-          bookedCount: avg.booked_count || 0,
-          totalCount: avg.total_count || 0
+          bookedCount: avg.booked_count ?? avg.bookedCount ?? 0,
+          totalCount: avg.total_count ?? avg.totalCount ?? 0,
         });
       });
     }
@@ -713,10 +723,10 @@ serve(async (req) => {
     let compsetDemandIndex = 0;
     let compsetMonthsWithData = 0;
     compsetDemandByMonth.forEach(demand => {
-      compsetDemandIndex += demand.occupancyRate;
+      compsetDemandIndex += demand.occupancyRate; // 0..1
       compsetMonthsWithData++;
     });
-    const avgCompsetDemand = compsetMonthsWithData > 0 ? compsetDemandIndex / compsetMonthsWithData : 0;
+    const avgCompsetDemand = compsetMonthsWithData > 0 ? (compsetDemandIndex / compsetMonthsWithData) * 100 : 0;
 
     // Apply floor: forecast should not be below prior year without strong evidence
     const calculatedForecast = totalBlendedForecast;
