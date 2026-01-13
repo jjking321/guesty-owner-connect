@@ -485,9 +485,20 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       }
 
       // Create a map for quick lookup of compset averages by month
+      // For future months, revenue may not exist - calculate from revpar * days in month
       const compsetMap = new Map<string, number>();
       compsetAverages.forEach((avg) => {
-        if (Number.isFinite(avg.revenue)) compsetMap.set(avg.month, avg.revenue);
+        if (Number.isFinite(avg.revenue) && avg.revenue > 0) {
+          compsetMap.set(avg.month, avg.revenue);
+        } else if (Number.isFinite(avg.revpar)) {
+          // Calculate estimated revenue from revpar for future months
+          const [yearStr, monthStr] = avg.month.split('-');
+          const daysInMonth = getDaysInMonth(new Date(parseInt(yearStr), parseInt(monthStr) - 1, 1));
+          const estimatedRevenue = avg.revpar * daysInMonth;
+          if (estimatedRevenue > 0) {
+            compsetMap.set(avg.month, estimatedRevenue);
+          }
+        }
       });
 
       // Calculate actual revenue per month
