@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent } from "lucide-react";
-import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths } from "date-fns";
-import { formatDateDisplay } from "@/lib/utils";
+import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths, isWithinInterval, startOfDay, endOfDay, startOfYear } from "date-fns";
+import { formatDateDisplay, parseLocalDate } from "@/lib/utils";
+import { StripeDateRangePicker, DateRange } from "@/components/StripeDateRangePicker";
 
 import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
@@ -46,6 +47,10 @@ export default function PropertyDetail() {
   const [goalsData, setGoalsData] = useState<any[]>([]);
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [metricsDateRange, setMetricsDateRange] = useState<DateRange>({
+    from: startOfYear(new Date()),
+    to: new Date(),
+  });
 
   useEffect(() => {
     if (id) {
@@ -269,86 +274,110 @@ export default function PropertyDetail() {
     };
   };
 
-  const calculateMetrics = () => {
+  const calculateMetrics = (dateRange: DateRange) => {
+    const emptyMetrics = {
+      totalReservations: 0,
+      totalRevenue: 0,
+      totalNights: 0,
+      averageADR: 0,
+      averageNightsPerReservation: 0,
+      totalGuests: 0,
+      averageGuestsPerReservation: 0,
+      overallOccupancy: 0,
+      revPAR: 0,
+    };
+
     if (reservations.length === 0) {
-      return {
-        totalReservations: 0,
-        totalRevenue: 0,
-        totalNights: 0,
-        averageADR: 0,
-        averageNightsPerReservation: 0,
-        totalGuests: 0,
-        averageGuestsPerReservation: 0,
-        overallOccupancy: 0,
-        revPAR: 0,
-      };
+      return emptyMetrics;
     }
 
-    // Filter to current year only
-    const currentYear = new Date().getFullYear();
-    // Filter reservations that have any nights in current year
-    const currentYearReservations = reservations.filter((r) => {
+    // Calculate date range boundaries
+    const rangeStart = dateRange.from ? startOfDay(dateRange.from) : null;
+    const rangeEnd = dateRange.to ? endOfDay(dateRange.to) : null;
+
+    // Helper to check if a night is within the date range
+    const isNightInRange = (night: Date) => {
+      if (!rangeStart && !rangeEnd) return true; // All time
+      if (rangeStart && rangeEnd) {
+        return isWithinInterval(night, { start: rangeStart, end: rangeEnd });
+      }
+      if (rangeStart) return night >= rangeStart;
+      if (rangeEnd) return night <= rangeEnd;
+      return true;
+    };
+
+    // Filter reservations that have any nights in the date range
+    const filteredReservations = reservations.filter((r) => {
       if (!r.check_in || !r.check_out) return false;
-      const checkIn = parseISO(r.check_in);
-      const checkOut = parseISO(r.check_out);
-      // Include if reservation spans any part of current year
-      return checkIn.getFullYear() <= currentYear && checkOut.getFullYear() >= currentYear;
-    });
-
-    if (currentYearReservations.length === 0) {
-      return {
-        totalReservations: 0,
-        totalRevenue: 0,
-        totalNights: 0,
-        averageADR: 0,
-        averageNightsPerReservation: 0,
-        totalGuests: 0,
-        averageGuestsPerReservation: 0,
-        overallOccupancy: 0,
-        revPAR: 0,
-      };
-    }
-
-    // Calculate revenue using night-based allocation for current year only
-    let totalRevenue = 0;
-    let totalNights = 0;
-    currentYearReservations.forEach(r => {
-      if (!r.fare_accommodation_adjusted || !r.nights_count || r.nights_count === 0) return;
+      const checkIn = parseLocalDate(r.check_in);
+      const checkOut = parseLocalDate(r.check_out);
+      if (!checkIn || !checkOut) return false;
       
-      const revenuePerNight = parseFloat(r.fare_accommodation_adjusted) / r.nights_count;
-      const checkIn = parseISO(r.check_in);
-      const checkOut = parseISO(r.check_out);
-      
+      // Check if any night of reservation falls within range
       let currentNight = new Date(checkIn);
       while (currentNight < checkOut) {
-        if (currentNight.getFullYear() === currentYear) {
-          totalRevenue += revenuePerNight;
-          totalNights += 1;
+        if (isNightInRange(currentNight)) {
+          return true;
         }
         currentNight.setDate(currentNight.getDate() + 1);
       }
+      return false;
     });
 
-    const totalGuests = currentYearReservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
+    if (filteredReservations.length === 0) {
+      return emptyMetrics;
+    }
+
+    // Calculate revenue using night-based allocation for nights in range only
+    let totalRevenue = 0;
+    let totalNights = 0;
+    let reservationsWithNightsInRange = 0;
+
+    filteredReservations.forEach(r => {
+      if (!r.fare_accommodation_adjusted || !r.nights_count || r.nights_count === 0) return;
+      
+      const revenuePerNight = parseFloat(r.fare_accommodation_adjusted) / r.nights_count;
+      const checkIn = parseLocalDate(r.check_in);
+      const checkOut = parseLocalDate(r.check_out);
+      if (!checkIn || !checkOut) return;
+      
+      let nightsInRange = 0;
+      let currentNight = new Date(checkIn);
+      while (currentNight < checkOut) {
+        if (isNightInRange(currentNight)) {
+          totalRevenue += revenuePerNight;
+          totalNights += 1;
+          nightsInRange += 1;
+        }
+        currentNight.setDate(currentNight.getDate() + 1);
+      }
+      
+      if (nightsInRange > 0) {
+        reservationsWithNightsInRange += 1;
+      }
+    });
+
+    const totalGuests = filteredReservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
     const averageADR = totalNights > 0 ? totalRevenue / totalNights : 0;
-    const averageNightsPerReservation = totalNights / currentYearReservations.length;
-    const averageGuestsPerReservation = totalGuests / currentYearReservations.length;
+    const averageNightsPerReservation = reservationsWithNightsInRange > 0 ? totalNights / reservationsWithNightsInRange : 0;
+    const averageGuestsPerReservation = filteredReservations.length > 0 ? totalGuests / filteredReservations.length : 0;
 
-    // Calculate overall occupancy for current year (Jan-Dec or Jan-current month)
-    const monthlyOccupancy = calculateMonthlyOccupancy();
-    const currentYearMonths = monthlyOccupancy.filter(m => {
-      const monthDate = parseISO(m.monthKey + '-01');
-      return monthDate.getFullYear() === currentYear;
-    });
-    const overallOccupancy = currentYearMonths.length > 0
-      ? currentYearMonths.reduce((sum, month) => sum + month.occupancyRate, 0) / currentYearMonths.length
-      : 0;
+    // Calculate occupancy for the date range
+    let totalDaysInRange = 0;
+    if (rangeStart && rangeEnd) {
+      totalDaysInRange = differenceInDays(rangeEnd, rangeStart) + 1;
+    } else {
+      // All time - use last 12 months
+      totalDaysInRange = 365;
+    }
+    
+    const overallOccupancy = totalDaysInRange > 0 ? (totalNights / totalDaysInRange) * 100 : 0;
 
     // Calculate RevPAR = ADR × Occupancy Rate
     const revPAR = averageADR * (overallOccupancy / 100);
 
     return {
-      totalReservations: currentYearReservations.length,
+      totalReservations: filteredReservations.length,
       totalRevenue,
       totalNights,
       averageADR,
@@ -360,7 +389,7 @@ export default function PropertyDetail() {
     };
   };
 
-  const metrics = calculateMetrics();
+  const metrics = calculateMetrics(metricsDateRange);
 
   if (loading) {
     return (
@@ -549,8 +578,16 @@ export default function PropertyDetail() {
           </Card>
         </div>
 
-        {/* Metrics Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {/* Metrics Cards with Date Filter */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Performance Metrics</h3>
+            <StripeDateRangePicker
+              value={metricsDateRange}
+              onChange={setMetricsDateRange}
+            />
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -562,7 +599,7 @@ export default function PropertyDetail() {
               <div className="text-2xl font-bold">
                 {metrics.overallOccupancy.toFixed(1)}%
               </div>
-              <p className="text-xs text-muted-foreground mt-1">Last 12 months</p>
+              <p className="text-xs text-muted-foreground mt-1">For selected period</p>
             </CardContent>
           </Card>
 
@@ -610,6 +647,7 @@ export default function PropertyDetail() {
               <p className="text-xs text-muted-foreground mt-1">Average stay length</p>
             </CardContent>
           </Card>
+          </div>
         </div>
 
         {/* Tabs for different sections */}
