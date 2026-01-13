@@ -11,6 +11,7 @@ interface GenerationResult {
   listingId: string;
   nickname: string;
   success: boolean;
+  source?: string;
   error?: string;
 }
 
@@ -65,7 +66,7 @@ serve(async (req) => {
     
     const { data: listings, error: listingsError } = await supabase
       .from('listings')
-      .select('id, nickname, active, is_listed')
+      .select('id, nickname, active, is_listed, created_at_guesty')
       .in('guesty_account_id', accountIds)
       .eq('active', true)
       .eq('is_listed', true)
@@ -130,7 +131,6 @@ serve(async (req) => {
       const results: GenerationResult[] = [];
       let succeeded = 0;
       let failed = 0;
-      const batchSize = 3;
 
       try {
         let processed = 0;
@@ -148,6 +148,7 @@ serve(async (req) => {
 
             console.log(`Generating goals for ${listing.nickname} (${listing.id}) - missing ${missingMonths.length} months: ${missingMonths.join(',')}`);
 
+            // Call the smart suggest-property-goals function
             const { data, error } = await supabase.functions.invoke('suggest-property-goals', {
               body: { listingId: listing.id, year }
             });
@@ -189,14 +190,29 @@ serve(async (req) => {
 
               processed++;
               succeeded++;
-              console.log(`Saved ${rowsToInsert.length} goals for ${listing.nickname} (${processed}/${eligibleListings.length})`);
+              
+              const dataSource = data.dataSource || 'unknown';
+              console.log(`Saved ${rowsToInsert.length} goals for ${listing.nickname} (source: ${dataSource}) (${processed}/${eligibleListings.length})`);
+              
+              results.push({
+                listingId: listing.id,
+                nickname: listing.nickname || listing.id,
+                success: true,
+                source: dataSource,
+              });
             } else {
               console.error(`No goals returned for ${listing.nickname}:`, data);
-              throw new Error('No goals returned from AI');
+              throw new Error('No goals returned from smart algorithm');
             }
           } catch (error: any) {
             console.error(`Failed to generate goals for ${listing.nickname}:`, error?.message || error);
             failed++;
+            results.push({
+              listingId: listing.id,
+              nickname: listing.nickname || listing.id,
+              success: false,
+              error: error?.message || 'Unknown error',
+            });
           }
         }
 
@@ -208,6 +224,11 @@ serve(async (req) => {
         };
 
         console.log('Bulk generation complete:', summary);
+        console.log('Results by source:', {
+          actuals: results.filter(r => r.source === 'actuals').length,
+          compset: results.filter(r => r.source === 'compset').length,
+          fallback: results.filter(r => r.source === 'fallback').length,
+        });
       } catch (error: any) {
         console.error('Fatal error in background processing:', error.message || error);
       }
@@ -228,8 +249,9 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: `Started generating goals for ${eligibleListings.length} properties. This will continue in the background.`,
-        totalProperties: eligibleListings.length
+        message: `Started generating smart goals for ${eligibleListings.length} properties. Algorithm uses last year actuals → compset averages → fallback.`,
+        totalProperties: eligibleListings.length,
+        algorithm: 'smart-v2'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

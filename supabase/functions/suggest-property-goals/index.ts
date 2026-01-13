@@ -6,6 +6,67 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Configuration
+const YOY_GROWTH_RATE = 0.05; // 5% year-over-year growth
+const RAMP_UP_MULTIPLIER = 0.70; // 70% of goal during ramp-up months
+const RAMP_UP_MONTHS = 2; // First 2 full months after listing are ramp-up
+
+interface MonthlyActual {
+  month: number;
+  revenue: number;
+}
+
+interface CompsetMonthlyAverage {
+  month: string;
+  avg_revenue?: number;
+  avg_adr?: number;
+  avg_occupancy?: number;
+  avg_revpar?: number;
+}
+
+interface GoalResult {
+  month: number;
+  projection: number;
+  source: 'actuals' | 'compset' | 'fallback';
+  isRampUp: boolean;
+  isPreListing: boolean;
+}
+
+// Outlier detection using IQR method
+function calculateTrimmedMean(values: number[]): number {
+  if (values.length === 0) return 0;
+  if (values.length <= 4) {
+    // Too few values, use median
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  
+  const sorted = [...values].sort((a, b) => a - b);
+  const q1Index = Math.floor(sorted.length * 0.25);
+  const q3Index = Math.floor(sorted.length * 0.75);
+  const q1 = sorted[q1Index];
+  const q3 = sorted[q3Index];
+  const iqr = q3 - q1;
+  const lowerBound = q1 - 1.5 * iqr;
+  const upperBound = q3 + 1.5 * iqr;
+  
+  const filtered = values.filter(v => v >= lowerBound && v <= upperBound);
+  
+  if (filtered.length === 0) {
+    // If all values are outliers, return median
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  
+  return filtered.reduce((a, b) => a + b, 0) / filtered.length;
+}
+
+// Round to nearest $100
+function roundTo(n: number, base = 100): number {
+  return Math.round((n || 0) / base) * base;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -13,7 +74,7 @@ serve(async (req) => {
 
   try {
     const { listingId, year } = await req.json();
-    console.log('Generating goals for listing:', listingId, 'year:', year);
+    console.log('Generating smart goals for listing:', listingId, 'year:', year);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -21,211 +82,251 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch property details
+    // Step 1: Fetch property details including created_at_guesty
     const { data: listing, error: listingError } = await supabase
       .from('listings')
-      .select('*')
+      .select('id, nickname, property_type, bedrooms, accommodates, address, created_at_guesty')
       .eq('id', listingId)
       .single();
 
     if (listingError) throw listingError;
 
-    // Fetch all historical reservations for this property
-    // Exclude owner reservations from calculations
-    const { data: reservations, error: reservationsError } = await supabase
-      .from('reservations')
-      .select('*')
-      .eq('listing_id', listingId)
-      .eq('status', 'confirmed')
-      .neq('source', 'owner')
-      .order('check_in');
-
-    if (reservationsError) throw reservationsError;
-
-    // Fetch existing goals
-    const { data: existingGoals, error: goalsError } = await supabase
-      .from('property_goals')
-      .select('*')
-      .eq('listing_id', listingId)
-      .order('year, month');
-
-    console.log('Found', reservations?.length || 0, 'reservations');
-
-    // Calculate monthly revenue by year using night-based allocation
-    const monthlyData: Record<number, Record<number, { revenue: number; bookings: number }>> = {};
+    // Determine property management start date
+    const createdAtGuesty = listing.created_at_guesty ? new Date(listing.created_at_guesty) : null;
+    const listingStartYear = createdAtGuesty ? createdAtGuesty.getFullYear() : null;
+    const listingStartMonth = createdAtGuesty ? createdAtGuesty.getMonth() + 1 : null; // 1-12
     
-    reservations?.forEach(res => {
-      if (!res.check_in || !res.check_out || !res.fare_accommodation_adjusted) return;
-      
-      const totalRevenue = Number(res.fare_accommodation_adjusted) || 0;
-      const nightsCount = Number(res.nights_count) || 0;
-      if (nightsCount === 0) return;
-      
-      const revenuePerNight = totalRevenue / nightsCount;
-      const checkIn = new Date(res.check_in);
-      const checkOut = new Date(res.check_out);
-      
-      // Allocate revenue to each night's month
-      let currentNight = new Date(checkIn);
-      while (currentNight < checkOut) {
-        const nightYear = currentNight.getFullYear();
-        const nightMonth = currentNight.getMonth() + 1;
-        
-        if (!monthlyData[nightYear]) monthlyData[nightYear] = {};
-        if (!monthlyData[nightYear][nightMonth]) {
-          monthlyData[nightYear][nightMonth] = { revenue: 0, bookings: 0 };
-        }
-        
-        monthlyData[nightYear][nightMonth].revenue += revenuePerNight;
-        currentNight.setDate(currentNight.getDate() + 1);
-      }
-      
-      // Count booking once (in check-in month)
-      const bookingYear = checkIn.getFullYear();
-      const bookingMonth = checkIn.getMonth() + 1;
-      if (!monthlyData[bookingYear]) monthlyData[bookingYear] = {};
-      if (!monthlyData[bookingYear][bookingMonth]) {
-        monthlyData[bookingYear][bookingMonth] = { revenue: 0, bookings: 0 };
-      }
-      monthlyData[bookingYear][bookingMonth].bookings += 1;
-    });
+    console.log('Property start date:', createdAtGuesty, 'Year:', listingStartYear, 'Month:', listingStartMonth);
 
-    // Prepare data summary for AI
-    const historicalSummary = Object.entries(monthlyData).map(([yr, months]) => {
-      const monthSummary = Object.entries(months).map(([m, data]) => ({
-        month: m,
-        revenue: data.revenue,
-        bookings: data.bookings
-      }));
-      return { year: yr, months: monthSummary };
-    });
+    // Step 2: Fetch last year's actual revenue from reservation_nights
+    const previousYear = year - 1;
+    const { data: lastYearActuals, error: actualsError } = await supabase
+      .from('reservation_nights')
+      .select('night_date, revenue_allocation')
+      .eq('listing_id', listingId)
+      .gte('night_date', `${previousYear}-01-01`)
+      .lte('night_date', `${previousYear}-12-31`);
 
-    const propertyContext = {
-      type: listing.property_type,
-      bedrooms: listing.bedrooms,
-      accommodates: listing.accommodates,
-      location: listing.address,
-      nickname: listing.nickname
-    };
-
-    const systemPrompt = `You are an expert revenue management consultant for vacation rental properties. 
-Analyze historical booking data and property characteristics to generate intelligent monthly revenue projections.
-
-Generate realistic monthly projection targets based on:
-- Historical averages and growth trends
-- Seasonal patterns and trends
-- Year-over-year growth rates
-- Property characteristics and location advantages
-- Market positioning (beachfront premium, size)
-- Booking velocity and lead times
-
-Return ONLY a valid JSON object with this exact structure (no markdown, no explanation):
-{
-  "goals": [
-    {"month": 1, "projection": 7000},
-    ... (12 months total)
-  ],
-  "reasoning": "Brief explanation of the overall strategy and key seasonal insights"
-}`;
-
-    const userPrompt = `Generate monthly revenue goals for ${year}.
-
-Property Details:
-${JSON.stringify(propertyContext, null, 2)}
-
-Historical Monthly Performance:
-${JSON.stringify(historicalSummary, null, 2)}
-
-Existing Goals (for reference):
-${existingGoals && existingGoals.length > 0 ? JSON.stringify(existingGoals, null, 2) : 'None'}
-
-Target Year: ${year}`;
-
-    console.log('Calling Lovable AI...');
-    
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('AI gateway error:', aiResponse.status, errorText);
-
-      if (aiResponse.status === 402 || aiResponse.status === 429) {
-        // Fallback heuristic goals using historical data
-        const years = Object.keys(monthlyData)
-          .map((y) => Number(y))
-          .filter((y) => y < year)
-          .sort((a, b) => a - b);
-
-        const lastYear = years[years.length - 1];
-        const prevYear = years[years.length - 2];
-
-        const sumForYear = (y: number) =>
-          monthlyData[y]
-            ? Object.values(monthlyData[y]).reduce((s, m) => s + (m?.revenue || 0), 0)
-            : 0;
-
-        let yoy = 0.03; // default modest growth
-        if (lastYear && prevYear) {
-          const prevSum = sumForYear(prevYear);
-          const lastSum = sumForYear(lastYear);
-          if (prevSum > 0) {
-            yoy = Math.max(-0.2, Math.min(0.3, (lastSum - prevSum) / prevSum));
-          }
-        }
-
-        const roundTo = (n: number, base = 100) => Math.round((n || 0) / base) * base;
-
-        const goals = Array.from({ length: 12 }, (_, i) => {
-          const m = i + 1;
-          const vals = years
-            .map((y) => monthlyData[y]?.[m]?.revenue || 0)
-            .filter((v) => v > 0);
-          const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-          return {
-            month: m,
-            projection: roundTo(avg * (1 + yoy)),
-          };
-        });
-
-        const reasoning = `Heuristic fallback: used historical monthly averages (${years.join(", ")}) with YoY growth ${Math.round(
-          yoy * 100,
-        )}% and peak-based stretch targets.`;
-
-        return new Response(
-          JSON.stringify({ goals, reasoning, source: 'fallback' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-        );
-      }
-
-      throw new Error(`AI gateway error: ${aiResponse.status}`);
+    if (actualsError) {
+      console.error('Error fetching actuals:', actualsError);
     }
 
-    const aiData = await aiResponse.json();
-    let aiContent = aiData.choices[0].message.content;
+    // Aggregate actuals by month
+    const monthlyActuals: MonthlyActual[] = [];
+    const actualsByMonth: Record<number, number> = {};
     
-    console.log('AI Response:', aiContent);
+    if (lastYearActuals && lastYearActuals.length > 0) {
+      lastYearActuals.forEach(night => {
+        const date = new Date(night.night_date);
+        const month = date.getMonth() + 1;
+        if (!actualsByMonth[month]) actualsByMonth[month] = 0;
+        actualsByMonth[month] += Number(night.revenue_allocation) || 0;
+      });
+      
+      for (let m = 1; m <= 12; m++) {
+        if (actualsByMonth[m] && actualsByMonth[m] > 0) {
+          monthlyActuals.push({ month: m, revenue: actualsByMonth[m] });
+        }
+      }
+    }
 
-    // Strip markdown code blocks if present
-    aiContent = aiContent.replace(/^```json\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+    const hasFullYearActuals = monthlyActuals.length === 12;
+    console.log('Last year actuals:', monthlyActuals.length, 'months. Full year:', hasFullYearActuals);
 
-    // Parse the JSON response
-    const suggestions = JSON.parse(aiContent);
+    // Step 3: Fetch compset monthly averages as fallback
+    let compsetAverages: CompsetMonthlyAverage[] = [];
+    const { data: compsetSummary, error: compsetError } = await supabase
+      .from('property_compset_summary')
+      .select('monthly_averages')
+      .eq('listing_id', listingId)
+      .single();
+
+    if (compsetError) {
+      console.log('No compset summary found:', compsetError.message);
+    } else if (compsetSummary?.monthly_averages) {
+      compsetAverages = compsetSummary.monthly_averages as CompsetMonthlyAverage[];
+      console.log('Compset averages found for', compsetAverages.length, 'months');
+    }
+
+    // Parse compset data into a lookup by month number
+    const compsetByMonth: Record<number, number> = {};
+    compsetAverages.forEach(ca => {
+      // monthly_averages has month in format "YYYY-MM", extract last month value
+      const monthStr = ca.month;
+      if (monthStr) {
+        const monthNum = parseInt(monthStr.split('-')[1]);
+        if (ca.avg_revenue && ca.avg_revenue > 0) {
+          if (!compsetByMonth[monthNum]) {
+            compsetByMonth[monthNum] = ca.avg_revenue;
+          } else {
+            // Average multiple years for the same month
+            compsetByMonth[monthNum] = (compsetByMonth[monthNum] + ca.avg_revenue) / 2;
+          }
+        }
+      }
+    });
+
+    // Step 4: Calculate goals using priority hierarchy
+    const goalResults: GoalResult[] = [];
+    let dataSource: 'actuals' | 'compset' | 'fallback' = 'fallback';
+
+    for (let month = 1; month <= 12; month++) {
+      // Check if this month is before property was listed (in target year)
+      let isPreListing = false;
+      if (listingStartYear && listingStartYear === year && listingStartMonth && month < listingStartMonth) {
+        isPreListing = true;
+      }
+
+      // Check if this is a ramp-up month (first RAMP_UP_MONTHS after listing in target year)
+      let isRampUp = false;
+      if (listingStartYear === year && listingStartMonth) {
+        const monthsAfterStart = month - listingStartMonth;
+        // The listing month itself and the next RAMP_UP_MONTHS-1 months are ramp-up
+        if (monthsAfterStart >= 0 && monthsAfterStart < RAMP_UP_MONTHS) {
+          isRampUp = true;
+        }
+      }
+
+      let projection = 0;
+      let source: 'actuals' | 'compset' | 'fallback' = 'fallback';
+
+      if (isPreListing) {
+        // Property wasn't managed yet
+        projection = 0;
+        source = 'fallback';
+      } else if (hasFullYearActuals && actualsByMonth[month]) {
+        // Use last year actuals with growth
+        projection = actualsByMonth[month] * (1 + YOY_GROWTH_RATE);
+        source = 'actuals';
+        dataSource = 'actuals';
+      } else if (actualsByMonth[month] && actualsByMonth[month] > 0) {
+        // Have partial actuals for this month - use them with growth
+        projection = actualsByMonth[month] * (1 + YOY_GROWTH_RATE);
+        source = 'actuals';
+        if (dataSource === 'fallback') dataSource = 'actuals';
+      } else if (compsetByMonth[month] && compsetByMonth[month] > 0) {
+        // Use compset average for missing months
+        projection = compsetByMonth[month];
+        source = 'compset';
+        if (dataSource === 'fallback') dataSource = 'compset';
+      } else {
+        // Final fallback: average of available actuals or compset
+        const availableActuals = Object.values(actualsByMonth).filter(v => v > 0);
+        const availableCompset = Object.values(compsetByMonth).filter(v => v > 0);
+        
+        if (availableActuals.length > 0) {
+          projection = calculateTrimmedMean(availableActuals);
+        } else if (availableCompset.length > 0) {
+          projection = calculateTrimmedMean(availableCompset);
+        }
+        source = 'fallback';
+      }
+
+      // Apply ramp-up multiplier
+      if (isRampUp && projection > 0) {
+        projection = projection * RAMP_UP_MULTIPLIER;
+      }
+
+      goalResults.push({
+        month,
+        projection: roundTo(projection),
+        source,
+        isRampUp,
+        isPreListing,
+      });
+    }
+
+    // Step 5: Use AI for refinement and insights (optional enhancement)
+    let reasoning = '';
+    
+    // Build reasoning based on data sources
+    const actualsCount = goalResults.filter(g => g.source === 'actuals').length;
+    const compsetCount = goalResults.filter(g => g.source === 'compset').length;
+    const rampUpCount = goalResults.filter(g => g.isRampUp).length;
+    const preListingCount = goalResults.filter(g => g.isPreListing).length;
+
+    if (hasFullYearActuals) {
+      reasoning = `Based on ${previousYear} actual performance with ${Math.round(YOY_GROWTH_RATE * 100)}% YoY growth applied.`;
+    } else if (actualsCount > 0 && compsetCount > 0) {
+      reasoning = `Blended approach: ${actualsCount} months from ${previousYear} actuals (+${Math.round(YOY_GROWTH_RATE * 100)}% growth), ${compsetCount} months from compset historical averages.`;
+    } else if (compsetCount > 0) {
+      reasoning = `Based on historical compset performance averages (${compsetCount} months of data).`;
+    } else {
+      reasoning = `Limited historical data available. Goals based on estimated averages.`;
+    }
+
+    if (preListingCount > 0) {
+      reasoning += ` ${preListingCount} months set to $0 (property not yet under management).`;
+    }
+
+    if (rampUpCount > 0) {
+      reasoning += ` ${rampUpCount} months at ${Math.round(RAMP_UP_MULTIPLIER * 100)}% (new property ramp-up period).`;
+    }
+
+    // Try AI refinement for additional insights
+    try {
+      const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lovableApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { 
+              role: 'system', 
+              content: `You are a vacation rental revenue analyst. Provide a brief (1-2 sentence) insight about the projected goals. Focus on seasonality patterns or recommendations. Do not output JSON.`
+            },
+            { 
+              role: 'user', 
+              content: `Property: ${listing.nickname || 'Vacation Rental'} (${listing.bedrooms || '?'} BR, ${listing.property_type || 'Property'})
+Monthly goals for ${year}:
+${goalResults.map(g => `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][g.month-1]}: $${g.projection.toLocaleString()}${g.isRampUp ? ' (ramp-up)' : ''}${g.isPreListing ? ' (pre-listing)' : ''}`).join('\n')}
+
+Data source: ${dataSource}. Provide a brief insight.`
+            }
+          ],
+        }),
+      });
+
+      if (aiResponse.ok) {
+        const aiData = await aiResponse.json();
+        const aiInsight = aiData.choices?.[0]?.message?.content?.trim();
+        if (aiInsight && aiInsight.length < 300) {
+          reasoning += ' ' + aiInsight;
+        }
+      }
+    } catch (aiError) {
+      console.log('AI refinement skipped:', aiError);
+    }
+
+    // Format response
+    const goals = goalResults.map(g => ({
+      month: g.month,
+      projection: g.projection,
+      source: g.source,
+      isRampUp: g.isRampUp,
+      isPreListing: g.isPreListing,
+    }));
+
+    console.log('Generated goals:', goals.map(g => `M${g.month}: $${g.projection} (${g.source})`).join(', '));
 
     return new Response(
-      JSON.stringify(suggestions),
+      JSON.stringify({ 
+        goals, 
+        reasoning,
+        dataSource,
+        metadata: {
+          hasFullYearActuals,
+          actualsMonths: monthlyActuals.length,
+          compsetMonths: Object.keys(compsetByMonth).length,
+          rampUpMonths: rampUpCount,
+          preListingMonths: preListingCount,
+          yoyGrowthRate: YOY_GROWTH_RATE,
+          propertyStartDate: createdAtGuesty?.toISOString() || null,
+        }
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy, Sparkles, Lock, Unlock, LockOpen } from "lucide-react";
+import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Database, BarChart3, AlertCircle, TrendingUp } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
 
 interface GoalsInputProps {
   listingId: string;
@@ -19,6 +20,20 @@ interface MonthlyGoal {
   locked_at?: string;
   locked_by?: string;
   id?: string;
+  source?: 'actuals' | 'compset' | 'fallback';
+  isRampUp?: boolean;
+  isPreListing?: boolean;
+}
+
+interface GenerationMetadata {
+  dataSource: 'actuals' | 'compset' | 'fallback';
+  hasFullYearActuals: boolean;
+  actualsMonths: number;
+  compsetMonths: number;
+  rampUpMonths: number;
+  preListingMonths: number;
+  yoyGrowthRate: number;
+  propertyStartDate: string | null;
 }
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -32,6 +47,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationMetadata, setGenerationMetadata] = useState<GenerationMetadata | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -40,6 +56,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
 
   const loadGoals = async () => {
     setIsLoading(true);
+    setGenerationMetadata(null);
     try {
       const { data, error } = await supabase
         .from('property_goals')
@@ -164,6 +181,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           };
         });
         setGoals(copiedGoals);
+        setGenerationMetadata(null);
         toast({
           title: "Goals copied",
           description: `Copied goals from ${previousYear}`,
@@ -220,19 +238,31 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             locked_at: existingGoal?.locked_at,
             locked_by: existingGoal?.locked_by,
             id: existingGoal?.id,
+            source: monthData?.source,
+            isRampUp: monthData?.isRampUp,
+            isPreListing: monthData?.isPreListing,
           };
         });
         setGoals(aiGoals);
+        
+        // Store metadata for display
+        if (data.metadata) {
+          setGenerationMetadata({
+            dataSource: data.dataSource,
+            ...data.metadata
+          });
+        }
+
         toast({
-          title: "AI Goals Generated",
-          description: data.reasoning || `AI has suggested goals based on historical data`,
+          title: "Goals Generated",
+          description: data.reasoning || `Goals generated based on ${data.dataSource || 'available'} data`,
         });
       }
     } catch (error: any) {
-      console.error('Error generating AI goals:', error);
+      console.error('Error generating goals:', error);
       toast({
         title: "Error generating goals",
-        description: error.message || "Failed to generate AI suggestions",
+        description: error.message || "Failed to generate goal suggestions",
         variant: "destructive",
       });
     } finally {
@@ -261,6 +291,32 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     setGoals(prev => prev.map(g => ({ ...g, locked: false })));
   };
 
+  const getSourceIcon = (source?: string) => {
+    switch (source) {
+      case 'actuals':
+        return <Database className="h-3 w-3 text-green-600" />;
+      case 'compset':
+        return <BarChart3 className="h-3 w-3 text-blue-600" />;
+      case 'fallback':
+        return <AlertCircle className="h-3 w-3 text-amber-600" />;
+      default:
+        return null;
+    }
+  };
+
+  const getSourceLabel = (source?: string) => {
+    switch (source) {
+      case 'actuals':
+        return 'From last year actuals (+5% growth)';
+      case 'compset':
+        return 'From compset historical averages';
+      case 'fallback':
+        return 'Estimated from available data';
+      default:
+        return null;
+    }
+  };
+
   if (isLoading) {
     return <div>Loading goals...</div>;
   }
@@ -284,7 +340,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             />
             <Button onClick={generateAIGoals} variant="outline" size="sm" disabled={isGenerating}>
               <Sparkles className="h-4 w-4 mr-2" />
-              {isGenerating ? "Generating..." : "AI Suggest Goals"}
+              {isGenerating ? "Generating..." : "Auto-Generate"}
             </Button>
             <Button onClick={copyFromPreviousYear} variant="outline" size="sm">
               <Copy className="h-4 w-4 mr-2" />
@@ -292,6 +348,39 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             </Button>
           </div>
         </div>
+        
+        {/* Generation metadata badge */}
+        {generationMetadata && (
+          <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t">
+            <Badge variant="outline" className="text-xs">
+              {generationMetadata.dataSource === 'actuals' && (
+                <><Database className="h-3 w-3 mr-1 text-green-600" /> Based on {year - 1} actuals</>
+              )}
+              {generationMetadata.dataSource === 'compset' && (
+                <><BarChart3 className="h-3 w-3 mr-1 text-blue-600" /> Based on compset data</>
+              )}
+              {generationMetadata.dataSource === 'fallback' && (
+                <><AlertCircle className="h-3 w-3 mr-1 text-amber-600" /> Limited data available</>
+              )}
+            </Badge>
+            {generationMetadata.hasFullYearActuals && (
+              <Badge variant="secondary" className="text-xs">
+                <TrendingUp className="h-3 w-3 mr-1" />
+                +{Math.round(generationMetadata.yoyGrowthRate * 100)}% YoY growth
+              </Badge>
+            )}
+            {generationMetadata.rampUpMonths > 0 && (
+              <Badge variant="secondary" className="text-xs text-amber-700">
+                {generationMetadata.rampUpMonths} ramp-up months (70%)
+              </Badge>
+            )}
+            {generationMetadata.preListingMonths > 0 && (
+              <Badge variant="secondary" className="text-xs text-muted-foreground">
+                {generationMetadata.preListingMonths} pre-listing months
+              </Badge>
+            )}
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
@@ -306,9 +395,10 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             </Button>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
+          <div className="grid grid-cols-4 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
             <div>Month</div>
             <div>Projection</div>
+            <div className="text-center">Source</div>
             <div className="text-center">Lock</div>
           </div>
 
@@ -316,11 +406,37 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             {goals.map((goal, index) => (
               <div 
                 key={goal.month} 
-                className={`grid grid-cols-3 gap-4 items-center p-2 rounded ${
+                className={`grid grid-cols-4 gap-4 items-center p-2 rounded ${
                   goal.locked ? 'bg-muted/50' : ''
-                }`}
+                } ${goal.isPreListing ? 'opacity-50' : ''} ${goal.isRampUp ? 'bg-amber-50 dark:bg-amber-950/20' : ''}`}
               >
-                <div className="font-medium">{monthNames[index]}</div>
+                <div className="font-medium flex items-center gap-2">
+                  {monthNames[index]}
+                  {goal.isRampUp && (
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <Badge variant="outline" className="text-xs px-1 py-0 text-amber-700 border-amber-300">
+                          70%
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Ramp-up period: New property, goal set to 70% of projection
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                  {goal.isPreListing && (
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <Badge variant="outline" className="text-xs px-1 py-0 text-muted-foreground">
+                          N/A
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Property not under management during this month
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
                 <Input
                   type="number"
                   value={goal.projection}
@@ -329,6 +445,18 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
                   className="text-right"
                   disabled={goal.locked}
                 />
+                <div className="flex justify-center">
+                  {goal.source && (
+                    <Tooltip>
+                      <TooltipTrigger>
+                        {getSourceIcon(goal.source)}
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {getSourceLabel(goal.source)}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
                 <div className="flex justify-center">
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -368,7 +496,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           </TooltipProvider>
 
           <div className="pt-4 border-t">
-            <div className="grid grid-cols-3 gap-4 items-center py-2">
+            <div className="grid grid-cols-4 gap-4 items-center py-2">
               <div className="font-semibold text-base">Annual Total</div>
               <div className="text-right font-bold text-lg text-primary">
                 {new Intl.NumberFormat("en-US", {
@@ -378,6 +506,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
                   maximumFractionDigits: 0,
                 }).format(goals.reduce((sum, goal) => sum + goal.projection, 0))}
               </div>
+              <div></div>
               <div></div>
             </div>
           </div>
