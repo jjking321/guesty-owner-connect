@@ -88,13 +88,15 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
   const loadActualRevenue = async () => {
     try {
+      // Fetch reservations that have any nights in the selected year
+      // This includes cross-year reservations (e.g., check_in Dec 2025, check_out Jan 2026)
       const { data, error } = await supabase
         .from("reservations")
         .select("check_in, check_out, fare_accommodation_adjusted, nights_count")
         .eq("listing_id", listingId)
         .in("status", ["confirmed", "checked_in", "checked_out"])
-        .gte("check_in", `${selectedYear}-01-01`)
-        .lt("check_out", `${selectedYear + 1}-01-01`);
+        .lt("check_in", `${selectedYear + 1}-01-01`)
+        .gt("check_out", `${selectedYear}-01-01`);
 
       if (error) throw error;
 
