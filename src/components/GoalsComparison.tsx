@@ -802,64 +802,6 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         </p>
       </div>
 
-      {/* YTD Summary Cards - Only show for revenue metric */}
-      {activeMetric === 'revenue' && (
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Target className="h-4 w-4 text-muted-foreground" />
-                vs Budget (Low)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsBudget >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-                {ytdComparison.vsBudget >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-                {Math.abs(ytdComparison.vsBudget).toFixed(1)}%
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {ytdComparison.vsBudget >= 0 ? 'Above' : 'Below'} budget target
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Target className="h-4 w-4 text-muted-foreground" />
-                vs Projection (Expected)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsProjection >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-                {ytdComparison.vsProjection >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-                {Math.abs(ytdComparison.vsProjection).toFixed(1)}%
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {ytdComparison.vsProjection >= 0 ? 'Above' : 'Below'} projection
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Target className="h-4 w-4 text-muted-foreground" />
-                vs Goal (High)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className={`flex items-center gap-2 text-2xl font-bold ${ytdComparison.vsGoal >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-                {ytdComparison.vsGoal >= 0 ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-                {Math.abs(ytdComparison.vsGoal).toFixed(1)}%
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                {ytdComparison.vsGoal >= 0 ? 'Above' : 'Below'} goal target
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
 
       {/* Chart */}
       <Card>
