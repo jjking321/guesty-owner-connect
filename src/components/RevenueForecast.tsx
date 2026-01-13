@@ -3,10 +3,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw } from "lucide-react";
+import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw, BarChart3, Target } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 
 interface ForecastData {
   listingId: string;
@@ -36,17 +37,29 @@ interface ForecastData {
     projection: number;
   };
   monthlyForecasts: Array<{
-    month: string; // YYYY-MM
+    month: string;
     revenue_on_books: number;
     additional_forecast: number;
     total_forecast_p50: number;
     velocity_factor?: number;
+    velocity_forecast?: number;
+    probability_forecast?: number;
+    blended_forecast?: number;
+    open_nights?: number;
+    avg_open_probability?: number;
+    forecast_confidence?: string;
+    compset_demand?: string;
   }>;
   insights: {
     drivers: string[];
     risks: string[];
     opportunities: string[];
   };
+  // New enhanced fields
+  probabilityWeightedRevenue?: number;
+  avgOpenNightProbability?: number;
+  compsetDemandIndex?: number;
+  forecastConfidence?: string;
 }
 
 interface RevenueForecastProps {
@@ -95,7 +108,6 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
             const nightsCount = row.nights_count || 0;
             const revenuePerNight = nightsCount > 0 ? totalRevenue / nightsCount : 0;
             
-            // Allocate revenue per night across all months the reservation spans
             let currentNight = new Date(row.check_in);
             const checkOut = new Date(row.check_out);
             
@@ -147,7 +159,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           goalTargets: data.goal_targets as any,
           goalProbabilities: data.goal_probabilities as any,
           monthlyForecasts: data.monthly_forecasts as any,
-          insights: data.insights as any
+          insights: data.insights as any,
+          probabilityWeightedRevenue: data.probability_weighted_revenue,
+          avgOpenNightProbability: data.avg_open_night_probability,
+          compsetDemandIndex: data.compset_demand_index,
+          forecastConfidence: data.forecast_confidence
         });
       } else {
         setForecast(null);
@@ -183,7 +199,11 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           goalTargets: data.goal_targets as any,
           goalProbabilities: data.goal_probabilities as any,
           monthlyForecasts: data.monthly_forecasts as any,
-          insights: data.insights as any
+          insights: data.insights as any,
+          probabilityWeightedRevenue: data.probability_weighted_revenue,
+          avgOpenNightProbability: data.avg_open_night_probability,
+          compsetDemandIndex: data.compset_demand_index,
+          forecastConfidence: data.forecast_confidence
         });
       }
 
@@ -214,39 +234,19 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
       <div className="flex flex-col items-center space-y-2">
         <div className="relative w-24 h-24">
           <svg className="transform -rotate-90 w-24 h-24">
-            <circle
-              cx="48"
-              cy="48"
-              r="40"
-              stroke="currentColor"
-              strokeWidth="8"
-              fill="transparent"
-              className="text-muted"
-            />
-            <circle
-              cx="48"
-              cy="48"
-              r="40"
-              stroke="currentColor"
-              strokeWidth="8"
-              fill="transparent"
+            <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-muted" />
+            <circle cx="48" cy="48" r="40" stroke="currentColor" strokeWidth="8" fill="transparent"
               strokeDasharray={`${2 * Math.PI * 40}`}
               strokeDashoffset={`${2 * Math.PI * 40 * (1 - probability / 100)}`}
-              className={getColor(probability)}
-              strokeLinecap="round"
-            />
+              className={getColor(probability)} strokeLinecap="round" />
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className={`text-2xl font-bold ${getColor(probability)}`}>
-              {probability.toFixed(0)}%
-            </span>
+            <span className={`text-2xl font-bold ${getColor(probability)}`}>{probability.toFixed(0)}%</span>
           </div>
         </div>
         <div className="text-center">
           <p className="text-sm font-medium">{label}</p>
-          <p className="text-xs text-muted-foreground">
-            ${target.toLocaleString()}
-          </p>
+          <p className="text-xs text-muted-foreground">${target.toLocaleString()}</p>
         </div>
       </div>
     );
@@ -261,6 +261,24 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
     }
   };
 
+  const getConfidenceBadge = (confidence: string | undefined) => {
+    switch (confidence) {
+      case 'high': return <Badge variant="default" className="bg-green-600">High Confidence</Badge>;
+      case 'medium': return <Badge variant="secondary">Medium Confidence</Badge>;
+      case 'low': return <Badge variant="outline">Low Confidence</Badge>;
+      default: return null;
+    }
+  };
+
+  const getDemandBadge = (demand: string | null | undefined) => {
+    switch (demand) {
+      case 'High': return <Badge variant="default" className="bg-green-600 text-xs">High</Badge>;
+      case 'Medium': return <Badge variant="secondary" className="text-xs">Med</Badge>;
+      case 'Low': return <Badge variant="outline" className="text-xs">Low</Badge>;
+      default: return <span className="text-muted-foreground text-xs">-</span>;
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -270,9 +288,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               <TrendingUp className="h-5 w-5" />
               Revenue Forecast
             </CardTitle>
-            <CardDescription>
-              AI-powered year-end revenue projection
-            </CardDescription>
+            <CardDescription>AI-powered year-end revenue projection with probability & compset data</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <Tabs value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(Number(v))}>
@@ -283,12 +299,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               </TabsList>
             </Tabs>
             {forecast && (
-              <Button 
-                onClick={generateForecast} 
-                variant="outline" 
-                size="sm"
-                disabled={refreshing}
-              >
+              <Button onClick={generateForecast} variant="outline" size="sm" disabled={refreshing}>
                 <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
                 Refresh
               </Button>
@@ -324,130 +335,66 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
             {selectedYear === lastYear ? (
               <div className="bg-gradient-to-br from-blue-500/10 to-blue-500/5 rounded-lg p-6 text-center">
                 <div className="flex justify-between items-start mb-4">
-                  <div className="text-left">
-                    <p className="text-xs text-muted-foreground">
-                      Historical Performance
-                    </p>
-                  </div>
+                  <p className="text-xs text-muted-foreground">Historical Performance</p>
                   <CheckCircle className="h-5 w-5 text-green-600" />
                 </div>
-                <p className="text-sm font-medium text-muted-foreground mb-2">
-                  {selectedYear} Actual Revenue
-                </p>
-                <p className="text-4xl font-bold mb-2">
-                  ${Math.round(actualRevenue.yearTotal).toLocaleString()}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Completed Year
-                </p>
+                <p className="text-sm font-medium text-muted-foreground mb-2">{selectedYear} Actual Revenue</p>
+                <p className="text-4xl font-bold mb-2">${Math.round(actualRevenue.yearTotal).toLocaleString()}</p>
+                <p className="text-sm text-muted-foreground">Completed Year</p>
               </div>
             ) : (
               <div className="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg p-6 text-center">
                 <div className="flex justify-between items-start mb-4">
-                  <div className="text-left">
-                    <p className="text-xs text-muted-foreground">
-                      Last updated: {forecast.generated_at ? formatDistanceToNow(new Date(forecast.generated_at)) : 'N/A'} ago
-                    </p>
+                  <p className="text-xs text-muted-foreground">
+                    Last updated: {forecast.generated_at ? formatDistanceToNow(new Date(forecast.generated_at)) : 'N/A'} ago
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {getConfidenceBadge(forecast.forecastConfidence)}
                   </div>
-                  {forecast.forecastMethod && (
-                    <div className="text-right">
-                      <p className="text-xs text-muted-foreground">
-                        Method: <span className="font-medium capitalize">{forecast.forecastMethod}</span>
-                      </p>
-                    </div>
-                  )}
                 </div>
-                <p className="text-sm font-medium text-muted-foreground mb-2">
-                  Projected End-of-Year Revenue
-                </p>
+                <p className="text-sm font-medium text-muted-foreground mb-2">Projected End-of-Year Revenue</p>
                 <p className="text-4xl font-bold mb-2">
                   ${Number(forecast.totalForecast?.p50 ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined) ? (
-                    `80% Confidence: $${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
-                  ) : (
-                    'Confidence interval not available'
-                  )}
+                  {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined)
+                    ? `80% Confidence: $${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
+                    : 'Confidence interval not available'}
                 </p>
-                <div className="mt-4 pt-4 border-t">
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    {selectedYear === currentYear && (
-                      <div className="text-center">
-                        <p className="text-muted-foreground">YTD Actuals</p>
-                        <p className="font-semibold">
-                          ${Math.round(actualRevenue.yearTotal).toLocaleString()}
-                        </p>
-                      </div>
-                    )}
+                
+                {/* Enhanced Metrics Row */}
+                <div className="mt-4 pt-4 border-t grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="text-center">
+                    <p className="text-muted-foreground">On Books</p>
+                    <p className="font-semibold">${Number(forecast.revenueOnBooks || 0).toLocaleString()}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-muted-foreground">Avg Pace</p>
+                    <p className={`font-semibold ${(forecast.paceFactor || 1) > 1.05 ? 'text-green-600' : (forecast.paceFactor || 1) < 0.95 ? 'text-red-600' : ''}`}>
+                      {((forecast.paceFactor || 1) * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                  {forecast.avgOpenNightProbability !== undefined && forecast.avgOpenNightProbability > 0 && (
                     <div className="text-center">
-                      <p className="text-muted-foreground">On Books (Year)</p>
-                      <p className="font-semibold">
-                        ${Number(forecast.revenueOnBooks || 0).toLocaleString()}
+                      <p className="text-muted-foreground flex items-center justify-center gap-1">
+                        <Target className="h-3 w-3" /> Avg Probability
+                      </p>
+                      <p className={`font-semibold ${forecast.avgOpenNightProbability > 50 ? 'text-green-600' : forecast.avgOpenNightProbability < 30 ? 'text-red-600' : 'text-yellow-600'}`}>
+                        {forecast.avgOpenNightProbability.toFixed(0)}%
                       </p>
                     </div>
-                    {selectedYear === currentYear ? (
-                      <div className="text-center">
-                        <p className="text-muted-foreground">Forecasted Add'l</p>
-                        <p className="font-semibold">
-                          ${Number((forecast.totalForecast?.p50 ?? 0) - (forecast.revenueOnBooks ?? 0)).toLocaleString()}
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="text-center">
-                          <p className="text-muted-foreground">P10–P90 Range</p>
-                          <p className="font-semibold">
-                            {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined)
-                              ? `$${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
-                              : '—'}
-                          </p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-muted-foreground">Forecasted Add'l</p>
-                          <p className="font-semibold">
-                            ${Number((forecast.totalForecast?.p50 ?? 0) - (forecast.revenueOnBooks ?? 0)).toLocaleString()}
-                          </p>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-                
-                {/* Pace-Aware Metrics */}
-                {(forecast.paceFactor !== null && forecast.paceFactor !== undefined) || 
-                 (forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined) ? (
-                  <div className="mt-4 pt-4 border-t">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      {forecast.paceFactor !== null && forecast.paceFactor !== undefined && (
-                        <div className="text-center">
-                          <p className="text-muted-foreground">Avg Pace Factor</p>
-                          <p className="font-semibold">
-                            {forecast.paceFactor.toFixed(2)}x
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {forecast.paceFactor > 1.1 ? '↑ Ahead of last year' : 
-                             forecast.paceFactor < 0.9 ? '↓ Behind last year' : 
-                             '→ On pace'}
-                          </p>
-                        </div>
-                      )}
-                      {forecast.capacityUtilization !== null && forecast.capacityUtilization !== undefined && (
-                        <div className="text-center">
-                          <p className="text-muted-foreground">Capacity Utilization</p>
-                          <p className="font-semibold">
-                            {forecast.capacityUtilization.toFixed(1)}%
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {forecast.capacityUtilization > 80 ? '⚠️ High utilization' : 
-                             forecast.capacityUtilization > 60 ? '✓ Good utilization' : 
-                             '○ Room to grow'}
-                          </p>
-                        </div>
-                      )}
+                  )}
+                  {forecast.compsetDemandIndex !== undefined && forecast.compsetDemandIndex > 0 && (
+                    <div className="text-center">
+                      <p className="text-muted-foreground flex items-center justify-center gap-1">
+                        <BarChart3 className="h-3 w-3" /> Market Demand
+                      </p>
+                      <p className={`font-semibold ${forecast.compsetDemandIndex > 60 ? 'text-green-600' : forecast.compsetDemandIndex < 40 ? 'text-red-600' : 'text-yellow-600'}`}>
+                        {forecast.compsetDemandIndex.toFixed(0)}%
+                      </p>
                     </div>
-                  </div>
-                ) : null}
+                  )}
+                </div>
               </div>
             )}
 
@@ -473,10 +420,10 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                       <th className="pb-2">Month</th>
                       <th className="pb-2 text-right">Actual</th>
                       <th className="pb-2 text-right">On Books</th>
-                      <th className="pb-2 text-right">Additional</th>
-                      <th className="pb-2 text-right">Total</th>
+                      <th className="pb-2 text-right">Forecast</th>
                       <th className="pb-2 text-center">Pace</th>
-                      <th className="pb-2 text-center">Window</th>
+                      <th className="pb-2 text-center">Prob %</th>
+                      <th className="pb-2 text-center">Demand</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -488,53 +435,40 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                       const today = new Date();
                       const monthStartThisRender = new Date(today.getFullYear(), today.getMonth(), 1);
                       const isPast = monthDate < monthStartThisRender && y <= today.getFullYear();
-                      const daysUntil = Math.floor((monthDate.getTime() - monthStartThisRender.getTime()) / (1000 * 60 * 60 * 24));
-                      const windowStatus = daysUntil < 0 ? 'closed' : daysUntil <= 90 ? 'closing' : 'open';
                       const pace = m.velocity_factor;
                       const actualForMonth = actualRevenue.monthlyActuals[m.month] || 0;
+                      const avgProb = m.avg_open_probability;
                       
                       return (
                         <tr key={m.month} className="border-b">
                           <td className="py-2 font-medium">{monthLabel}</td>
                           <td className="py-2 text-right">
-                            {isPast && actualForMonth > 0 ? (
-                              `$${Math.round(actualForMonth).toLocaleString()}`
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
+                            {isPast && actualForMonth > 0 ? `$${Math.round(actualForMonth).toLocaleString()}` : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-right">
-                            {!isPast ? (
-                              `$${Math.round(Number(m.revenue_on_books || 0)).toLocaleString()}`
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
-                          </td>
-                          <td className="py-2 text-right">
-                            {!isPast ? (
-                              `$${Math.round(Number(m.additional_forecast || 0)).toLocaleString()}`
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
+                            {!isPast ? `$${Math.round(Number(m.revenue_on_books || 0)).toLocaleString()}` : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-right font-semibold">
-                            {isPast && actualForMonth > 0 ? (
-                              `$${Math.round(actualForMonth).toLocaleString()}`
-                            ) : (
-                              `$${Math.round(Number(m.total_forecast_p50 || 0)).toLocaleString()}`
-                            )}
+                            {isPast && actualForMonth > 0 
+                              ? `$${Math.round(actualForMonth).toLocaleString()}`
+                              : `$${Math.round(Number(m.blended_forecast || m.total_forecast_p50 || 0)).toLocaleString()}`}
                           </td>
                           <td className="py-2 text-center">
                             {!isPast && pace !== undefined ? (
                               <span className={`text-xs font-medium ${pace > 1.1 ? 'text-green-600' : pace < 0.9 ? 'text-red-600' : 'text-muted-foreground'}`}>
                                 {(pace * 100).toFixed(0)}%
                               </span>
-                            ) : (
-                              <span className="text-muted-foreground">-</span>
-                            )}
+                            ) : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-center">
-                            {!isPast ? getWindowIcon(windowStatus) : <span className="text-muted-foreground text-xs">Past</span>}
+                            {!isPast && avgProb !== undefined && avgProb > 0 ? (
+                              <span className={`text-xs font-medium ${avgProb > 50 ? 'text-green-600' : avgProb < 30 ? 'text-red-600' : 'text-yellow-600'}`}>
+                                {avgProb.toFixed(0)}%
+                              </span>
+                            ) : <span className="text-muted-foreground">-</span>}
+                          </td>
+                          <td className="py-2 text-center">
+                            {!isPast ? getDemandBadge(m.compset_demand) : <span className="text-muted-foreground text-xs">-</span>}
                           </td>
                         </tr>
                       );
@@ -554,9 +488,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                   <div>
                     <p className="font-medium text-green-600">Drivers</p>
                     <ul className="list-disc list-inside text-muted-foreground">
-                      {forecast.insights.drivers.map((driver, i) => (
-                        <li key={i}>{driver}</li>
-                      ))}
+                      {forecast.insights.drivers.map((driver, i) => <li key={i}>{driver}</li>)}
                     </ul>
                   </div>
                 </div>
@@ -568,9 +500,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                   <div>
                     <p className="font-medium text-red-600">Risks</p>
                     <ul className="list-disc list-inside text-muted-foreground">
-                      {forecast.insights.risks.map((risk, i) => (
-                        <li key={i}>{risk}</li>
-                      ))}
+                      {forecast.insights.risks.map((risk, i) => <li key={i}>{risk}</li>)}
                     </ul>
                   </div>
                 </div>
@@ -582,9 +512,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                   <div>
                     <p className="font-medium text-yellow-600">Opportunities</p>
                     <ul className="list-disc list-inside text-muted-foreground">
-                      {forecast.insights.opportunities.map((opp, i) => (
-                        <li key={i}>{opp}</li>
-                      ))}
+                      {forecast.insights.opportunities.map((opp, i) => <li key={i}>{opp}</li>)}
                     </ul>
                   </div>
                 </div>
@@ -595,9 +523,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               <p className="text-xs text-muted-foreground">
                 Last updated: {forecast.generated_at ? formatDistanceToNow(new Date(forecast.generated_at), { addSuffix: true }) : 'Unknown'}
               </p>
-              <p className="text-xs text-muted-foreground">
-                Forecasts regenerate weekly
-              </p>
+              <p className="text-xs text-muted-foreground">Method: Velocity + Probability Blend</p>
             </div>
           </>
         )}
