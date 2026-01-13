@@ -434,7 +434,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                       const monthLabel = monthDate.toLocaleString('en-US', { month: 'short' });
                       const today = new Date();
                       const monthStartThisRender = new Date(today.getFullYear(), today.getMonth(), 1);
-                      const isPast = monthDate < monthStartThisRender && y <= today.getFullYear();
+                      const isPast = monthDate <= monthStartThisRender && y <= today.getFullYear();
                       const pace = m.velocity_factor;
                       const actualForMonth = actualRevenue.monthlyActuals[m.month] || 0;
                       const avgProb = m.avg_open_probability;
