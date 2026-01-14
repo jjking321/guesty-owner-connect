@@ -115,6 +115,25 @@ export default function GroupDetail() {
   ) || [];
   const listingIds = [...new Set([...directListingIds, ...subGroupListingIds])];
 
+  // Fetch composite status for listings
+  const { data: listingsWithComposite } = useQuery({
+    queryKey: ["listings-composite-status", listingIds],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("listings")
+        .select("id, is_composite")
+        .in("id", listingIds);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: listingIds.length > 0,
+  });
+
+  // Separate composite and non-composite listings for occupancy calculation
+  const compositeListingIds = listingsWithComposite?.filter(l => l.is_composite).map(l => l.id) || [];
+  const nonCompositeListingIds = listingsWithComposite?.filter(l => !l.is_composite).map(l => l.id) || [];
+
   // Get available listings for creating sub-groups (only direct members of this group)
   const { data: availableListings } = useQuery({
     queryKey: ["available-listings", directListingIds],
@@ -335,12 +354,28 @@ export default function GroupDetail() {
   const totalReservations = filteredReservations.length;
   const totalNights = reservationNights?.length || 0;
 
-  // Calculate overall occupancy
-  // Total possible nights = number of properties × number of days in date range
+  // Calculate overall occupancy (excluding composite listings from denominator)
   const daysInRange = differenceInDays(dateRange.to, dateRange.from) + 1;
-  const totalPossibleNights = listingIds.length * daysInRange;
+  
+  // Count direct nights for non-composite listings
+  const nonCompositeNights = reservationNights?.filter(
+    n => nonCompositeListingIds.includes(n.listing_id)
+  ).length || 0;
+  
+  // Count composite booking nights (each composite night = N unit-nights)
+  const compositeNights = reservationNights?.filter(
+    n => compositeListingIds.includes(n.listing_id)
+  ).length || 0;
+  const childUnitCount = nonCompositeListingIds.length;
+  const attributedNights = compositeNights * childUnitCount;
+  
+  // Total occupied = direct non-composite + attributed from composites
+  const totalOccupiedNights = nonCompositeNights + attributedNights;
+  
+  // Denominator uses only non-composite listings
+  const totalPossibleNights = nonCompositeListingIds.length * daysInRange || listingIds.length * daysInRange;
   const overallOccupancy = totalPossibleNights > 0 
-    ? (totalNights / totalPossibleNights) * 100 
+    ? (totalOccupiedNights / totalPossibleNights) * 100 
     : 0;
 
   // Check if data is incomplete (reservations exist but nights data is missing)

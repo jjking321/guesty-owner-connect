@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Database, BarChart3, AlertCircle, TrendingUp, ChevronUp, ChevronDown } from "lucide-react";
+import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Database, BarChart3, AlertCircle, TrendingUp, ChevronUp, ChevronDown, Building2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 
@@ -49,6 +50,21 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationMetadata, setGenerationMetadata] = useState<GenerationMetadata | null>(null);
   const { toast } = useToast();
+
+  // Check if listing is composite
+  const { data: listingDetails, isLoading: isLoadingDetails } = useQuery({
+    queryKey: ["listing-composite-status", listingId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("listings")
+        .select("id, nickname, is_composite")
+        .eq("id", listingId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!listingId,
+  });
 
   useEffect(() => {
     loadGoals();
@@ -329,8 +345,36 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || isLoadingDetails) {
     return <div>Loading goals...</div>;
+  }
+
+  // Show info card for composite listings
+  if (listingDetails?.is_composite) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-muted-foreground" />
+            <CardTitle>Composite Listing</CardTitle>
+          </div>
+          <CardDescription className="mt-2">
+            This is a composite ("Full") listing that represents all units booked together. 
+            Revenue from bookings on this listing is automatically distributed to individual units.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-muted/50 rounded-lg p-4 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground mb-2">Why are goals disabled?</p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>Goals are tracked at the individual unit level, not on composite listings</li>
+              <li>Revenue from Full bookings is attributed proportionally to each child unit</li>
+              <li>This prevents double-counting revenue in reports and forecasts</li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (

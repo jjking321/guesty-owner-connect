@@ -250,6 +250,45 @@ export type Database = {
           },
         ]
       }
+      composite_listing_children: {
+        Row: {
+          child_listing_id: string
+          composite_listing_id: string
+          created_at: string | null
+          id: string
+          revenue_share_weight: number | null
+        }
+        Insert: {
+          child_listing_id: string
+          composite_listing_id: string
+          created_at?: string | null
+          id?: string
+          revenue_share_weight?: number | null
+        }
+        Update: {
+          child_listing_id?: string
+          composite_listing_id?: string
+          created_at?: string | null
+          id?: string
+          revenue_share_weight?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "composite_listing_children_child_listing_id_fkey"
+            columns: ["child_listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "composite_listing_children_composite_listing_id_fkey"
+            columns: ["composite_listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       compset_templates: {
         Row: {
           airroi_listing_ids: string[]
@@ -547,6 +586,7 @@ export type Database = {
           guesty_account_id: string
           id: string
           imported_at: string
+          is_composite: boolean | null
           is_listed: boolean | null
           nickname: string | null
           owner_id: string | null
@@ -566,6 +606,7 @@ export type Database = {
           guesty_account_id: string
           id: string
           imported_at?: string
+          is_composite?: boolean | null
           is_listed?: boolean | null
           nickname?: string | null
           owner_id?: string | null
@@ -585,6 +626,7 @@ export type Database = {
           guesty_account_id?: string
           id?: string
           imported_at?: string
+          is_composite?: boolean | null
           is_listed?: boolean | null
           nickname?: string | null
           owner_id?: string | null
@@ -1508,6 +1550,14 @@ export type Database = {
         Returns: Json
       }
       cancel_sync_job: { Args: { job_id: string }; Returns: undefined }
+      get_composite_nights_for_listing: {
+        Args: { p_end_date: string; p_listing_id: string; p_start_date: string }
+        Returns: number
+      }
+      get_distributed_revenue: {
+        Args: { p_end_date: string; p_listing_id: string; p_start_date: string }
+        Returns: number
+      }
       get_user_owner_id: { Args: { _user_id: string }; Returns: string }
       get_ytd_revenue_by_listing: {
         Args: { end_date: string; target_year: number }
