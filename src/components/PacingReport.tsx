@@ -298,10 +298,12 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
       return Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     };
 
-    const currentTotalDays = getTotalDays(currentPeriod.start, currentPeriod.end);
-    const lastTotalDays = getTotalDays(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end);
+    // Account for multiple properties in groups - multiply days by number of listings
+    const propertyCount = effectiveListingIds.length || 1;
+    const currentTotalDays = getTotalDays(currentPeriod.start, currentPeriod.end) * propertyCount;
+    const lastTotalDays = getTotalDays(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end) * propertyCount;
 
-    // Standard Occupancy (guest nights / total days)
+    // Standard Occupancy (guest nights / total available nights across all properties)
     const currentOccupancy =
       currentTotalDays > 0 ? (currentNights / currentTotalDays) * 100 : 0;
     const lastOccupancy =
