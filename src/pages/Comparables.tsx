@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Trash2, Search, Database, TrendingUp, Calendar, Edit2, Check, X, Wand2, Settings2 } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Search, Database, TrendingUp, Calendar, Edit2, Check, X, Wand2, Settings2, Filter } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow, subDays } from "date-fns";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Link } from "react-router-dom";
@@ -81,6 +82,13 @@ export default function Comparables() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [setupSearchTerm, setSetupSearchTerm] = useState("");
   const [setupBedroomFilter, setSetupBedroomFilter] = useState<string>("all");
+  const [propertyFilters, setPropertyFilters] = useState({
+    active: true,
+    inactive: false,
+    listed: true,
+    unlisted: false,
+    archived: false,
+  });
 
   // Fetch all comparables with their associated listings
   const { data: comparables = [], isLoading: loadingComparables, refetch: refetchComparables } = useQuery({
@@ -102,8 +110,7 @@ export default function Comparables() {
     queryFn: async () => {
       const { data: listings, error: listingsError } = await supabase
         .from('listings')
-        .select('id, nickname, bedrooms, address')
-        .eq('archived', false)
+        .select('id, nickname, bedrooms, address, active, is_listed, archived')
         .order('nickname');
       
       if (listingsError) throw listingsError;
@@ -129,6 +136,9 @@ export default function Comparables() {
         nickname: l.nickname,
         bedrooms: l.bedrooms,
         city: (l.address as any)?.city || null,
+        active: l.active,
+        is_listed: l.is_listed,
+        archived: l.archived,
         cachedCount: countMap.get(l.id)?.cached || 0,
         selectedCount: countMap.get(l.id)?.selected || 0,
       })) || [];
@@ -191,6 +201,21 @@ export default function Comparables() {
 
   const metricsCounts = getFilterCounts('metrics_fetched_at');
   const futureRatesCounts = getFilterCounts('future_rates_fetched_at');
+
+  // Compute filtered listings for setup tab count
+  const filteredListingsForSetup = listingsForSetup.filter(l => {
+    const needsComps = l.selectedCount < 5;
+    const hasActiveFilter = propertyFilters.active || propertyFilters.inactive;
+    const activeMatch = !hasActiveFilter || 
+      (propertyFilters.active && l.active) || 
+      (propertyFilters.inactive && !l.active);
+    const hasListedFilter = propertyFilters.listed || propertyFilters.unlisted;
+    const listedMatch = !hasListedFilter || 
+      (propertyFilters.listed && l.is_listed) || 
+      (propertyFilters.unlisted && !l.is_listed);
+    const archivedMatch = propertyFilters.archived ? true : !l.archived;
+    return needsComps && activeMatch && listedMatch && archivedMatch;
+  });
 
   // Bulk fetch historical metrics
   const fetchHistoricalsMutation = useMutation({
@@ -338,7 +363,7 @@ export default function Comparables() {
           <TabsList>
             <TabsTrigger value="setup">
               <Settings2 className="h-4 w-4 mr-1" />
-              Setup ({listingsForSetup.filter(l => l.selectedCount < 5).length})
+              Setup ({filteredListingsForSetup.length})
             </TabsTrigger>
             <TabsTrigger value="selected">All Selected ({stats.totalSelected})</TabsTrigger>
             <TabsTrigger value="cached">All Cached ({stats.totalCached})</TabsTrigger>
@@ -370,6 +395,97 @@ export default function Comparables() {
                     ))}
                   </SelectContent>
                 </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="relative">
+                      <Filter className="mr-2 h-4 w-4" />
+                      Filters
+                      {(propertyFilters.active !== true || propertyFilters.inactive !== false ||
+                        propertyFilters.listed !== true || propertyFilters.unlisted !== false ||
+                        propertyFilters.archived !== false) && (
+                        <span className="absolute -top-1 -right-1 h-3 w-3 bg-primary rounded-full" />
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Status</p>
+                        <div className="space-y-1">
+                          <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <Checkbox
+                              checked={propertyFilters.active}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, active: !!checked }))
+                              }
+                            />
+                            Active
+                          </label>
+                          <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <Checkbox
+                              checked={propertyFilters.inactive}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, inactive: !!checked }))
+                              }
+                            />
+                            Inactive
+                          </label>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Listing</p>
+                        <div className="space-y-1">
+                          <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <Checkbox
+                              checked={propertyFilters.listed}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, listed: !!checked }))
+                              }
+                            />
+                            Listed
+                          </label>
+                          <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <Checkbox
+                              checked={propertyFilters.unlisted}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, unlisted: !!checked }))
+                              }
+                            />
+                            Unlisted
+                          </label>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Archive</p>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                          <Checkbox
+                            checked={propertyFilters.archived}
+                            onCheckedChange={(checked) =>
+                              setPropertyFilters((prev) => ({ ...prev, archived: !!checked }))
+                            }
+                          />
+                          Show Archived
+                        </label>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full"
+                        onClick={() =>
+                          setPropertyFilters({
+                            active: true,
+                            inactive: false,
+                            listed: true,
+                            unlisted: false,
+                            archived: false,
+                          })
+                        }
+                      >
+                        Reset to Defaults
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               <Button onClick={() => setWizardOpen(true)}>
                 <Wand2 className="h-4 w-4 mr-2" />
@@ -409,7 +525,21 @@ export default function Comparables() {
                                                l.city?.toLowerCase().includes(setupSearchTerm.toLowerCase());
                           const matchesBedroom = setupBedroomFilter === "all" || l.bedrooms?.toString() === setupBedroomFilter;
                           const needsComps = l.selectedCount < 5;
-                          return matchesSearch && matchesBedroom && needsComps;
+                          
+                          // Property status filters
+                          const hasActiveFilter = propertyFilters.active || propertyFilters.inactive;
+                          const activeMatch = !hasActiveFilter || 
+                            (propertyFilters.active && l.active) || 
+                            (propertyFilters.inactive && !l.active);
+                          
+                          const hasListedFilter = propertyFilters.listed || propertyFilters.unlisted;
+                          const listedMatch = !hasListedFilter || 
+                            (propertyFilters.listed && l.is_listed) || 
+                            (propertyFilters.unlisted && !l.is_listed);
+                          
+                          const archivedMatch = propertyFilters.archived ? true : !l.archived;
+                          
+                          return matchesSearch && matchesBedroom && needsComps && activeMatch && listedMatch && archivedMatch;
                         })
                         .map((listing) => (
                           <TableRow key={listing.id}>
