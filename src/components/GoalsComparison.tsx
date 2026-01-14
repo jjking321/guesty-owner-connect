@@ -14,6 +14,7 @@ interface GoalsComparisonProps {
   reservations: any[];
   goals?: any[];
   forecasts?: any[];
+  propertyCount?: number;
 }
 
 interface GoalData {
@@ -47,7 +48,7 @@ interface CompsetMonthlyAverage {
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function GoalsComparison({ listingId, reservations, goals: externalGoals, forecasts: externalForecasts }: GoalsComparisonProps) {
+export function GoalsComparison({ listingId, reservations, goals: externalGoals, forecasts: externalForecasts, propertyCount = 1 }: GoalsComparisonProps) {
   const [activeMetric, setActiveMetric] = useState<'revenue' | 'occupancy' | 'revpar' | 'adr'>('revenue');
   const [activeTab, setActiveTab] = useState<'monthly' | 'cumulative'>('monthly');
   const [monthlyData, setMonthlyData] = useState<GoalData[]>([]);
@@ -141,17 +142,21 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       // Get compset average for this month (format: "2024-01")
       const compsetAvg = compsetOccupancyMap.get(currentKey);
       
+      // For groups (propertyCount > 1), divide by total available nights across all properties
+      const currentTotalAvailable = currentData.totalDays * propertyCount;
+      const lastTotalAvailable = lastData.totalDays * propertyCount;
+      
       result.push({
         month: monthName,
         monthKey: currentKey,
-        currentYear: (currentData.nightsBooked / currentData.totalDays) * 100,
-        lastYear: (lastData.nightsBooked / lastData.totalDays) * 100,
+        currentYear: currentTotalAvailable > 0 ? (currentData.nightsBooked / currentTotalAvailable) * 100 : 0,
+        lastYear: lastTotalAvailable > 0 ? (lastData.nightsBooked / lastTotalAvailable) * 100 : 0,
         compsetAverage: compsetAvg !== undefined ? compsetAvg * 100 : undefined, // Convert from decimal to percentage
       });
     }
 
     return result;
-  }, [reservations, year, compsetMonthlyAverages]);
+  }, [reservations, year, compsetMonthlyAverages, propertyCount]);
 
   // Calculate year-over-year RevPAR data
   const revparData = useMemo((): TrendDataPoint[] => {
@@ -225,12 +230,16 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       const lastData = lastYearData.get(lastKey)!;
       
       // Calculate ADR and Occupancy, then RevPAR = ADR × Occupancy
+      // For groups (propertyCount > 1), divide by total available nights across all properties
+      const currentTotalAvailable = currentData.totalDays * propertyCount;
+      const lastTotalAvailable = lastData.totalDays * propertyCount;
+      
       const currentADR = currentData.nightsBooked > 0 ? currentData.revenue / currentData.nightsBooked : 0;
-      const currentOccupancy = (currentData.nightsBooked / currentData.totalDays) * 100;
+      const currentOccupancy = currentTotalAvailable > 0 ? (currentData.nightsBooked / currentTotalAvailable) * 100 : 0;
       const currentRevPAR = currentADR * (currentOccupancy / 100);
       
       const lastADR = lastData.nightsBooked > 0 ? lastData.revenue / lastData.nightsBooked : 0;
-      const lastOccupancy = (lastData.nightsBooked / lastData.totalDays) * 100;
+      const lastOccupancy = lastTotalAvailable > 0 ? (lastData.nightsBooked / lastTotalAvailable) * 100 : 0;
       const lastRevPAR = lastADR * (lastOccupancy / 100);
       
       // Get compset average for this month
@@ -246,7 +255,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     }
 
     return result;
-  }, [reservations, year, compsetMonthlyAverages]);
+  }, [reservations, year, compsetMonthlyAverages, propertyCount]);
 
   // Calculate year-over-year ADR data - uses calendar asking rates for future months
   const adrData = useMemo((): TrendDataPoint[] => {

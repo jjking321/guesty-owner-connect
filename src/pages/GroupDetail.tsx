@@ -942,6 +942,7 @@ export default function GroupDetail() {
               reservations={reservations || []}
               goals={goals || []}
               forecasts={forecasts || []}
+              propertyCount={listingIds.length}
             />
           </TabsContent>
 
