@@ -50,14 +50,11 @@ export function PacingReport({ reservations }: PacingReportProps) {
   const getPeriodBoundaries = (year: number): { start: Date; end: Date } => {
     switch (periodType) {
       case 'ytd':
-        // For current year: Jan 1 through today
-        // For last year: Jan 1 through same day last year
-        const ytdEnd = year === currentYear 
-          ? currentDate 
-          : new Date(year, currentMonth, currentDate.getDate());
+        // Full year boundaries for booking pace comparison
+        // Compare all bookings for the full year, filtered by when they were created
         return {
-          start: new Date(year, 0, 1), // Jan 1
-          end: ytdEnd,
+          start: new Date(year, 0, 1),    // Jan 1
+          end: new Date(year, 11, 31),    // Dec 31
         };
       case 'monthly':
         return {
@@ -137,12 +134,13 @@ export function PacingReport({ reservations }: PacingReportProps) {
       };
     }
 
-    // For monthly mode, use booking pace logic (filter by when bookings were created)
-    // This compares: "Feb 2026 bookings as of today" vs "Feb 2025 bookings as of same date last year"
+    // For both YTD and monthly modes, use booking pace logic (filter by when bookings were created)
+    // YTD: "Full year 2026 bookings as of today" vs "Full year 2025 bookings as of same date last year"
+    // Monthly: "Feb 2026 bookings as of today" vs "Feb 2025 bookings as of same date last year"
     let currentCutoff: Date | undefined;
     let lastYearCutoff: Date | undefined;
     
-    if (periodType === 'monthly') {
+    if (periodType === 'ytd' || periodType === 'monthly') {
       currentCutoff = currentDate;
       lastYearCutoff = new Date(currentYear - 1, currentMonth, currentDate.getDate());
     }
@@ -212,7 +210,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
   const getPeriodDescription = (): string => {
     switch (periodType) {
       case 'ytd':
-        return `Jan 1 - ${format(currentDate, 'MMM d')}, ${currentYear} vs same period ${currentYear - 1}`;
+        return `Full Year ${currentYear} bookings as of ${format(currentDate, 'MMM d')} vs same point ${currentYear - 1}`;
       case 'monthly':
         const monthDate = new Date(selectedMonthYear, selectedMonth, 1);
         return `${format(monthDate, 'MMMM yyyy')} bookings as of ${format(currentDate, 'MMM d')} vs same point last year`;
