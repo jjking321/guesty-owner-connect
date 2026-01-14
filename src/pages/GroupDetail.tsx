@@ -30,7 +30,7 @@ import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
 import { PropertiesTable } from "@/components/PropertiesTable";
-import { format, startOfYear } from "date-fns";
+import { format, startOfYear, differenceInDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
@@ -337,7 +337,7 @@ export default function GroupDetail() {
 
   // Calculate overall occupancy
   // Total possible nights = number of properties × number of days in date range
-  const daysInRange = Math.ceil((dateRange.to.getTime() - dateRange.from.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  const daysInRange = differenceInDays(dateRange.to, dateRange.from) + 1;
   const totalPossibleNights = listingIds.length * daysInRange;
   const overallOccupancy = totalPossibleNights > 0 
     ? (totalNights / totalPossibleNights) * 100 
