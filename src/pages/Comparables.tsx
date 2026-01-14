@@ -9,12 +9,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Loader2, RefreshCw, Trash2, Search, Database, TrendingUp, Calendar, Edit2, Check, X } from "lucide-react";
+import { Loader2, RefreshCw, Trash2, Search, Database, TrendingUp, Calendar, Edit2, Check, X, Wand2, Settings2 } from "lucide-react";
 import { format, formatDistanceToNow, subDays } from "date-fns";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Link } from "react-router-dom";
-
+import { CompSelectionWizard } from "@/components/CompSelectionWizard";
 interface ComparableWithListing {
   id: string;
   listing_id: string;
@@ -77,6 +78,9 @@ export default function Comparables() {
   const [editDescription, setEditDescription] = useState("");
   const [metricsFilter, setMetricsFilter] = useState<DateFilter>("all");
   const [futureRatesFilter, setFutureRatesFilter] = useState<DateFilter>("all");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [setupSearchTerm, setSetupSearchTerm] = useState("");
+  const [setupBedroomFilter, setSetupBedroomFilter] = useState<string>("all");
 
   // Fetch all comparables with their associated listings
   const { data: comparables = [], isLoading: loadingComparables, refetch: refetchComparables } = useQuery({
