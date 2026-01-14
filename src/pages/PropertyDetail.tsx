@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,11 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info } from "lucide-react";
+import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info, ChevronDown, ChevronRight } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths, isWithinInterval, startOfDay, endOfDay, startOfYear } from "date-fns";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, addMonths, isSameMonth, subMonths, isWithinInterval, startOfDay, endOfDay, startOfYear } from "date-fns";
 import { formatDateDisplay, parseLocalDate } from "@/lib/utils";
 import { StripeDateRangePicker, DateRange } from "@/components/StripeDateRangePicker";
 
@@ -56,6 +57,7 @@ export default function PropertyDetail() {
   });
   const [showAdjustedOccupancy, setShowAdjustedOccupancy] = useState(false);
   const [showAdjustedRevPAR, setShowAdjustedRevPAR] = useState(false);
+  const [isMonthlyTableOpen, setIsMonthlyTableOpen] = useState(false);
 
   // Fetch capacity calendar for blocked dates
   const { data: capacityCalendar } = useQuery({
@@ -450,6 +452,47 @@ export default function PropertyDetail() {
 
   const metrics = calculateMetrics(metricsDateRange);
 
+  // Calculate monthly metrics for the table
+  const monthlyMetrics = useMemo(() => {
+    const data: Array<{
+      month: string;
+      monthStart: Date;
+      revenue: number;
+      nights: number;
+      occupancy: number;
+      adr: number;
+      revpar: number;
+    }> = [];
+
+    if (!metricsDateRange.from || !metricsDateRange.to) return data;
+
+    // Iterate through each month in the date range
+    let currentMonth = startOfMonth(metricsDateRange.from);
+    const endMonth = startOfMonth(metricsDateRange.to);
+
+    while (currentMonth <= endMonth) {
+      const monthStart = startOfMonth(currentMonth);
+      const monthEnd = endOfMonth(currentMonth);
+      
+      // Calculate metrics for this specific month
+      const monthMetrics = calculateMetrics({ from: monthStart, to: monthEnd });
+      
+      data.push({
+        month: format(currentMonth, 'MMM yyyy'),
+        monthStart: currentMonth,
+        revenue: monthMetrics.totalRevenue,
+        nights: monthMetrics.totalNights,
+        occupancy: monthMetrics.overallOccupancy,
+        adr: monthMetrics.averageADR,
+        revpar: monthMetrics.revPAR,
+      });
+
+      currentMonth = addMonths(currentMonth, 1);
+    }
+
+    return data;
+  }, [reservations, metricsDateRange, capacityCalendar]);
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -773,6 +816,58 @@ export default function PropertyDetail() {
                   </CardContent>
                 </Card>
               </div>
+
+              {/* Monthly Performance Table */}
+              <Collapsible open={isMonthlyTableOpen} onOpenChange={setIsMonthlyTableOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" className="flex items-center gap-2 w-full justify-start p-0 h-auto hover:bg-transparent">
+                    {isMonthlyTableOpen ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                    <span className="text-sm font-medium">Monthly Breakdown</span>
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-4">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Month</TableHead>
+                              <TableHead className="text-right">Revenue</TableHead>
+                              <TableHead className="text-right">Nights</TableHead>
+                              <TableHead className="text-right">Occupancy</TableHead>
+                              <TableHead className="text-right">ADR</TableHead>
+                              <TableHead className="text-right">RevPAR</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {monthlyMetrics.map((row) => (
+                              <TableRow key={row.month}>
+                                <TableCell className="font-medium">{row.month}</TableCell>
+                                <TableCell className="text-right">
+                                  ${row.revenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                </TableCell>
+                                <TableCell className="text-right">{row.nights}</TableCell>
+                                <TableCell className="text-right">{row.occupancy.toFixed(1)}%</TableCell>
+                                <TableCell className="text-right">
+                                  ${row.adr.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  ${row.revpar.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </CollapsibleContent>
+              </Collapsible>
             </div>
 
             {/* Pacing Report - YTD metrics */}
