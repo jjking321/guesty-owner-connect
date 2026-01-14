@@ -86,7 +86,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
       if (r.source === "owner") return;
 
       // If bookedAsOf is provided, only include reservations created before that date
-      if (bookedAsOf && r.created_at_guesty) {
+      // IMPORTANT: Skip reservations without created_at_guesty when using booking pace mode
+      // This ensures we're comparing apples-to-apples (only reservations we know the booking date for)
+      if (bookedAsOf) {
+        if (!r.created_at_guesty) {
+          return; // Skip - we don't know when this was booked, can't use for pace comparison
+        }
         const createdAt = new Date(r.created_at_guesty);
         if (createdAt > bookedAsOf) {
           return; // Skip - this reservation was booked after the cutoff
