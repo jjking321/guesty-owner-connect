@@ -11,8 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Loader2, Wand2, Copy, FileStack, ChevronRight, ChevronLeft, Search, CheckCircle2, AlertCircle } from "lucide-react";
+import { Loader2, Wand2, Copy, FileStack, ChevronRight, ChevronLeft, Search, CheckCircle2, AlertCircle, Filter } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface PropertyForSetup {
   id: string;
@@ -21,6 +22,9 @@ interface PropertyForSetup {
   city: string | null;
   cachedCount: number;
   selectedCount: number;
+  active?: boolean;
+  is_listed?: boolean;
+  archived?: boolean;
 }
 
 interface Template {
@@ -58,17 +62,44 @@ export function CompSelectionWizard({
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionProgress, setExecutionProgress] = useState(0);
   const [executionResult, setExecutionResult] = useState<any>(null);
+  const [propertyFilters, setPropertyFilters] = useState({
+    active: true,
+    inactive: false,
+    listed: true,
+    unlisted: false,
+    archived: false,
+  });
 
   // Get unique bedroom counts for filter
   const bedroomCounts = [...new Set(properties.map(p => p.bedrooms).filter(b => b !== null))].sort();
   const cities = [...new Set(properties.map(p => p.city).filter(c => c !== null))].sort();
+
+  // Calculate active filter count for badge
+  const defaultFilters = { active: true, inactive: false, listed: true, unlisted: false, archived: false };
+  const activeFilterCount = Object.entries(propertyFilters).filter(
+    ([key, value]) => value !== defaultFilters[key as keyof typeof defaultFilters]
+  ).length;
 
   // Filter properties
   const filteredProperties = properties.filter(p => {
     const matchesSearch = p.nickname?.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          p.city?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesBedroom = bedroomFilter === "all" || p.bedrooms?.toString() === bedroomFilter;
-    return matchesSearch && matchesBedroom;
+    
+    // Property status filters
+    const hasActiveFilter = propertyFilters.active || propertyFilters.inactive;
+    const activeMatch = !hasActiveFilter || 
+      (propertyFilters.active && p.active) || 
+      (propertyFilters.inactive && !p.active);
+    
+    const hasListedFilter = propertyFilters.listed || propertyFilters.unlisted;
+    const listedMatch = !hasListedFilter || 
+      (propertyFilters.listed && p.is_listed) || 
+      (propertyFilters.unlisted && !p.is_listed);
+    
+    const archivedMatch = propertyFilters.archived ? true : !p.archived;
+    
+    return matchesSearch && matchesBedroom && activeMatch && listedMatch && archivedMatch;
   });
 
   // Toggle property selection
@@ -186,6 +217,23 @@ export function CompSelectionWizard({
     setIsExecuting(false);
     setExecutionProgress(0);
     setExecutionResult(null);
+    setPropertyFilters({
+      active: true,
+      inactive: false,
+      listed: true,
+      unlisted: false,
+      archived: false,
+    });
+  };
+
+  const resetPropertyFilters = () => {
+    setPropertyFilters({
+      active: true,
+      inactive: false,
+      listed: true,
+      unlisted: false,
+      archived: false,
+    });
   };
 
   const handleClose = () => {
@@ -253,6 +301,93 @@ export function CompSelectionWizard({
                     ))}
                   </SelectContent>
                 </Select>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="relative">
+                      <Filter className="mr-2 h-4 w-4" />
+                      Filters
+                      {activeFilterCount > 0 && (
+                        <Badge className="ml-2 h-5 min-w-[20px] rounded-full p-0 text-xs flex items-center justify-center">
+                          {activeFilterCount}
+                        </Badge>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <h4 className="font-medium text-sm">Status</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="wizard-active"
+                              checked={propertyFilters.active}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, active: !!checked }))
+                              }
+                            />
+                            <label htmlFor="wizard-active" className="text-sm cursor-pointer">Active</label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="wizard-inactive"
+                              checked={propertyFilters.inactive}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, inactive: !!checked }))
+                              }
+                            />
+                            <label htmlFor="wizard-inactive" className="text-sm cursor-pointer">Inactive</label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <h4 className="font-medium text-sm">Listing</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="wizard-listed"
+                              checked={propertyFilters.listed}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, listed: !!checked }))
+                              }
+                            />
+                            <label htmlFor="wizard-listed" className="text-sm cursor-pointer">Listed</label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="wizard-unlisted"
+                              checked={propertyFilters.unlisted}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters((prev) => ({ ...prev, unlisted: !!checked }))
+                              }
+                            />
+                            <label htmlFor="wizard-unlisted" className="text-sm cursor-pointer">Unlisted</label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <h4 className="font-medium text-sm">Archive</h4>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="wizard-archived"
+                            checked={propertyFilters.archived}
+                            onCheckedChange={(checked) =>
+                              setPropertyFilters((prev) => ({ ...prev, archived: !!checked }))
+                            }
+                          />
+                          <label htmlFor="wizard-archived" className="text-sm cursor-pointer">Show Archived</label>
+                        </div>
+                      </div>
+
+                      <Button variant="outline" size="sm" className="w-full" onClick={resetPropertyFilters}>
+                        Reset to Defaults
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="flex items-center justify-between">
