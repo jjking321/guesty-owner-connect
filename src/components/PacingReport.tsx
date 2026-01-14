@@ -1,10 +1,20 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target, ChevronDown, ChevronRight } from "lucide-react";
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -45,6 +55,7 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
   const [periodType, setPeriodType] = useState<PeriodType>('ytd');
   const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
   const [selectedMonthYear, setSelectedMonthYear] = useState<number>(currentYear);
+  const [isTableOpen, setIsTableOpen] = useState(false);
 
   // Resolve listing IDs for queries
   const effectiveListingIds = listingId ? [listingId] : (listingIds || []);
@@ -348,6 +359,74 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
 
   const metrics = calculatePacingMetrics();
 
+  // Calculate monthly data for the table
+  const monthlyData = useMemo(() => {
+    const data: Array<{
+      month: string;
+      monthIndex: number;
+      year: number;
+      currentRevenue: number;
+      lastRevenue: number;
+      revenueChange: number;
+      currentNights: number;
+      lastNights: number;
+      nightsChange: number;
+      currentOccupancy: number;
+      lastOccupancy: number;
+      occupancyChange: number;
+      currentRevPAR: number;
+      lastRevPAR: number;
+      revPARChange: number;
+    }> = [];
+
+    // Generate data for 12 months from current month
+    for (let i = 0; i < 12; i++) {
+      const monthDate = new Date(currentYear, currentMonth + i, 1);
+      const year = monthDate.getFullYear();
+      const month = monthDate.getMonth();
+      
+      const periodStart = startOfMonth(monthDate);
+      const periodEnd = endOfMonth(monthDate);
+      const lastYearPeriodStart = new Date(year - 1, month, 1);
+      const lastYearPeriodEnd = endOfMonth(lastYearPeriodStart);
+
+      const currentCutoff = currentDate;
+      const lastYearCutoff = new Date(currentYear - 1, currentMonth, currentDate.getDate());
+
+      const currentData = calculateBookedRevenue(periodStart, periodEnd, reservations, currentCutoff);
+      const lastData = calculateBookedRevenue(lastYearPeriodStart, lastYearPeriodEnd, reservations, lastYearCutoff);
+
+      const totalDaysCurrent = getDaysInMonth(monthDate);
+      const totalDaysLast = getDaysInMonth(lastYearPeriodStart);
+
+      const currentOccupancy = totalDaysCurrent > 0 ? (currentData.nights / totalDaysCurrent) * 100 : 0;
+      const lastOccupancy = totalDaysLast > 0 ? (lastData.nights / totalDaysLast) * 100 : 0;
+
+      const currentRevPAR = totalDaysCurrent > 0 ? currentData.revenue / totalDaysCurrent : 0;
+      const lastRevPAR = totalDaysLast > 0 ? lastData.revenue / totalDaysLast : 0;
+
+      data.push({
+        month: format(monthDate, 'MMM yyyy'),
+        monthIndex: month,
+        year: year,
+        currentRevenue: currentData.revenue,
+        lastRevenue: lastData.revenue,
+        revenueChange: lastData.revenue > 0 ? ((currentData.revenue - lastData.revenue) / lastData.revenue) * 100 : 0,
+        currentNights: currentData.nights,
+        lastNights: lastData.nights,
+        nightsChange: lastData.nights > 0 ? ((currentData.nights - lastData.nights) / lastData.nights) * 100 : 0,
+        currentOccupancy,
+        lastOccupancy,
+        occupancyChange: lastOccupancy > 0 ? ((currentOccupancy - lastOccupancy) / lastOccupancy) * 100 : 0,
+        currentRevPAR,
+        lastRevPAR,
+        revPARChange: lastRevPAR > 0 ? ((currentRevPAR - lastRevPAR) / lastRevPAR) * 100 : 0,
+      });
+    }
+
+    return data;
+  }, [reservations, currentYear, currentMonth, currentDate]);
+
   // Get period description for display
   const getPeriodDescription = (): string => {
     switch (periodType) {
@@ -553,6 +632,75 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
           format={(val) => val.toFixed(0)}
         />
       </div>
+
+      {/* Monthly Data Table - Only visible in monthly mode */}
+      {periodType === 'monthly' && (
+        <Collapsible open={isTableOpen} onOpenChange={setIsTableOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="flex items-center gap-2 w-full justify-start p-0 h-auto hover:bg-transparent">
+              {isTableOpen ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+              <span className="text-sm font-medium">Monthly Breakdown</span>
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Month</TableHead>
+                        <TableHead className="text-right">Revenue</TableHead>
+                        <TableHead className="text-right">vs LY</TableHead>
+                        <TableHead className="text-right">Nights</TableHead>
+                        <TableHead className="text-right">vs LY</TableHead>
+                        <TableHead className="text-right">Occupancy</TableHead>
+                        <TableHead className="text-right">vs LY</TableHead>
+                        <TableHead className="text-right">RevPAR</TableHead>
+                        <TableHead className="text-right">vs LY</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {monthlyData.map((row) => (
+                        <TableRow 
+                          key={row.month}
+                          className={row.month === format(new Date(selectedMonthYear, selectedMonth, 1), 'MMM yyyy') ? 'bg-muted/50' : ''}
+                        >
+                          <TableCell className="font-medium">{row.month}</TableCell>
+                          <TableCell className="text-right">
+                            ${row.currentRevenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                          </TableCell>
+                          <TableCell className={`text-right ${row.revenueChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                            {row.revenueChange >= 0 ? '+' : ''}{row.revenueChange.toFixed(1)}%
+                          </TableCell>
+                          <TableCell className="text-right">{row.currentNights}</TableCell>
+                          <TableCell className={`text-right ${row.nightsChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                            {row.nightsChange >= 0 ? '+' : ''}{row.nightsChange.toFixed(1)}%
+                          </TableCell>
+                          <TableCell className="text-right">{row.currentOccupancy.toFixed(1)}%</TableCell>
+                          <TableCell className={`text-right ${row.occupancyChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                            {row.occupancyChange >= 0 ? '+' : ''}{row.occupancyChange.toFixed(1)}%
+                          </TableCell>
+                          <TableCell className="text-right">
+                            ${row.currentRevPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </TableCell>
+                          <TableCell className={`text-right ${row.revPARChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                            {row.revPARChange >= 0 ? '+' : ''}{row.revPARChange.toFixed(1)}%
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 }
