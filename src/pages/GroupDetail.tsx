@@ -1062,7 +1062,7 @@ export default function GroupDetail() {
 
           <TabsContent value="pacing">
             {reservations && reservations.length > 0 ? (
-              <PacingReport reservations={reservations} />
+              <PacingReport reservations={reservations} listingIds={listingIds} />
             ) : (
               <Card>
                 <CardContent className="text-center py-12">
