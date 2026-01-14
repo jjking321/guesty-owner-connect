@@ -576,6 +576,7 @@ export default function OwnerDetail() {
               reservations={reservations || []}
               goals={goals || []}
               forecasts={forecasts || []}
+              propertyCount={listingIds.length}
             />
           </TabsContent>
 
