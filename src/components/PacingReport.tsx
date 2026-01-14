@@ -23,7 +23,7 @@ interface PacingMetrics {
   nights: { current: number; last: number; change: number };
 }
 
-type PeriodType = 'ytd' | 'mtd' | 'monthly';
+type PeriodType = 'ytd' | 'monthly';
 
 export function PacingReport({ reservations }: PacingReportProps) {
   const currentDate = new Date();
@@ -58,11 +58,6 @@ export function PacingReport({ reservations }: PacingReportProps) {
         return {
           start: new Date(year, 0, 1), // Jan 1
           end: ytdEnd,
-        };
-      case 'mtd':
-        return {
-          start: new Date(year, currentMonth, 1),
-          end: new Date(year, currentMonth, currentDate.getDate()),
         };
       case 'monthly':
         return {
@@ -218,8 +213,6 @@ export function PacingReport({ reservations }: PacingReportProps) {
     switch (periodType) {
       case 'ytd':
         return `Jan 1 - ${format(currentDate, 'MMM d')}, ${currentYear} vs same period ${currentYear - 1}`;
-      case 'mtd':
-        return `${format(currentDate, 'MMMM')} 1-${currentDate.getDate()}, ${currentYear} vs ${currentYear - 1}`;
       case 'monthly':
         const monthDate = new Date(selectedMonthYear, selectedMonth, 1);
         return `${format(monthDate, 'MMMM yyyy')} bookings as of ${format(currentDate, 'MMM d')} vs same point last year`;
@@ -231,8 +224,6 @@ export function PacingReport({ reservations }: PacingReportProps) {
   const getComparisonLabel = (): { current: string; previous: string } => {
     switch (periodType) {
       case 'ytd':
-        return { current: String(currentYear), previous: String(currentYear - 1) };
-      case 'mtd':
         return { current: String(currentYear), previous: String(currentYear - 1) };
       case 'monthly':
         return {
@@ -317,9 +308,6 @@ export function PacingReport({ reservations }: PacingReportProps) {
           >
             <ToggleGroupItem value="ytd" className="text-xs px-3">
               YTD
-            </ToggleGroupItem>
-            <ToggleGroupItem value="mtd" className="text-xs px-3">
-              MTD
             </ToggleGroupItem>
             <ToggleGroupItem value="monthly" className="text-xs px-3">
               Monthly
