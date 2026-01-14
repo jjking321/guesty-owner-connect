@@ -113,7 +113,7 @@ export default function GroupDetail() {
   const subGroupListingIds = subGroups?.flatMap((sg: any) => 
     sg.property_group_members.map((m: any) => m.listing_id)
   ) || [];
-  const listingIds = [...directListingIds, ...subGroupListingIds];
+  const listingIds = [...new Set([...directListingIds, ...subGroupListingIds])];
 
   // Get available listings for creating sub-groups (only direct members of this group)
   const { data: availableListings } = useQuery({
@@ -902,7 +902,7 @@ export default function GroupDetail() {
         <div className="grid gap-4 md:grid-cols-5">
           <MetricCard
             title="Total Revenue"
-            value={`$${totalRevenue.toLocaleString()}`}
+            value={`$${Math.round(totalRevenue).toLocaleString()}`}
             icon={DollarSign}
           />
           <MetricCard
