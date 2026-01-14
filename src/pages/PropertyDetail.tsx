@@ -48,7 +48,7 @@ export default function PropertyDetail() {
   const [revenueForecast, setRevenueForecast] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [metricsDateRange, setMetricsDateRange] = useState<DateRange>({
-    from: startOfYear(new Date()),
+    from: subMonths(new Date(), 12),
     to: new Date(),
   });
 
