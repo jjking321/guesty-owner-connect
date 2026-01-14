@@ -6,7 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent } from "lucide-react";
+import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, isSameMonth, subMonths, isWithinInterval, startOfDay, endOfDay, startOfYear } from "date-fns";
 import { formatDateDisplay, parseLocalDate } from "@/lib/utils";
 import { StripeDateRangePicker, DateRange } from "@/components/StripeDateRangePicker";
@@ -50,6 +53,23 @@ export default function PropertyDetail() {
   const [metricsDateRange, setMetricsDateRange] = useState<DateRange>({
     from: subMonths(new Date(), 12),
     to: new Date(),
+  });
+  const [showAdjustedOccupancy, setShowAdjustedOccupancy] = useState(false);
+
+  // Fetch capacity calendar for blocked dates
+  const { data: capacityCalendar } = useQuery({
+    queryKey: ['capacity-calendar-blocks', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('capacity_calendar')
+        .select('date, status, block_reason')
+        .eq('listing_id', id!)
+        .or('block_reason.eq.blocked,status.eq.unavailable');
+      
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!id
   });
 
   useEffect(() => {
@@ -285,6 +305,10 @@ export default function PropertyDetail() {
       averageGuestsPerReservation: 0,
       overallOccupancy: 0,
       revPAR: 0,
+      ownerNights: 0,
+      blockedNights: 0,
+      bookableDays: 0,
+      adjustedOccupancy: 0,
     };
 
     if (reservations.length === 0) {
@@ -331,15 +355,29 @@ export default function PropertyDetail() {
     // Calculate revenue using night-based allocation for nights in range only
     let totalRevenue = 0;
     let totalNights = 0;
+    let ownerNights = 0;
     let reservationsWithNightsInRange = 0;
 
     filteredReservations.forEach(r => {
-      if (!r.fare_accommodation_adjusted || !r.nights_count || r.nights_count === 0) return;
-      
-      const revenuePerNight = parseFloat(r.fare_accommodation_adjusted) / r.nights_count;
       const checkIn = parseLocalDate(r.check_in);
       const checkOut = parseLocalDate(r.check_out);
       if (!checkIn || !checkOut) return;
+
+      // Count owner nights
+      if (r.source === 'owner') {
+        let currentNight = new Date(checkIn);
+        while (currentNight < checkOut) {
+          if (isNightInRange(currentNight)) {
+            ownerNights += 1;
+          }
+          currentNight.setDate(currentNight.getDate() + 1);
+        }
+        return; // Don't count owner reservations in revenue/nights
+      }
+
+      if (!r.fare_accommodation_adjusted || !r.nights_count || r.nights_count === 0) return;
+      
+      const revenuePerNight = parseFloat(r.fare_accommodation_adjusted) / r.nights_count;
       
       let nightsInRange = 0;
       let currentNight = new Date(checkIn);
@@ -357,10 +395,19 @@ export default function PropertyDetail() {
       }
     });
 
-    const totalGuests = filteredReservations.reduce((sum, r) => sum + (r.guests_count || 0), 0);
+    // Calculate blocked nights from capacity_calendar
+    const blockedNights = (capacityCalendar || []).filter(day => {
+      const date = parseLocalDate(day.date);
+      if (!date) return false;
+      return isNightInRange(date);
+    }).length;
+
+    const totalGuests = filteredReservations.filter(r => r.source !== 'owner').reduce((sum, r) => sum + (r.guests_count || 0), 0);
     const averageADR = totalNights > 0 ? totalRevenue / totalNights : 0;
     const averageNightsPerReservation = reservationsWithNightsInRange > 0 ? totalNights / reservationsWithNightsInRange : 0;
-    const averageGuestsPerReservation = filteredReservations.length > 0 ? totalGuests / filteredReservations.length : 0;
+    const averageGuestsPerReservation = filteredReservations.filter(r => r.source !== 'owner').length > 0 
+      ? totalGuests / filteredReservations.filter(r => r.source !== 'owner').length 
+      : 0;
 
     // Calculate occupancy for the date range
     let totalDaysInRange = 0;
@@ -373,11 +420,15 @@ export default function PropertyDetail() {
     
     const overallOccupancy = totalDaysInRange > 0 ? (totalNights / totalDaysInRange) * 100 : 0;
 
+    // Calculate adjusted occupancy (excluding owner nights and blocked days)
+    const bookableDays = Math.max(0, totalDaysInRange - ownerNights - blockedNights);
+    const adjustedOccupancy = bookableDays > 0 ? (totalNights / bookableDays) * 100 : 0;
+
     // Calculate RevPAR = ADR × Occupancy Rate
     const revPAR = averageADR * (overallOccupancy / 100);
 
     return {
-      totalReservations: filteredReservations.length,
+      totalReservations: filteredReservations.filter(r => r.source !== 'owner').length,
       totalRevenue,
       totalNights,
       averageADR,
@@ -386,6 +437,10 @@ export default function PropertyDetail() {
       averageGuestsPerReservation,
       overallOccupancy,
       revPAR,
+      ownerNights,
+      blockedNights,
+      bookableDays,
+      adjustedOccupancy,
     };
   };
 
@@ -600,16 +655,44 @@ export default function PropertyDetail() {
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium flex items-center gap-2">
-                      <Percent className="h-4 w-4 text-muted-foreground" />
-                      Occupancy Rate
+                    <CardTitle className="text-sm font-medium flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Percent className="h-4 w-4 text-muted-foreground" />
+                        Occupancy Rate
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="adjusted-occupancy" className="text-xs font-normal text-muted-foreground cursor-pointer">
+                          Adjusted
+                        </Label>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3 w-3 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs">
+                              <p>Adjusted occupancy excludes owner stays ({metrics.ownerNights} nights) and blocked dates ({metrics.blockedNights} days) from the calculation.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <Switch
+                          id="adjusted-occupancy"
+                          checked={showAdjustedOccupancy}
+                          onCheckedChange={setShowAdjustedOccupancy}
+                        />
+                      </div>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">
-                      {metrics.overallOccupancy.toFixed(1)}%
+                      {showAdjustedOccupancy 
+                        ? metrics.adjustedOccupancy.toFixed(1)
+                        : metrics.overallOccupancy.toFixed(1)}%
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">For selected period</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {showAdjustedOccupancy 
+                        ? `${metrics.bookableDays} bookable days`
+                        : 'For selected period'}
+                    </p>
                   </CardContent>
                 </Card>
 
