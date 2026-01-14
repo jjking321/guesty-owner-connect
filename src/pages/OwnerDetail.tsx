@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { PropertiesTable } from "@/components/PropertiesTable";
 import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
-
+import { AssignGroupToOwnerDialog } from "@/components/AssignGroupToOwnerDialog";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { PacingReport } from "@/components/PacingReport";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, Mail, Phone, Building2, Loader2 } from "lucide-react";
+import { ArrowLeft, Mail, Phone, Building2, Loader2, FolderPlus, Folder, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format, startOfYear } from "date-fns";
 import {
@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 import { useUserRole } from "@/hooks/useUserRole";
+import { toast as sonnerToast } from "sonner";
 
 interface Owner {
   id: string;
@@ -48,6 +49,7 @@ export default function OwnerDetail() {
     to: new Date(),
     preset: "ytd",
   });
+  const [isAssignGroupOpen, setIsAssignGroupOpen] = useState(false);
 
   // Redirect owners to their own page if they try to access another owner's page
   useEffect(() => {
@@ -88,6 +90,46 @@ export default function OwnerDetail() {
 
       if (error) throw error;
       return data || [];
+    },
+    enabled: !!id,
+  });
+
+  // Fetch assigned groups for this owner
+  const { data: ownerGroups, refetch: refetchOwnerGroups } = useQuery({
+    queryKey: ["owner-assigned-groups", id],
+    queryFn: async () => {
+      const { data: groupAssignments, error: assignmentError } = await supabase
+        .from('owner_groups')
+        .select('group_id')
+        .eq('owner_id', id!);
+
+      if (assignmentError) throw assignmentError;
+      if (!groupAssignments || groupAssignments.length === 0) return [];
+
+      const groupIds = groupAssignments.map(a => a.group_id);
+
+      // Fetch group details with member count
+      const { data: groups, error: groupsError } = await supabase
+        .from('property_groups')
+        .select('id, name, description')
+        .in('id', groupIds);
+
+      if (groupsError) throw groupsError;
+
+      // Fetch members for each group
+      const { data: members, error: membersError } = await supabase
+        .from('property_group_members')
+        .select('group_id, listing_id')
+        .in('group_id', groupIds);
+
+      if (membersError) throw membersError;
+
+      // Combine data
+      return (groups || []).map(group => ({
+        ...group,
+        memberCount: members?.filter(m => m.group_id === group.id).length || 0,
+        listingIds: members?.filter(m => m.group_id === group.id).map(m => m.listing_id) || [],
+      }));
     },
     enabled: !!id,
   });
@@ -282,6 +324,40 @@ export default function OwnerDetail() {
 
   const metrics = calculateMetrics();
   const isLoading = isOwnerLoading;
+
+  // Calculate which listings are in assigned groups
+  const groupedListingIds = useMemo(() => {
+    if (!ownerGroups || ownerGroups.length === 0) return [];
+    return ownerGroups.flatMap(g => g.listingIds);
+  }, [ownerGroups]);
+
+  const hasAssignedGroups = ownerGroups && ownerGroups.length > 0;
+
+  // Filter listings to only show those NOT in any assigned group
+  const ungroupedListings = useMemo(() => {
+    if (!listings) return [];
+    if (!hasAssignedGroups) return listings;
+    return listings.filter(l => !groupedListingIds.includes(l.id));
+  }, [listings, groupedListingIds, hasAssignedGroups]);
+
+  // Function to remove a group assignment
+  const handleRemoveGroupAssignment = async (groupId: string) => {
+    try {
+      const { error } = await supabase
+        .from('owner_groups')
+        .delete()
+        .eq('owner_id', id)
+        .eq('group_id', groupId);
+
+      if (error) throw error;
+
+      sonnerToast.success("Group unassigned from owner");
+      refetchOwnerGroups();
+    } catch (error) {
+      console.error("Error removing group assignment:", error);
+      sonnerToast.error("Failed to remove group assignment");
+    }
+  };
 
   // Calculate year-over-year revenue data
   const calculateYearOverYearRevenue = () => {
@@ -708,107 +784,192 @@ export default function OwnerDetail() {
           </TabsContent>
         </Tabs>
 
-        {/* Properties Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Properties</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {listings && listings.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
-                No properties found for this owner
+        {/* Groups Section */}
+        {hasAssignedGroups && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Groups</CardTitle>
+              {role !== 'owner' && (
+                <Button variant="outline" size="sm" onClick={() => setIsAssignGroupOpen(true)}>
+                  <FolderPlus className="mr-2 h-4 w-4" />
+                  Assign Group
+                </Button>
+              )}
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {ownerGroups.map((group) => (
+                  <Card 
+                    key={group.id}
+                    className="cursor-pointer hover:shadow-lg transition-shadow relative group"
+                  >
+                    <div 
+                      onClick={() => navigate(`/groups/${group.id}`)}
+                      className="p-4"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Folder className="h-5 w-5 text-primary" />
+                        <h3 className="font-semibold">{group.name}</h3>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {group.memberCount} {group.memberCount === 1 ? 'property' : 'properties'}
+                      </p>
+                      {group.description && (
+                        <p className="text-sm text-muted-foreground mt-1 truncate">
+                          {group.description}
+                        </p>
+                      )}
+                    </div>
+                    {role !== 'owner' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveGroupAssignment(group.id);
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Add Group button when no groups assigned (for non-owners) */}
+        {!hasAssignedGroups && role !== 'owner' && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Groups</CardTitle>
+              <Button variant="outline" size="sm" onClick={() => setIsAssignGroupOpen(true)}>
+                <FolderPlus className="mr-2 h-4 w-4" />
+                Assign Group
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <p className="text-center text-muted-foreground py-4">
+                No groups assigned to this owner yet
               </p>
-            ) : (
-              <PropertiesTable
-                properties={(listings || []).map(listing => {
-                  const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
-                  const listingForecast = forecasts?.find(f => f.listing_id === listing.id && f.year === currentYear);
-                  
-                  const ytdRevenue = reservationNights
-                    ?.filter(n => n.listing_id === listing.id)
-                    .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
+            </CardContent>
+          </Card>
+        )}
 
-                  const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
-                  const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
-                  const goal = listingGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
-                  const forecast = listingForecast ? (Number((listingForecast.total_forecast as any)?.p50) || 0) : 0;
-                  
-                  let status: 'on-track' | 'at-risk' | 'behind' = 'behind';
-                  if (projection > 0) {
-                    const pacing = (forecast / projection) * 100;
-                    if (pacing >= 95) status = 'on-track';
-                    else if (pacing >= 85) status = 'at-risk';
-                  }
+        {/* Ungrouped Properties Table */}
+        {(!hasAssignedGroups || ungroupedListings.length > 0) && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{hasAssignedGroups ? "Other Properties" : "Properties"}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(hasAssignedGroups ? ungroupedListings : listings) && (hasAssignedGroups ? ungroupedListings : listings)!.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No properties found for this owner
+                </p>
+              ) : (
+                <PropertiesTable
+                  properties={((hasAssignedGroups ? ungroupedListings : listings) || []).map(listing => {
+                    const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
+                    const listingForecast = forecasts?.find(f => f.listing_id === listing.id && f.year === currentYear);
+                    
+                    const ytdRevenue = reservationNights
+                      ?.filter(n => n.listing_id === listing.id)
+                      .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
 
-                  const lockedGoals = listingGoals.filter(g => g.locked === true);
-                  const budgetAchievement = budget > 0 ? (ytdRevenue / budget) * 100 : 0;
-                  const projectionAchievement = projection > 0 ? (ytdRevenue / projection) * 100 : 0;
-                  const goalAchievement = goal > 0 ? (ytdRevenue / goal) * 100 : 0;
-                  const forecastBudgetAchievement = budget > 0 ? (forecast / budget) * 100 : 0;
-                  const forecastProjectionAchievement = projection > 0 ? (forecast / projection) * 100 : 0;
-                  const forecastGoalAchievement = goal > 0 ? (forecast / goal) * 100 : 0;
+                    const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
+                    const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
+                    const goal = listingGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
+                    const forecast = listingForecast ? (Number((listingForecast.total_forecast as any)?.p50) || 0) : 0;
+                    
+                    let status: 'on-track' | 'at-risk' | 'behind' = 'behind';
+                    if (projection > 0) {
+                      const pacing = (forecast / projection) * 100;
+                      if (pacing >= 95) status = 'on-track';
+                      else if (pacing >= 85) status = 'at-risk';
+                    }
 
-                  return {
-                    id: listing.id,
-                    nickname: listing.nickname,
-                    address: listing.address,
-                    thumbnail: listing.thumbnail,
-                    propertyType: listing.property_type,
-                    actualRevenue: ytdRevenue,
-                    budgetTotal: budget,
-                    projectionTotal: projection,
-                    goalTotal: goal,
-                    forecastedRevenue: forecast,
-                    forecastUpdatedAt: listingForecast?.updated_at || null,
-                    budgetAchievement,
-                    projectionAchievement,
-                    goalAchievement,
-                    forecastBudgetAchievement,
-                    forecastProjectionAchievement,
-                    forecastGoalAchievement,
-                    status,
-                    hasGoals: listingGoals.length > 0,
-                    hasLockedGoals: lockedGoals.length > 0,
-                    goalsLockedCount: lockedGoals.length,
-                  };
-                }).sort((a, b) => {
-                  let comparison = 0;
-                  
-                  switch (sortBy) {
-                    case "name":
-                      comparison = a.nickname.localeCompare(b.nickname);
-                      break;
-                    case "actual":
-                      comparison = a.actualRevenue - b.actualRevenue;
-                      break;
-                    case "forecast":
-                      comparison = a.forecastedRevenue - b.forecastedRevenue;
-                      break;
-                    case "goalProgress":
-                      comparison = a.forecastProjectionAchievement - b.forecastProjectionAchievement;
-                      break;
-                    case "status":
-                      const statusOrder = { "on-track": 3, "at-risk": 2, "behind": 1 };
-                      comparison = statusOrder[a.status] - statusOrder[b.status];
-                      break;
-                  }
-                  
-                  return sortDirection === "asc" ? comparison : -comparison;
-                })}
-                 isLoading={false}
-                sortBy={sortBy}
-                sortDirection={sortDirection}
-                onSort={handleSort}
-                referrer={{
-                  path: `/owners/${id}`,
-                  label: owner ? getOwnerName(owner) : 'Owner',
-                  state: { dateRange, sortBy, sortDirection, scrollPosition: window.scrollY }
-                }}
-              />
-            )}
-          </CardContent>
-        </Card>
+                    const lockedGoals = listingGoals.filter(g => g.locked === true);
+                    const budgetAchievement = budget > 0 ? (ytdRevenue / budget) * 100 : 0;
+                    const projectionAchievement = projection > 0 ? (ytdRevenue / projection) * 100 : 0;
+                    const goalAchievement = goal > 0 ? (ytdRevenue / goal) * 100 : 0;
+                    const forecastBudgetAchievement = budget > 0 ? (forecast / budget) * 100 : 0;
+                    const forecastProjectionAchievement = projection > 0 ? (forecast / projection) * 100 : 0;
+                    const forecastGoalAchievement = goal > 0 ? (forecast / goal) * 100 : 0;
+
+                    return {
+                      id: listing.id,
+                      nickname: listing.nickname,
+                      address: listing.address,
+                      thumbnail: listing.thumbnail,
+                      propertyType: listing.property_type,
+                      actualRevenue: ytdRevenue,
+                      budgetTotal: budget,
+                      projectionTotal: projection,
+                      goalTotal: goal,
+                      forecastedRevenue: forecast,
+                      forecastUpdatedAt: listingForecast?.updated_at || null,
+                      budgetAchievement,
+                      projectionAchievement,
+                      goalAchievement,
+                      forecastBudgetAchievement,
+                      forecastProjectionAchievement,
+                      forecastGoalAchievement,
+                      status,
+                      hasGoals: listingGoals.length > 0,
+                      hasLockedGoals: lockedGoals.length > 0,
+                      goalsLockedCount: lockedGoals.length,
+                    };
+                  }).sort((a, b) => {
+                    let comparison = 0;
+                    
+                    switch (sortBy) {
+                      case "name":
+                        comparison = a.nickname.localeCompare(b.nickname);
+                        break;
+                      case "actual":
+                        comparison = a.actualRevenue - b.actualRevenue;
+                        break;
+                      case "forecast":
+                        comparison = a.forecastedRevenue - b.forecastedRevenue;
+                        break;
+                      case "goalProgress":
+                        comparison = a.forecastProjectionAchievement - b.forecastProjectionAchievement;
+                        break;
+                      case "status":
+                        const statusOrder = { "on-track": 3, "at-risk": 2, "behind": 1 };
+                        comparison = statusOrder[a.status] - statusOrder[b.status];
+                        break;
+                    }
+                    
+                    return sortDirection === "asc" ? comparison : -comparison;
+                  })}
+                  isLoading={false}
+                  sortBy={sortBy}
+                  sortDirection={sortDirection}
+                  onSort={handleSort}
+                  referrer={{
+                    path: `/owners/${id}`,
+                    label: owner ? getOwnerName(owner) : 'Owner',
+                    state: { dateRange, sortBy, sortDirection, scrollPosition: window.scrollY }
+                  }}
+                />
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
+
+      {/* Assign Group Dialog */}
+      <AssignGroupToOwnerDialog
+        open={isAssignGroupOpen}
+        onOpenChange={setIsAssignGroupOpen}
+        ownerId={id!}
+        existingGroupIds={ownerGroups?.map(g => g.id) || []}
+        onSuccess={() => refetchOwnerGroups()}
+      />
     </DashboardLayout>
   );
 }
