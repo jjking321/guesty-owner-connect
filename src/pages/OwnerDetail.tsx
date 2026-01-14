@@ -79,14 +79,15 @@ export default function OwnerDetail() {
     enabled: !!id,
   });
 
-  // Fetch listings for this owner
+  // Fetch listings for this owner (only active properties)
   const { data: listings } = useQuery({
     queryKey: ["owner-listings", id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('listings')
         .select('*')
-        .eq('owner_id', id);
+        .eq('owner_id', id)
+        .eq('active', true);
 
       if (error) throw error;
       return data || [];
