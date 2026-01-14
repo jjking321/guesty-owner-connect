@@ -76,6 +76,42 @@ function scoreComparable(
   return score;
 }
 
+// Filter nearby comparables from global pool by distance and bedroom match
+function filterNearbyComparables(
+  allComps: any[],
+  targetLat: number,
+  targetLng: number,
+  targetBedrooms: number,
+  maxDistanceMiles: number = 1
+): any[] {
+  // Deduplicate by airroi_listing_id (keep the most recently fetched)
+  const uniqueComps = new Map<string, any>();
+  
+  for (const comp of allComps) {
+    const compBedrooms = comp.property_details?.bedrooms;
+    const compLat = comp.location_info?.lat;
+    const compLng = comp.location_info?.lng;
+    
+    // Skip if missing data
+    if (!compLat || !compLng || compBedrooms === null || compBedrooms === undefined) continue;
+    
+    // Check bedroom match (+/- 1)
+    if (Math.abs(compBedrooms - targetBedrooms) > 1) continue;
+    
+    // Check distance
+    const distance = calculateDistanceMiles(targetLat, targetLng, compLat, compLng);
+    if (distance > maxDistanceMiles) continue;
+    
+    // Deduplicate - keep most recent by airroi_listing_id
+    const existing = uniqueComps.get(comp.airroi_listing_id);
+    if (!existing || new Date(comp.fetched_at) > new Date(existing.fetched_at)) {
+      uniqueComps.set(comp.airroi_listing_id, comp);
+    }
+  }
+  
+  return Array.from(uniqueComps.values());
+}
+
 // Fetch comparables from Air ROI API and cache them
 async function fetchFromAirROI(
   supabase: any,
@@ -220,13 +256,51 @@ async function fetchFromAirROI(
     throw new Error(`Failed to save comparables: ${upsertError.message}`);
   }
 
-  // Fetch the cached comparables back
-  const { data: cachedComps } = await supabase
-    .from('property_comparables')
-    .select('*')
-    .eq('listing_id', listingId);
+  // Return the upserted data directly (already have it)
+  return upsertData;
+}
 
-  return cachedComps || [];
+// Copy selected comparables from global pool to target property
+async function copySelectedToProperty(
+  supabase: any,
+  listingId: string,
+  selectedComps: any[]
+): Promise<void> {
+  const upsertData = selectedComps.map(comp => ({
+    listing_id: listingId,
+    airroi_listing_id: comp.airroi_listing_id,
+    listing_name: comp.listing_name,
+    listing_type: comp.listing_type,
+    room_type: comp.room_type,
+    cover_photo_url: comp.cover_photo_url,
+    host_name: comp.host_name,
+    superhost: comp.superhost,
+    location_info: comp.location_info,
+    property_details: comp.property_details,
+    booking_settings: comp.booking_settings,
+    pricing_info: comp.pricing_info,
+    ratings: comp.ratings,
+    performance_metrics: comp.performance_metrics,
+    ttm_revenue: comp.ttm_revenue,
+    ttm_occupancy: comp.ttm_occupancy,
+    ttm_adr: comp.ttm_adr,
+    ttm_revpar: comp.ttm_revpar,
+    fetched_at: comp.fetched_at || new Date().toISOString(),
+    is_selected: true,
+    selected_at: new Date().toISOString(),
+  }));
+
+  const { error } = await supabase
+    .from('property_comparables')
+    .upsert(upsertData, {
+      onConflict: 'listing_id,airroi_listing_id',
+      ignoreDuplicates: false,
+    });
+
+  if (error) {
+    console.error(`Error copying comparables to ${listingId}:`, error);
+    throw error;
+  }
 }
 
 serve(async (req) => {
@@ -248,6 +322,19 @@ serve(async (req) => {
     }
 
     console.log(`AI-selecting top ${max_selections} comparables for ${listing_ids.length} listings`);
+
+    // Fetch the GLOBAL pool of all cached comparables once (not per-property)
+    const { data: allCachedComps, error: globalFetchError } = await supabase
+      .from('property_comparables')
+      .select('*')
+      .not('location_info', 'is', null)
+      .not('property_details', 'is', null);
+
+    if (globalFetchError) {
+      console.error('Error fetching global comparable pool:', globalFetchError);
+    }
+
+    console.log(`Loaded ${allCachedComps?.length || 0} total cached comparables (global pool)`);
 
     const results: { 
       listing_id: string; 
@@ -311,30 +398,35 @@ serve(async (req) => {
         
         const targetRevenue = revData?.reduce((sum, r) => sum + (r.revenue_allocation || 0), 0) || null;
 
-        // 3. Fetch cached comparables
-        let { data: comparables, error: compError } = await supabase
-          .from('property_comparables')
-          .select('*')
-          .eq('listing_id', listingId);
+        // 3. Filter nearby comparables from global pool (cross-property reuse)
+        let nearbyComps = filterNearbyComparables(
+          allCachedComps || [],
+          targetLat,
+          targetLng,
+          targetBedrooms,
+          1 // 1 mile radius
+        );
+
+        console.log(`Found ${nearbyComps.length} nearby cached comps for ${listingId} (global search, ${targetBedrooms}BR)`);
 
         let fetchedFromApi = false;
         
-        // 4. If insufficient cached comps, fetch from Air ROI
-        if (!comparables || comparables.length < MIN_CACHED_THRESHOLD) {
+        // 4. If insufficient nearby comps in global pool, fetch from Air ROI
+        if (nearbyComps.length < MIN_CACHED_THRESHOLD) {
           if (!airroiApiKey) {
             console.warn(`No AIRROI_API_KEY, cannot fetch for ${listingId}`);
             results.push({ 
               listing_id: listingId, 
               selected: 0, 
               fetched_from_api: false,
-              cached_count: comparables?.length || 0,
+              cached_count: nearbyComps.length,
               source: 'error',
               error: 'AIRROI_API_KEY not configured'
             });
             continue;
           }
 
-          console.log(`Insufficient cached comps (${comparables?.length || 0}) for ${listingId}, fetching from Air ROI...`);
+          console.log(`Insufficient nearby comps (${nearbyComps.length}) for ${listingId}, fetching from Air ROI...`);
           
           // Add delay between API calls to respect rate limits
           if (apiCallsMade > 0) {
@@ -342,7 +434,7 @@ serve(async (req) => {
           }
           
           try {
-            comparables = await fetchFromAirROI(
+            const freshComps = await fetchFromAirROI(
               supabase,
               airroiApiKey,
               listingId,
@@ -350,6 +442,12 @@ serve(async (req) => {
               targetLng,
               targetBedrooms
             );
+            // Merge fresh comps with any existing nearby comps (dedupe by airroi_listing_id)
+            const merged = new Map<string, any>();
+            for (const c of nearbyComps) merged.set(c.airroi_listing_id, c);
+            for (const c of freshComps) merged.set(c.airroi_listing_id, c);
+            nearbyComps = Array.from(merged.values());
+            
             fetchedFromApi = true;
             apiCallsMade++;
           } catch (apiError: any) {
@@ -358,7 +456,7 @@ serve(async (req) => {
               listing_id: listingId, 
               selected: 0, 
               fetched_from_api: false,
-              cached_count: 0,
+              cached_count: nearbyComps.length,
               source: 'error',
               error: `API fetch failed: ${apiError.message}`
             });
@@ -366,7 +464,7 @@ serve(async (req) => {
           }
         }
 
-        if (!comparables || comparables.length === 0) {
+        if (nearbyComps.length === 0) {
           console.warn(`No comparables available for ${listingId}`);
           results.push({ 
             listing_id: listingId, 
@@ -379,44 +477,43 @@ serve(async (req) => {
         }
 
         // 5. Score and sort comparables
-        const scoredComparables = comparables.map((comp) => ({
+        const scoredComparables = nearbyComps.map((comp) => ({
           ...comp,
           ai_score: scoreComparable(comp, targetBedrooms, targetLat, targetLng, targetRevenue),
         }));
 
         scoredComparables.sort((a, b) => b.ai_score - a.ai_score);
-        const topIds = scoredComparables.slice(0, max_selections).map(c => c.id);
+        const topComps = scoredComparables.slice(0, max_selections);
 
-        // 6. Update selection status - deselect all first, then select top N
-        await supabase
-          .from('property_comparables')
-          .update({ is_selected: false, selected_at: null })
-          .eq('listing_id', listingId);
+        // 6. Copy selected comparables to this property and mark as selected
+        try {
+          // First, deselect any existing selections for this property
+          await supabase
+            .from('property_comparables')
+            .update({ is_selected: false, selected_at: null })
+            .eq('listing_id', listingId);
 
-        const { error: selectError } = await supabase
-          .from('property_comparables')
-          .update({ is_selected: true, selected_at: new Date().toISOString() })
-          .in('id', topIds);
+          // Copy and select the top comps for this property
+          await copySelectedToProperty(supabase, listingId, topComps);
 
-        if (selectError) {
-          console.error(`Error selecting comparables for ${listingId}:`, selectError);
+          results.push({ 
+            listing_id: listingId, 
+            selected: topComps.length, 
+            fetched_from_api: fetchedFromApi,
+            cached_count: nearbyComps.length,
+            source: fetchedFromApi ? 'air_roi' : 'global_cache'
+          });
+          console.log(`Selected ${topComps.length} comparables for ${listingId} (source: ${fetchedFromApi ? 'air_roi' : 'global_cache'})`);
+        } catch (copyError: any) {
+          console.error(`Error copying comparables for ${listingId}:`, copyError);
           results.push({ 
             listing_id: listingId, 
             selected: 0, 
             fetched_from_api: fetchedFromApi,
-            cached_count: comparables.length,
-            source: fetchedFromApi ? 'air_roi' : 'cache',
-            error: 'Selection update failed'
+            cached_count: nearbyComps.length,
+            source: 'error',
+            error: 'Copy/selection failed'
           });
-        } else {
-          results.push({ 
-            listing_id: listingId, 
-            selected: topIds.length, 
-            fetched_from_api: fetchedFromApi,
-            cached_count: comparables.length,
-            source: fetchedFromApi ? 'air_roi' : 'cache'
-          });
-          console.log(`Selected ${topIds.length} comparables for ${listingId} (source: ${fetchedFromApi ? 'air_roi' : 'cache'})`);
         }
       } catch (propError: any) {
         console.error(`Error processing ${listingId}:`, propError);
