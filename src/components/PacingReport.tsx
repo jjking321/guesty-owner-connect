@@ -396,8 +396,10 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
       const currentData = calculateBookedRevenue(periodStart, periodEnd, reservations, currentCutoff);
       const lastData = calculateBookedRevenue(lastYearPeriodStart, lastYearPeriodEnd, reservations, lastYearCutoff);
 
-      const totalDaysCurrent = getDaysInMonth(monthDate);
-      const totalDaysLast = getDaysInMonth(lastYearPeriodStart);
+      // Account for multiple properties in groups - multiply days by number of listings
+      const numberOfProperties = effectiveListingIds.length || 1;
+      const totalDaysCurrent = getDaysInMonth(monthDate) * numberOfProperties;
+      const totalDaysLast = getDaysInMonth(lastYearPeriodStart) * numberOfProperties;
 
       const currentOccupancy = totalDaysCurrent > 0 ? (currentData.nights / totalDaysCurrent) * 100 : 0;
       const lastOccupancy = totalDaysLast > 0 ? (lastData.nights / totalDaysLast) * 100 : 0;
@@ -425,7 +427,7 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
     }
 
     return data;
-  }, [reservations, currentYear, currentMonth, currentDate]);
+  }, [reservations, currentYear, currentMonth, currentDate, effectiveListingIds.length]);
 
   // Get period description for display
   const getPeriodDescription = (): string => {
