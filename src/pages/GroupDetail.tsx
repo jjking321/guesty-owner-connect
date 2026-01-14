@@ -30,7 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
-import { DateRangeFilter, type DateRange } from "@/components/DateRangeFilter";
+import { StripeDateRangePicker, type DateRange } from "@/components/StripeDateRangePicker";
 import { PropertiesTable } from "@/components/PropertiesTable";
 import { format, startOfYear, differenceInDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -53,11 +53,16 @@ export default function GroupDetail() {
   const [dateRange, setDateRange] = useState<DateRange>({
     from: startOfYear(new Date()),
     to: new Date(),
-    preset: "ytd",
   });
   const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("actual");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [showDistributedRevenue, setShowDistributedRevenue] = useState(false);
+
+  // Effective date range with fallbacks for "All time" (undefined dates)
+  const effectiveDateRange = useMemo(() => ({
+    from: dateRange.from || new Date(2020, 0, 1),
+    to: dateRange.to || new Date(),
+  }), [dateRange.from, dateRange.to]);
 
   const { data: group, isLoading: isGroupLoading, refetch: refetchGroup } = useQuery({
     queryKey: ["property-group", id],
@@ -211,17 +216,17 @@ export default function GroupDetail() {
   ) || [];
 
   const { data: reservations, isLoading: isReservationsLoading } = useQuery({
-    queryKey: ["group-reservations", listingIds, dateRange.from.getFullYear()],
+    queryKey: ["group-reservations", listingIds, effectiveDateRange.from.getFullYear()],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
       // Fetch reservations for the full year to show "on the books" revenue
       // in Goals Comparison, including confirmed future bookings through December
-      const startDate = new Date(dateRange.from);
+      const startDate = new Date(effectiveDateRange.from);
       startDate.setFullYear(startDate.getFullYear() - 1);
 
       // Set end date to December 31st of the selected year to include future bookings
-      const endOfYear = new Date(dateRange.from);
+      const endOfYear = new Date(effectiveDateRange.from);
       endOfYear.setMonth(11, 31); // December 31
 
       // PostgREST caps responses at 1,000 rows per request. Paginate to fetch all rows.
@@ -254,7 +259,7 @@ export default function GroupDetail() {
 
   // Fetch reservation nights for accurate revenue calculation by date
   const { data: reservationNights } = useQuery({
-    queryKey: ["group-reservation-nights", listingIds, dateRange.from, dateRange.to],
+    queryKey: ["group-reservation-nights", listingIds, effectiveDateRange.from, effectiveDateRange.to],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
@@ -268,8 +273,8 @@ export default function GroupDetail() {
           .from("reservation_nights")
           .select("listing_id, night_date, revenue_allocation")
           .in("listing_id", listingIds)
-          .gte("night_date", format(dateRange.from, "yyyy-MM-dd"))
-          .lte("night_date", format(dateRange.to, "yyyy-MM-dd"))
+          .gte("night_date", format(effectiveDateRange.from, "yyyy-MM-dd"))
+          .lte("night_date", format(effectiveDateRange.to, "yyyy-MM-dd"))
           .order("night_date", { ascending: true })
           .range(from, from + pageSize - 1);
 
@@ -287,7 +292,7 @@ export default function GroupDetail() {
 
   // Fetch capacity calendar data for occupancy calculation
   const { data: capacityData } = useQuery({
-    queryKey: ["group-capacity", listingIds, dateRange.from, dateRange.to],
+    queryKey: ["group-capacity", listingIds, effectiveDateRange.from, effectiveDateRange.to],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
@@ -300,8 +305,8 @@ export default function GroupDetail() {
           .from("capacity_calendar")
           .select("listing_id, date, is_available")
           .in("listing_id", listingIds)
-          .gte("date", format(dateRange.from, "yyyy-MM-dd"))
-          .lte("date", format(dateRange.to, "yyyy-MM-dd"))
+          .gte("date", format(effectiveDateRange.from, "yyyy-MM-dd"))
+          .lte("date", format(effectiveDateRange.to, "yyyy-MM-dd"))
           .order("date", { ascending: true })
           .range(from, from + pageSize - 1);
 
@@ -318,12 +323,12 @@ export default function GroupDetail() {
   });
 
   const { data: goals } = useQuery({
-    queryKey: ["group-goals", listingIds, dateRange.from],
+    queryKey: ["group-goals", listingIds, effectiveDateRange.from],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
       // Always fetch all months for the selected year
-      const year = dateRange.from.getFullYear();
+      const year = effectiveDateRange.from.getFullYear();
 
       const { data, error } = await supabase
         .from("property_goals")
@@ -339,11 +344,11 @@ export default function GroupDetail() {
 
   // Fetch all forecasts for properties in the group
   const { data: forecasts } = useQuery({
-    queryKey: ["group-forecasts", listingIds, dateRange.from],
+    queryKey: ["group-forecasts", listingIds, effectiveDateRange.from],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
 
-      const year = dateRange.from.getFullYear();
+      const year = effectiveDateRange.from.getFullYear();
 
       const { data, error } = await supabase
         .from("revenue_forecasts")
@@ -366,14 +371,14 @@ export default function GroupDetail() {
     const checkIn = new Date(r.check_in);
     const checkOut = new Date(r.check_out);
     // Reservation overlaps if: check_in <= dateRange.to AND check_out >= dateRange.from
-    return checkIn <= dateRange.to && checkOut >= dateRange.from;
+    return checkIn <= effectiveDateRange.to && checkOut >= effectiveDateRange.from;
   }) || [];
 
   const totalReservations = filteredReservations.length;
   const totalNights = reservationNights?.length || 0;
 
   // Calculate overall occupancy (excluding composite listings from denominator)
-  const daysInRange = differenceInDays(dateRange.to, dateRange.from) + 1;
+  const daysInRange = differenceInDays(effectiveDateRange.to, effectiveDateRange.from) + 1;
   
   // Count direct nights for non-composite listings
   const nonCompositeNights = reservationNights?.filter(
@@ -423,7 +428,7 @@ export default function GroupDetail() {
 
     // Initialize all 12 months
     for (let i = 1; i <= 12; i++) {
-      const monthKey = `${dateRange.from.getFullYear()}-${String(i).padStart(2, '0')}`;
+      const monthKey = `${effectiveDateRange.from.getFullYear()}-${String(i).padStart(2, '0')}`;
       monthlyData[monthKey] = { p50: 0, onBooks: 0 };
     }
 
@@ -446,7 +451,7 @@ export default function GroupDetail() {
         revenue_on_books: data.onBooks,
       })),
     };
-  }, [forecasts, dateRange.from]);
+  }, [forecasts, effectiveDateRange.from]);
 
   // Calculate goal probabilities (average across all properties)
   const avgGoalProbabilities = forecasts?.reduce((acc, f: any) => {
@@ -467,7 +472,7 @@ export default function GroupDetail() {
 
   // Calculate year-over-year revenue data
   const calculateYearOverYearRevenue = () => {
-    const currentYear = dateRange.from.getFullYear();
+    const currentYear = effectiveDateRange.from.getFullYear();
     const monthlyRevenue: { [key: string]: { current: number; last: number } } = {};
 
     // Initialize all months
@@ -509,7 +514,7 @@ export default function GroupDetail() {
 
   // Calculate year-over-year occupancy data
   const calculateYearOverYearOccupancy = () => {
-    const currentYear = dateRange.from.getFullYear();
+    const currentYear = effectiveDateRange.from.getFullYear();
     const monthlyOccupancy: { [key: string]: { currentNights: number; lastNights: number; totalDays: number } } = {};
 
     // Initialize all months
@@ -558,7 +563,7 @@ export default function GroupDetail() {
 
   // Calculate year-over-year RevPAR data
   const calculateYearOverYearRevPAR = () => {
-    const currentYear = dateRange.from.getFullYear();
+    const currentYear = effectiveDateRange.from.getFullYear();
     const monthlyData: { [key: string]: { currentRevenue: number; lastRevenue: number; totalDays: number } } = {};
 
     // Initialize all months
@@ -897,7 +902,7 @@ export default function GroupDetail() {
                 </div>
               </TooltipProvider>
             )}
-            <DateRangeFilter value={dateRange} onChange={setDateRange} />
+            <StripeDateRangePicker value={dateRange} onChange={setDateRange} />
             {directListingIds.length > 0 && (
               <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
                 <DialogTrigger asChild>
@@ -1335,7 +1340,7 @@ export default function GroupDetail() {
                   // When distributed view is on, hide composite listings
                   .filter(listing => !showDistributedRevenue || !listing.is_composite)
                   .map(listing => {
-                  const currentYear = dateRange.from.getFullYear();
+                  const currentYear = effectiveDateRange.from.getFullYear();
                   const currentDate = new Date();
                   
                   const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
