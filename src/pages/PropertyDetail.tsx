@@ -578,78 +578,6 @@ export default function PropertyDetail() {
           </Card>
         </div>
 
-        {/* Metrics Cards with Date Filter */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Performance Metrics</h3>
-            <StripeDateRangePicker
-              value={metricsDateRange}
-              onChange={setMetricsDateRange}
-            />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Percent className="h-4 w-4 text-muted-foreground" />
-                Occupancy Rate
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {metrics.overallOccupancy.toFixed(1)}%
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">For selected period</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-                Average ADR
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                ${metrics.averageADR.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Per night average</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                RevPAR
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                ${metrics.revPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Revenue per available room</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                Avg Nights/Reservation
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {metrics.averageNightsPerReservation.toFixed(1)}
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">Average stay length</p>
-            </CardContent>
-          </Card>
-          </div>
-        </div>
-
         {/* Tabs for different sections */}
         <Tabs defaultValue="overview" className="space-y-4">
           <TabsList>
@@ -660,6 +588,78 @@ export default function PropertyDetail() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
+            {/* Performance Metrics with Date Filter */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Performance Metrics</h3>
+                <StripeDateRangePicker
+                  value={metricsDateRange}
+                  onChange={setMetricsDateRange}
+                />
+              </div>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <Percent className="h-4 w-4 text-muted-foreground" />
+                      Occupancy Rate
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {metrics.overallOccupancy.toFixed(1)}%
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">For selected period</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      Average ADR
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      ${metrics.averageADR.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">Per night average</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                      RevPAR
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      ${metrics.revPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">Revenue per available room</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      Avg Nights/Reservation
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {metrics.averageNightsPerReservation.toFixed(1)}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">Average stay length</p>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
             {/* Pacing Report - YTD metrics */}
             <PacingReport reservations={reservations} />
 
@@ -668,7 +668,6 @@ export default function PropertyDetail() {
 
             {/* Revenue Forecast */}
             <RevenueForecast listingId={id!} />
-
 
             {/* Property Comparables */}
             <ComparablesModule
