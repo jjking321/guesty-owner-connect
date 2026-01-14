@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, Moon, Percent } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target } from "lucide-react";
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -11,21 +12,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { supabase } from "@/integrations/supabase/client";
 
 interface PacingReportProps {
   reservations: any[];
+  listingId?: string;      // For single listing views (PropertyDetail)
+  listingIds?: string[];   // For multi-listing views (OwnerDetail, GroupDetail)
 }
 
 interface PacingMetrics {
   occupancy: { current: number; last: number; change: number };
+  adjustedOccupancy: { current: number; last: number; change: number };
   revenue: { current: number; last: number; change: number };
   revPAR: { current: number; last: number; change: number };
   nights: { current: number; last: number; change: number };
+  bookableDays: { current: number; last: number };
 }
 
 type PeriodType = 'ytd' | 'monthly';
 
-export function PacingReport({ reservations }: PacingReportProps) {
+export function PacingReport({ reservations, listingId, listingIds }: PacingReportProps) {
   const currentDate = new Date();
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
@@ -33,6 +45,9 @@ export function PacingReport({ reservations }: PacingReportProps) {
   const [periodType, setPeriodType] = useState<PeriodType>('ytd');
   const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
   const [selectedMonthYear, setSelectedMonthYear] = useState<number>(currentYear);
+
+  // Resolve listing IDs for queries
+  const effectiveListingIds = listingId ? [listingId] : (listingIds || []);
 
   // Generate month options for the next 12 months
   const monthOptions = [];
@@ -68,6 +83,49 @@ export function PacingReport({ reservations }: PacingReportProps) {
         };
     }
   };
+
+  // Fetch blocked dates from capacity_calendar
+  const { data: capacityCalendar } = useQuery({
+    queryKey: ['capacity-calendar-blocks', effectiveListingIds, periodType, selectedMonth, selectedMonthYear],
+    queryFn: async () => {
+      if (effectiveListingIds.length === 0) return [];
+
+      const currentPeriod = getPeriodBoundaries(currentYear);
+      const lastYearPeriod = periodType === 'monthly' 
+        ? { start: new Date(selectedMonthYear - 1, selectedMonth, 1), end: endOfMonth(new Date(selectedMonthYear - 1, selectedMonth, 1)) }
+        : getPeriodBoundaries(currentYear - 1);
+
+      // Calculate the overall date range we need
+      const startDate = format(lastYearPeriod.start, 'yyyy-MM-dd');
+      const endDate = format(currentPeriod.end, 'yyyy-MM-dd');
+
+      // Paginate to fetch all blocked dates
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from('capacity_calendar')
+          .select('date, status, block_reason, listing_id')
+          .in('listing_id', effectiveListingIds)
+          .eq('block_reason', 'blocked')
+          .eq('status', 'unavailable')
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
+    },
+    enabled: effectiveListingIds.length > 0,
+  });
 
   // Calculate booked revenue for a period (actual + future bookings)
   // bookedAsOf: Only count reservations created on or before this date (for booking pace)
@@ -126,6 +184,56 @@ export function PacingReport({ reservations }: PacingReportProps) {
     return { revenue: totalRevenue, nights: totalNights };
   };
 
+  // Calculate owner stay nights for a period
+  const calculateOwnerNights = (
+    periodStart: Date,
+    periodEnd: Date,
+    reservationList: any[],
+    bookedAsOf?: Date
+  ): number => {
+    let totalNights = 0;
+
+    reservationList.forEach((r) => {
+      if (!r.check_in || !r.check_out) return;
+      if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return;
+      if (r.source !== "owner") return; // Only count owner stays
+
+      // Apply bookedAsOf filter if provided
+      if (bookedAsOf) {
+        if (!r.created_at_guesty) return;
+        const createdAt = new Date(r.created_at_guesty);
+        if (createdAt > bookedAsOf) return;
+      }
+
+      const checkIn = parseLocalDate(r.check_in)!;
+      const checkOut = parseLocalDate(r.check_out)!;
+
+      // Check if reservation overlaps with the period
+      if (checkIn <= periodEnd && checkOut > periodStart) {
+        let currentNight = new Date(checkIn);
+        while (currentNight < checkOut) {
+          if (currentNight >= periodStart && currentNight <= periodEnd) {
+            totalNights++;
+          }
+          currentNight.setDate(currentNight.getDate() + 1);
+        }
+      }
+    });
+
+    return totalNights;
+  };
+
+  // Calculate blocked nights from capacity calendar data
+  const calculateBlockedNights = (periodStart: Date, periodEnd: Date): number => {
+    if (!capacityCalendar || capacityCalendar.length === 0) return 0;
+
+    return capacityCalendar.filter(day => {
+      const date = parseLocalDate(day.date);
+      if (!date) return false;
+      return date >= periodStart && date <= periodEnd;
+    }).length;
+  };
+
   const calculatePacingMetrics = (): PacingMetrics => {
     const currentPeriod = getPeriodBoundaries(currentYear);
     const lastYearPeriod = getPeriodBoundaries(currentYear - 1);
@@ -182,6 +290,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
     const currentTotalDays = getTotalDays(currentPeriod.start, currentPeriod.end);
     const lastTotalDays = getTotalDays(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end);
 
+    // Standard Occupancy (guest nights / total days)
     const currentOccupancy =
       currentTotalDays > 0 ? (currentNights / currentTotalDays) * 100 : 0;
     const lastOccupancy =
@@ -190,6 +299,28 @@ export function PacingReport({ reservations }: PacingReportProps) {
       lastOccupancy > 0
         ? ((currentOccupancy - lastOccupancy) / lastOccupancy) * 100
         : 0;
+
+    // Calculate owner nights and blocked nights for adjusted occupancy
+    const currentOwnerNights = calculateOwnerNights(currentPeriod.start, currentPeriod.end, reservations, currentCutoff);
+    const lastOwnerNights = calculateOwnerNights(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end, reservations, lastYearCutoff);
+
+    const currentBlockedNights = calculateBlockedNights(currentPeriod.start, currentPeriod.end);
+    const lastBlockedNights = calculateBlockedNights(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end);
+
+    // Bookable days = Total days - Owner stays - Blocked days
+    const currentBookableDays = Math.max(0, currentTotalDays - currentOwnerNights - currentBlockedNights);
+    const lastBookableDays = Math.max(0, lastTotalDays - lastOwnerNights - lastBlockedNights);
+
+    // Adjusted Occupancy = Guest nights / Bookable days
+    const currentAdjustedOccupancy = currentBookableDays > 0 
+      ? (currentNights / currentBookableDays) * 100 
+      : 0;
+    const lastAdjustedOccupancy = lastBookableDays > 0 
+      ? (lastNights / lastBookableDays) * 100 
+      : 0;
+    const adjustedOccupancyChange = lastAdjustedOccupancy > 0
+      ? ((currentAdjustedOccupancy - lastAdjustedOccupancy) / lastAdjustedOccupancy) * 100
+      : 0;
 
     // Calculate RevPAR (Revenue / Total Available Nights)
     const currentRevPAR = currentTotalDays > 0 ? currentRevenue / currentTotalDays : 0;
@@ -203,9 +334,15 @@ export function PacingReport({ reservations }: PacingReportProps) {
         last: lastOccupancy,
         change: occupancyChange,
       },
+      adjustedOccupancy: {
+        current: currentAdjustedOccupancy,
+        last: lastAdjustedOccupancy,
+        change: adjustedOccupancyChange,
+      },
       revenue: { current: currentRevenue, last: lastRevenue, change: revenueChange },
       revPAR: { current: currentRevPAR, last: lastRevPAR, change: revPARChange },
       nights: { current: currentNights, last: lastNights, change: nightsChange },
+      bookableDays: { current: currentBookableDays, last: lastBookableDays },
     };
   };
 
@@ -247,6 +384,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
     last,
     change,
     format: formatFn,
+    tooltip,
   }: {
     title: string;
     icon: any;
@@ -254,11 +392,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
     last: number;
     change: number;
     format: (val: number) => string;
+    tooltip?: string;
   }) => {
     const isPositive = change >= 0;
     const TrendIcon = isPositive ? TrendingUp : TrendingDown;
 
-    return (
+    const cardContent = (
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -286,6 +425,23 @@ export function PacingReport({ reservations }: PacingReportProps) {
         </CardContent>
       </Card>
     );
+
+    if (tooltip) {
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {cardContent}
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-xs">
+              <p>{tooltip}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      );
+    }
+
+    return cardContent;
   };
 
   const handleMonthChange = (value: string) => {
@@ -293,6 +449,9 @@ export function PacingReport({ reservations }: PacingReportProps) {
     setSelectedMonth(month);
     setSelectedMonthYear(year);
   };
+
+  // Check if we have listing data for adjusted occupancy
+  const hasListingData = effectiveListingIds.length > 0;
 
   return (
     <div className="space-y-6">
@@ -338,7 +497,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       </div>
 
       {/* Metrics Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           title="Occupancy Rate"
           icon={Percent}
@@ -346,7 +505,19 @@ export function PacingReport({ reservations }: PacingReportProps) {
           last={metrics.occupancy.last}
           change={metrics.occupancy.change}
           format={(val) => `${val.toFixed(1)}%`}
+          tooltip="Standard occupancy: Guest booked nights ÷ Total calendar days"
         />
+        {hasListingData && (
+          <MetricCard
+            title="Adjusted Occupancy"
+            icon={Target}
+            current={metrics.adjustedOccupancy.current}
+            last={metrics.adjustedOccupancy.last}
+            change={metrics.adjustedOccupancy.change}
+            format={(val) => `${val.toFixed(1)}%`}
+            tooltip="Adjusted occupancy: Guest booked nights ÷ Bookable days (excludes owner stays and blocked dates)"
+          />
+        )}
         <MetricCard
           title="Booked Revenue"
           icon={DollarSign}

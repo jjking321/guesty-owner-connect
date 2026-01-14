@@ -661,7 +661,7 @@ export default function PropertyDetail() {
             </div>
 
             {/* Pacing Report - YTD metrics */}
-            <PacingReport reservations={reservations} />
+            <PacingReport reservations={reservations} listingId={id} />
 
             {/* Goals Comparison */}
             <GoalsComparison listingId={id!} reservations={reservations} />
