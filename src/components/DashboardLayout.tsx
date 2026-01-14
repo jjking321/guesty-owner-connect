@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { User } from "@supabase/supabase-js";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
-
+import { GlobalSearch } from "@/components/GlobalSearch";
 interface DashboardLayoutProps {
   children: ReactNode;
 }
@@ -78,7 +78,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                   <p className="text-sm text-muted-foreground">{user.email}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-4">
+                <GlobalSearch />
                 <Button variant="ghost" size="icon" onClick={handleSignOut}>
                   <LogOut className="h-5 w-5" />
                 </Button>
