@@ -78,10 +78,12 @@ export function PacingReport({ reservations }: PacingReportProps) {
   };
 
   // Calculate booked revenue for a period (actual + future bookings)
+  // bookedAsOf: Only count reservations created on or before this date (for booking pace)
   const calculateBookedRevenue = (
     periodStart: Date,
     periodEnd: Date,
-    reservationList: any[]
+    reservationList: any[],
+    bookedAsOf?: Date
   ): { revenue: number; nights: number } => {
     let totalRevenue = 0;
     let totalNights = 0;
@@ -90,6 +92,14 @@ export function PacingReport({ reservations }: PacingReportProps) {
       if (!r.check_in || !r.check_out || !r.fare_accommodation_adjusted) return;
       if (!["confirmed", "checked_in", "checked_out"].includes(r.status)) return;
       if (r.source === "owner") return;
+
+      // If bookedAsOf is provided, only include reservations created before that date
+      if (bookedAsOf && r.created_at_guesty) {
+        const createdAt = new Date(r.created_at_guesty);
+        if (createdAt > bookedAsOf) {
+          return; // Skip - this reservation was booked after the cutoff
+        }
+      }
 
       const checkIn = parseLocalDate(r.check_in)!;
       const checkOut = parseLocalDate(r.check_out)!;
@@ -132,16 +142,28 @@ export function PacingReport({ reservations }: PacingReportProps) {
       };
     }
 
+    // For monthly mode, use booking pace logic (filter by when bookings were created)
+    // This compares: "Feb 2026 bookings as of today" vs "Feb 2025 bookings as of same date last year"
+    let currentCutoff: Date | undefined;
+    let lastYearCutoff: Date | undefined;
+    
+    if (periodType === 'monthly') {
+      currentCutoff = currentDate;
+      lastYearCutoff = new Date(currentYear - 1, currentMonth, currentDate.getDate());
+    }
+
     const currentData = calculateBookedRevenue(
       currentPeriod.start,
       currentPeriod.end,
-      reservations
+      reservations,
+      currentCutoff
     );
 
     const lastData = calculateBookedRevenue(
       adjustedLastYearPeriod.start,
       adjustedLastYearPeriod.end,
-      reservations
+      reservations,
+      lastYearCutoff
     );
 
     const currentRevenue = currentData.revenue;
@@ -200,7 +222,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
         return `${format(currentDate, 'MMMM')} 1-${currentDate.getDate()}, ${currentYear} vs ${currentYear - 1}`;
       case 'monthly':
         const monthDate = new Date(selectedMonthYear, selectedMonth, 1);
-        return `${format(monthDate, 'MMMM yyyy')} vs ${format(new Date(selectedMonthYear - 1, selectedMonth, 1), 'MMMM yyyy')}`;
+        return `${format(monthDate, 'MMMM yyyy')} bookings as of ${format(currentDate, 'MMM d')} vs same point last year`;
       default:
         return '';
     }
