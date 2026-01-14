@@ -96,6 +96,45 @@ export default function Comparables() {
     }
   });
 
+  // Fetch all listings with comp stats for Setup tab
+  const { data: listingsForSetup = [], isLoading: loadingListings } = useQuery({
+    queryKey: ['properties-for-comp-setup'],
+    queryFn: async () => {
+      const { data: listings, error: listingsError } = await supabase
+        .from('listings')
+        .select('id, nickname, bedrooms, address')
+        .eq('archived', false)
+        .order('nickname');
+      
+      if (listingsError) throw listingsError;
+
+      // Get comp counts per listing
+      const { data: compCounts, error: compError } = await supabase
+        .from('property_comparables')
+        .select('listing_id, is_selected');
+      
+      if (compError) throw compError;
+
+      // Aggregate counts
+      const countMap = new Map<string, { cached: number; selected: number }>();
+      compCounts?.forEach(c => {
+        const existing = countMap.get(c.listing_id) || { cached: 0, selected: 0 };
+        existing.cached++;
+        if (c.is_selected) existing.selected++;
+        countMap.set(c.listing_id, existing);
+      });
+
+      return listings?.map(l => ({
+        id: l.id,
+        nickname: l.nickname,
+        bedrooms: l.bedrooms,
+        city: (l.address as any)?.city || null,
+        cachedCount: countMap.get(l.id)?.cached || 0,
+        selectedCount: countMap.get(l.id)?.selected || 0,
+      })) || [];
+    }
+  });
+
   // Fetch templates
   const { data: templates = [], isLoading: loadingTemplates, refetch: refetchTemplates } = useQuery({
     queryKey: ['compset-templates-all'],
@@ -295,13 +334,138 @@ export default function Comparables() {
           <p className="text-muted-foreground">Manage all property comparables and templates</p>
         </div>
 
-        <Tabs defaultValue="selected" className="space-y-4">
+        <Tabs defaultValue="setup" className="space-y-4">
           <TabsList>
+            <TabsTrigger value="setup">
+              <Settings2 className="h-4 w-4 mr-1" />
+              Setup ({listingsForSetup.filter(l => l.selectedCount < 5).length})
+            </TabsTrigger>
             <TabsTrigger value="selected">All Selected ({stats.totalSelected})</TabsTrigger>
             <TabsTrigger value="cached">All Cached ({stats.totalCached})</TabsTrigger>
             <TabsTrigger value="bulk">Bulk Actions</TabsTrigger>
             <TabsTrigger value="templates">Templates ({templates.length})</TabsTrigger>
           </TabsList>
+
+          {/* Setup Tab - Properties needing comps */}
+          <TabsContent value="setup" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search properties..."
+                    value={setupSearchTerm}
+                    onChange={(e) => setSetupSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <Select value={setupBedroomFilter} onValueChange={setSetupBedroomFilter}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Bedrooms" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Bedrooms</SelectItem>
+                    {[...new Set(listingsForSetup.map(l => l.bedrooms).filter(b => b !== null))].sort().map(b => (
+                      <SelectItem key={b} value={b?.toString() || "0"}>{b} BR</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button onClick={() => setWizardOpen(true)}>
+                <Wand2 className="h-4 w-4 mr-2" />
+                Quick Setup Wizard
+              </Button>
+            </div>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Properties Needing Comparables</CardTitle>
+                <CardDescription>
+                  Properties with fewer than 5 selected comparables. Use the wizard for bulk selection.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loadingListings ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Property</TableHead>
+                        <TableHead>Bedrooms</TableHead>
+                        <TableHead>City</TableHead>
+                        <TableHead>Cached</TableHead>
+                        <TableHead>Selected</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {listingsForSetup
+                        .filter(l => {
+                          const matchesSearch = l.nickname?.toLowerCase().includes(setupSearchTerm.toLowerCase()) ||
+                                               l.city?.toLowerCase().includes(setupSearchTerm.toLowerCase());
+                          const matchesBedroom = setupBedroomFilter === "all" || l.bedrooms?.toString() === setupBedroomFilter;
+                          const needsComps = l.selectedCount < 5;
+                          return matchesSearch && matchesBedroom && needsComps;
+                        })
+                        .map((listing) => (
+                          <TableRow key={listing.id}>
+                            <TableCell>
+                              <Link 
+                                to={`/listings/${listing.id}`}
+                                className="font-medium text-primary hover:underline"
+                              >
+                                {listing.nickname || listing.id}
+                              </Link>
+                            </TableCell>
+                            <TableCell>{listing.bedrooms || "-"}</TableCell>
+                            <TableCell>{listing.city || "-"}</TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">{listing.cachedCount}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={listing.selectedCount >= 5 ? "default" : listing.selectedCount > 0 ? "outline" : "destructive"}>
+                                {listing.selectedCount}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {listing.selectedCount >= 5 ? (
+                                <span className="text-green-600 text-sm">✓ Complete</span>
+                              ) : listing.cachedCount > 0 ? (
+                                <span className="text-yellow-600 text-sm">Needs selection</span>
+                              ) : (
+                                <span className="text-red-600 text-sm">Needs fetch</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                asChild
+                              >
+                                <Link to={`/listings/${listing.id}`}>
+                                  View
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      {listingsForSetup.filter(l => l.selectedCount < 5).length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                            All properties have 5+ comparables selected! 🎉
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           {/* All Selected Tab */}
           <TabsContent value="selected" className="space-y-4">
@@ -733,6 +897,15 @@ export default function Comparables() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Comp Selection Wizard */}
+      <CompSelectionWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        properties={listingsForSetup.filter(l => l.selectedCount < 5)}
+        templates={templates}
+        propertiesWithComps={listingsForSetup.filter(l => l.selectedCount > 0)}
+      />
     </DashboardLayout>
   );
 }
