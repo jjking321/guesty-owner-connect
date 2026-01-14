@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
-import { TrendingUp, TrendingDown, Minus, Lock, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Lock, ArrowUpDown, ArrowUp, ArrowDown, Building2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSmartNavigation, type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
@@ -38,6 +38,7 @@ interface PropertyMetrics {
   hasLockedGoals: boolean;
   goalsLockedCount: number;
   archived?: boolean;
+  isComposite?: boolean;
 }
 
 interface PropertiesTableProps {
@@ -208,8 +209,14 @@ export function PropertiesTable({
                       )}
                       <div className="flex items-center gap-2">
                         <div>
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
                             <p className="font-medium">{property.nickname}</p>
+                            {property.isComposite && (
+                              <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                                <Building2 className="h-3 w-3 mr-1" />
+                                Full
+                              </Badge>
+                            )}
                             {property.archived && (
                               <Badge variant="outline" className="bg-muted text-muted-foreground">
                                 Archived

@@ -60,6 +60,22 @@ Deno.serve(async (req) => {
     for (const update of updates) {
       const { listingId, monthlyProjections } = update;
       listingIds.push(listingId);
+    }
+
+    // Fetch composite status for all listings
+    const { data: listingsData } = await supabaseClient
+      .from('listings')
+      .select('id, is_composite')
+      .in('id', listingIds);
+
+    const compositeIds = new Set(
+      listingsData?.filter(l => l.is_composite).map(l => l.id) || []
+    );
+
+    console.log(`Found ${compositeIds.size} composite listings to skip`);
+
+    for (const update of updates) {
+      const { listingId, monthlyProjections } = update;
 
       for (const [monthStr, projection] of Object.entries(monthlyProjections)) {
         const month = parseInt(monthStr);
@@ -91,12 +107,18 @@ Deno.serve(async (req) => {
       lockedGoals?.map(g => `${g.listing_id}-${g.month}`) || []
     );
 
-    // Filter out locked goals
+    // Filter out locked goals and composite listings
     const goalsToInsert = goalsToUpsert.filter(
-      g => !lockedSet.has(`${g.listing_id}-${g.month}`)
+      g => !lockedSet.has(`${g.listing_id}-${g.month}`) && !compositeIds.has(g.listing_id)
     );
 
-    const goalsSkipped = goalsToUpsert.length - goalsToInsert.length;
+    const goalsSkippedLocked = goalsToUpsert.filter(
+      g => lockedSet.has(`${g.listing_id}-${g.month}`)
+    ).length;
+    const goalsSkippedComposite = goalsToUpsert.filter(
+      g => compositeIds.has(g.listing_id)
+    ).length;
+    const goalsSkipped = goalsSkippedLocked + goalsSkippedComposite;
     console.log(`Skipping ${goalsSkipped} locked goals, upserting ${goalsToInsert.length} goals`);
 
     // Batch upsert in chunks of 500 to avoid payload limits
@@ -133,6 +155,9 @@ Deno.serve(async (req) => {
         propertiesProcessed: updates.length,
         goalsUpdated,
         goalsSkipped,
+        goalsSkippedLocked,
+        goalsSkippedComposite,
+        compositeListingsSkipped: compositeIds.size,
         errors: errors.length > 0 ? errors.slice(0, 10) : [], // Return first 10 errors
       },
     };

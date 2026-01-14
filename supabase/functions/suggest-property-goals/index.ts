@@ -82,14 +82,43 @@ serve(async (req) => {
     
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Step 1: Fetch property details including created_at_guesty
+    // Step 1: Fetch property details including created_at_guesty and is_composite
     const { data: listing, error: listingError } = await supabase
       .from('listings')
-      .select('id, nickname, property_type, bedrooms, accommodates, address, created_at_guesty')
+      .select('id, nickname, property_type, bedrooms, accommodates, address, created_at_guesty, is_composite')
       .eq('id', listingId)
       .single();
 
     if (listingError) throw listingError;
+
+    // If this is a composite listing, return $0 goals
+    if (listing?.is_composite) {
+      console.log('Composite listing detected, returning $0 goals');
+      return new Response(
+        JSON.stringify({
+          goals: Array.from({ length: 12 }, (_, i) => ({
+            month: i + 1,
+            projection: 0,
+            source: 'composite',
+            isRampUp: false,
+            isPreListing: false,
+          })),
+          reasoning: 'Composite ("Full") listing - revenue is distributed to individual units. Goals are tracked at the unit level.',
+          dataSource: 'composite',
+          metadata: {
+            isComposite: true,
+            hasFullYearActuals: false,
+            actualsMonths: 0,
+            compsetMonths: 0,
+            rampUpMonths: 0,
+            preListingMonths: 0,
+            yoyGrowthRate: 0,
+            propertyStartDate: null,
+          }
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Determine property management start date
     const createdAtGuesty = listing.created_at_guesty ? new Date(listing.created_at_guesty) : null;
