@@ -59,3 +59,33 @@ verify_jwt = true
 
 [functions.calculate-booking-probabilities]
 verify_jwt = true
+
+[functions.apply-compset-template]
+verify_jwt = true
+
+[functions.get-mapbox-token]
+verify_jwt = true
+
+[functions.invite-owner]
+verify_jwt = true
+
+[functions.bulk-upload-goals]
+verify_jwt = true
+
+[functions.sync-capacity-calendar]
+verify_jwt = true
+
+[functions.build-booking-curves]
+verify_jwt = false
+
+[functions.suggest-best-comparables]
+verify_jwt = true
+
+[functions.copy-compset]
+verify_jwt = true
+
+[functions.batch-apply-template]
+verify_jwt = true
+
+[functions.batch-ai-select-comparables]
+verify_jwt = true
