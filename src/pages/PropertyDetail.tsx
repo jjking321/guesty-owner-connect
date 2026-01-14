@@ -55,6 +55,7 @@ export default function PropertyDetail() {
     to: new Date(),
   });
   const [showAdjustedOccupancy, setShowAdjustedOccupancy] = useState(false);
+  const [showAdjustedRevPAR, setShowAdjustedRevPAR] = useState(false);
 
   // Fetch capacity calendar for blocked dates
   const { data: capacityCalendar } = useQuery({
@@ -305,6 +306,7 @@ export default function PropertyDetail() {
       averageGuestsPerReservation: 0,
       overallOccupancy: 0,
       revPAR: 0,
+      adjustedRevPAR: 0,
       ownerNights: 0,
       blockedNights: 0,
       bookableDays: 0,
@@ -426,6 +428,7 @@ export default function PropertyDetail() {
 
     // Calculate RevPAR = ADR × Occupancy Rate
     const revPAR = averageADR * (overallOccupancy / 100);
+    const adjustedRevPAR = averageADR * (adjustedOccupancy / 100);
 
     return {
       totalReservations: filteredReservations.filter(r => r.source !== 'owner').length,
@@ -437,6 +440,7 @@ export default function PropertyDetail() {
       averageGuestsPerReservation,
       overallOccupancy,
       revPAR,
+      adjustedRevPAR,
       ownerNights,
       blockedNights,
       bookableDays,
@@ -713,16 +717,44 @@ export default function PropertyDetail() {
 
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                      RevPAR
+                    <CardTitle className="text-sm font-medium flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                        RevPAR
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label htmlFor="adjusted-revpar" className="text-xs font-normal text-muted-foreground cursor-pointer">
+                          Adjusted
+                        </Label>
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Info className="h-3 w-3 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs">
+                              <p>Adjusted RevPAR uses adjusted occupancy, which excludes owner stays and blocked dates from the calculation.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                        <Switch
+                          id="adjusted-revpar"
+                          checked={showAdjustedRevPAR}
+                          onCheckedChange={setShowAdjustedRevPAR}
+                        />
+                      </div>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">
-                      ${metrics.revPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${showAdjustedRevPAR
+                        ? metrics.adjustedRevPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : metrics.revPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">Revenue per available room</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {showAdjustedRevPAR
+                        ? 'Per bookable room night'
+                        : 'Revenue per available room'}
+                    </p>
                   </CardContent>
                 </Card>
 
