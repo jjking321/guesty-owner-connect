@@ -50,9 +50,14 @@ export function PacingReport({ reservations }: PacingReportProps) {
   const getPeriodBoundaries = (year: number): { start: Date; end: Date } => {
     switch (periodType) {
       case 'ytd':
+        // For current year: Jan 1 through today
+        // For last year: Jan 1 through same day last year
+        const ytdEnd = year === currentYear 
+          ? currentDate 
+          : new Date(year, currentMonth, currentDate.getDate());
         return {
           start: new Date(year, 0, 1), // Jan 1
-          end: new Date(year, 11, 31), // Dec 31
+          end: ytdEnd,
         };
       case 'mtd':
         return {
@@ -67,7 +72,7 @@ export function PacingReport({ reservations }: PacingReportProps) {
       default:
         return {
           start: new Date(year, 0, 1),
-          end: new Date(year, 11, 31),
+          end: new Date(year, currentMonth, currentDate.getDate()),
         };
     }
   };
@@ -188,10 +193,9 @@ export function PacingReport({ reservations }: PacingReportProps) {
 
   // Get period description for display
   const getPeriodDescription = (): string => {
-    const currentPeriod = getPeriodBoundaries(currentYear);
     switch (periodType) {
       case 'ytd':
-        return `Full year ${currentYear} vs ${currentYear - 1}`;
+        return `Jan 1 - ${format(currentDate, 'MMM d')}, ${currentYear} vs same period ${currentYear - 1}`;
       case 'mtd':
         return `${format(currentDate, 'MMMM')} 1-${currentDate.getDate()}, ${currentYear} vs ${currentYear - 1}`;
       case 'monthly':
