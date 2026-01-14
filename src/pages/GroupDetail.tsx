@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
   AlertDialog,
   AlertDialogAction,
@@ -55,6 +57,7 @@ export default function GroupDetail() {
   });
   const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("actual");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [showDistributedRevenue, setShowDistributedRevenue] = useState(false);
 
   const { data: group, isLoading: isGroupLoading, refetch: refetchGroup } = useQuery({
     queryKey: ["property-group", id],
@@ -133,6 +136,21 @@ export default function GroupDetail() {
   // Separate composite and non-composite listings for occupancy calculation
   const compositeListingIds = listingsWithComposite?.filter(l => l.is_composite).map(l => l.id) || [];
   const nonCompositeListingIds = listingsWithComposite?.filter(l => !l.is_composite).map(l => l.id) || [];
+
+  // Fetch composite children relationships
+  const { data: compositeChildren } = useQuery({
+    queryKey: ["composite-children", compositeListingIds],
+    queryFn: async () => {
+      if (compositeListingIds.length === 0) return [];
+      const { data, error } = await supabase
+        .from("composite_listing_children")
+        .select("composite_listing_id, child_listing_id, revenue_share_weight")
+        .in("composite_listing_id", compositeListingIds);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: compositeListingIds.length > 0,
+  });
 
   // Get available listings for creating sub-groups (only direct members of this group)
   const { data: availableListings } = useQuery({
@@ -750,6 +768,46 @@ export default function GroupDetail() {
     }
   };
 
+  // Helper function to calculate distributed revenue for a listing
+  const getDistributedRevenue = (listingId: string) => {
+    // Direct revenue from this listing
+    const directRevenue = reservationNights
+      ?.filter(n => n.listing_id === listingId)
+      .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
+
+    if (!showDistributedRevenue) {
+      return { total: directRevenue, direct: directRevenue, attributed: 0 };
+    }
+
+    // Find which composites this listing is a child of
+    const parentComposites = compositeChildren?.filter(
+      cc => cc.child_listing_id === listingId
+    ) || [];
+
+    // Calculate share of each parent composite's revenue
+    let attributedRevenue = 0;
+    parentComposites.forEach(pc => {
+      // Count total children for this composite
+      const childCount = compositeChildren?.filter(
+        cc => cc.composite_listing_id === pc.composite_listing_id
+      ).length || 1;
+      
+      // Get composite's revenue
+      const compositeRevenue = reservationNights
+        ?.filter(n => n.listing_id === pc.composite_listing_id)
+        .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
+      
+      // Add proportional share
+      attributedRevenue += compositeRevenue / childCount;
+    });
+
+    return { 
+      total: directRevenue + attributedRevenue, 
+      direct: directRevenue, 
+      attributed: attributedRevenue 
+    };
+  };
+
   // Fetch all listings data for the properties table
   const { data: allListings } = useQuery({
     queryKey: ["group-all-listings", listingIds],
@@ -816,7 +874,29 @@ export default function GroupDetail() {
             </div>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex items-center gap-4">
+            {compositeListingIds.length > 0 && (
+              <TooltipProvider>
+                <div className="flex items-center gap-2">
+                  <Switch 
+                    id="distribute-revenue"
+                    checked={showDistributedRevenue} 
+                    onCheckedChange={setShowDistributedRevenue}
+                  />
+                  <Label htmlFor="distribute-revenue" className="text-sm cursor-pointer">
+                    Distribute Full Revenue
+                  </Label>
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <InfoIcon className="h-4 w-4 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <p>When enabled, Full property revenue is distributed equally to individual units for comparison purposes.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+              </TooltipProvider>
+            )}
             <DateRangeFilter value={dateRange} onChange={setDateRange} />
             {directListingIds.length > 0 && (
               <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
@@ -1251,16 +1331,19 @@ export default function GroupDetail() {
               </div>
             ) : (
               <PropertiesTable
-                properties={(allListings || []).map(listing => {
+                properties={(allListings || [])
+                  // When distributed view is on, hide composite listings
+                  .filter(listing => !showDistributedRevenue || !listing.is_composite)
+                  .map(listing => {
                   const currentYear = dateRange.from.getFullYear();
                   const currentDate = new Date();
                   
                   const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
                   const listingForecast = forecasts?.find(f => f.listing_id === listing.id && f.year === currentYear);
                   
-                  const ytdRevenue = reservationNights
-                    ?.filter(n => n.listing_id === listing.id)
-                    .reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
+                  // Use distributed revenue when toggle is on
+                  const revenueData = getDistributedRevenue(listing.id);
+                  const ytdRevenue = revenueData.total;
 
                   const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
                   const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
@@ -1289,6 +1372,8 @@ export default function GroupDetail() {
                     thumbnail: listing.thumbnail,
                     propertyType: listing.property_type,
                     actualRevenue: ytdRevenue,
+                    directRevenue: revenueData.direct,
+                    attributedRevenue: revenueData.attributed,
                     budgetTotal: budget,
                     projectionTotal: projection,
                     goalTotal: goal,
@@ -1304,6 +1389,7 @@ export default function GroupDetail() {
                     hasGoals: listingGoals.length > 0,
                     hasLockedGoals: lockedGoals.length > 0,
                     goalsLockedCount: lockedGoals.length,
+                    isComposite: listing.is_composite,
                   };
                 }).sort((a, b) => {
                   let comparison = 0;
