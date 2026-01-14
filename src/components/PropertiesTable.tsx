@@ -22,6 +22,8 @@ interface PropertyMetrics {
   address: any;
   propertyType: string | null;
   actualRevenue: number;
+  directRevenue?: number;
+  attributedRevenue?: number;
   budgetTotal: number;
   projectionTotal: number;
   goalTotal: number;
@@ -244,7 +246,14 @@ export function PropertiesTable({
                     </div>
                   </TableCell>
                 <TableCell className="text-right font-medium">
-                  {formatCurrency(property.actualRevenue)}
+                  <div className="flex flex-col items-end">
+                    <span>{formatCurrency(property.actualRevenue)}</span>
+                    {(property.attributedRevenue ?? 0) > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        +{formatCurrency(property.attributedRevenue || 0)} from Full
+                      </span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground">
                   {formatCurrency(property.budgetTotal)}
