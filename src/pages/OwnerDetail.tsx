@@ -899,6 +899,7 @@ export default function OwnerDetail() {
                       thumbnail: listing.thumbnail,
                       propertyType: listing.property_type,
                       actualRevenue: ytdRevenue,
+                      onTheBooksRevenue: 0,
                       budgetTotal: budget,
                       projectionTotal: projection,
                       goalTotal: goal,

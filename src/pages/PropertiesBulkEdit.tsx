@@ -24,8 +24,11 @@ import {
 import { toast } from "sonner";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
-const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['property', 'actual', 'occupancy', 'adr', 'revpar', 'goal', 'forecast', 'goalProgress', 'status'];
-const DEFAULT_COLUMN_ORDER: ColumnKey[] = ['property', 'actual', 'occupancy', 'adr', 'revpar', 'goal', 'forecast', 'goalProgress', 'status'];
+const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['property', 'actual', 'onTheBooks', 'occupancy', 'adr', 'revpar', 'goal', 'forecast', 'goalProgress', 'status'];
+const DEFAULT_COLUMN_ORDER: ColumnKey[] = ['property', 'actual', 'onTheBooks', 'occupancy', 'adr', 'revpar', 'goal', 'forecast', 'goalProgress', 'status'];
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 
+                     'July', 'August', 'September', 'October', 'November', 'December'];
 
 interface PropertyMetrics {
   id: string;
@@ -34,6 +37,7 @@ interface PropertyMetrics {
   address: any;
   propertyType: string | null;
   actualRevenue: number;
+  onTheBooksRevenue: number;
   projectionTotal: number;
   forecastedRevenue: number;
   forecastUpdatedAt: string | null;
@@ -52,6 +56,7 @@ interface PropertyMetrics {
 export default function PropertiesBulkEdit() {
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null); // null = Full Year, 1-12 = specific month
   const [searchQuery, setSearchQuery] = useState("");
   const [propertyFilters, setPropertyFilters] = useState({
     active: true,
@@ -72,7 +77,7 @@ export default function PropertiesBulkEdit() {
     unlocked: true,
   });
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
-  const [sortBy, setSortBy] = useState<"name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status">("name");
+  const [sortBy, setSortBy] = useState<"name" | "actual" | "onTheBooks" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
@@ -197,13 +202,12 @@ export default function PropertiesBulkEdit() {
     },
   });
 
-  // Fetch reservation nights for occupancy/ADR/RevPAR calculations
+  // Fetch reservation nights for the FULL YEAR (past + future) for occupancy/ADR/RevPAR and on-the-books calculations
   const { data: reservationNights = [] } = useQuery({
-    queryKey: ["reservation-nights-ytd-portfolio", selectedYear],
+    queryKey: ["reservation-nights-portfolio", selectedYear],
     queryFn: async () => {
       const startDate = `${selectedYear}-01-01`;
-      const today = new Date().toISOString().split('T')[0];
-      const endDate = selectedYear === new Date().getFullYear() ? today : `${selectedYear}-12-31`;
+      const endDate = `${selectedYear}-12-31`; // Full year to get future bookings too
       
       const { data, error } = await supabase
         .from("reservation_nights")
@@ -215,15 +219,67 @@ export default function PropertiesBulkEdit() {
     },
   });
 
-  // Calculate days in range for occupancy calculations
-  const daysInRange = useMemo(() => {
-    const startDate = new Date(`${selectedYear}-01-01`);
+  // Calculate period info based on selected month
+  const periodInfo = useMemo(() => {
     const today = new Date();
-    const endDate = selectedYear === today.getFullYear() 
-      ? today 
-      : new Date(`${selectedYear}-12-31`);
-    return Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-  }, [selectedYear]);
+    const todayStr = today.toISOString().split('T')[0];
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1;
+    
+    if (selectedMonth === null) {
+      // Full Year mode
+      return {
+        start: `${selectedYear}-01-01`,
+        end: `${selectedYear}-12-31`,
+        actualCutoff: todayStr,
+        isPastPeriod: selectedYear < currentYear,
+        isFuturePeriod: selectedYear > currentYear,
+        isCurrentPeriod: selectedYear === currentYear,
+        label: `${selectedYear}`,
+        periodLabel: selectedYear === currentYear ? 'YTD' : `${selectedYear}`,
+      };
+    } else {
+      // Specific month mode
+      const monthStr = String(selectedMonth).padStart(2, '0');
+      const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
+      const periodStart = `${selectedYear}-${monthStr}-01`;
+      const periodEnd = `${selectedYear}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+      
+      const isPast = selectedYear < currentYear || 
+                     (selectedYear === currentYear && selectedMonth < currentMonth);
+      const isFuture = selectedYear > currentYear || 
+                       (selectedYear === currentYear && selectedMonth > currentMonth);
+      const isCurrent = selectedYear === currentYear && selectedMonth === currentMonth;
+      
+      return {
+        start: periodStart,
+        end: periodEnd,
+        actualCutoff: todayStr,
+        isPastPeriod: isPast,
+        isFuturePeriod: isFuture,
+        isCurrentPeriod: isCurrent,
+        label: `${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`,
+        periodLabel: MONTH_NAMES[selectedMonth - 1],
+      };
+    }
+  }, [selectedYear, selectedMonth]);
+
+  // Calculate days in range for occupancy calculations (only past days)
+  const daysInRange = useMemo(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    const periodStart = new Date(periodInfo.start);
+    const periodEnd = new Date(periodInfo.end);
+    
+    // For "actual" calculations, only count days up to today (if period extends beyond)
+    const actualEnd = periodEnd < today ? periodEnd : today;
+    
+    // If period hasn't started yet, return 0
+    if (actualEnd < periodStart) return 0;
+    
+    return Math.floor((actualEnd.getTime() - periodStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  }, [periodInfo]);
 
   // Realtime: refetch goals when new rows for the selected year are inserted/updated
   useEffect(() => {
@@ -249,35 +305,59 @@ export default function PropertiesBulkEdit() {
   const propertyMetrics = useMemo(() => {
     if (!listings.length) return [];
 
+    const today = new Date().toISOString().split('T')[0];
+
     return listings.map((listing): PropertyMetrics => {
-      // Get actual revenue from reservation_nights (per-night allocation, matching forecasting module)
-      const listingNights = reservationNights.filter(n => n.listing_id === listing.id);
-      const actualRevenue = listingNights.reduce(
+      // Filter nights to selected period
+      const periodNights = reservationNights.filter(n => 
+        n.listing_id === listing.id && 
+        n.night_date >= periodInfo.start && 
+        n.night_date <= periodInfo.end
+      );
+      
+      // Split into past (actual) and future (on the books)
+      const pastNights = periodNights.filter(n => n.night_date < today);
+      const futureNights = periodNights.filter(n => n.night_date >= today);
+      
+      // Actual revenue = sum of past nights only
+      const actualRevenue = pastNights.reduce(
+        (sum, n) => sum + (Number(n.revenue_allocation) || 0),
+        0
+      );
+      
+      // On the books revenue = sum of future nights
+      const onTheBooksRevenue = futureNights.reduce(
         (sum, n) => sum + (Number(n.revenue_allocation) || 0),
         0
       );
 
-      // Calculate annual goals using precomputed map
+      // Calculate goals using precomputed map, filtered to selected period
       const listingGoals = goalsByListing.get(String(listing.id)) || [];
+      const periodGoals = selectedMonth === null 
+        ? listingGoals 
+        : listingGoals.filter((g: any) => g.month === selectedMonth);
       
-      // Debug logging for specific property
-      if (listing.nickname === "104 W Leon - Full") {
-        console.log("🔍 Debug '104 W Leon - Full' listingGoals", {
-          listing_id: listing.id,
-          total_goals_fetched: goals.length,
-          listingGoalsCount: listingGoals.length,
-          sample: (listingGoals as any[]).slice(0, 3).map((g: any) => ({ month: g.month, projection: g.projection_revenue })),
-        });
-      }
-      const projectionTotal = listingGoals.reduce(
+      const projectionTotal = periodGoals.reduce(
         (sum, g) => sum + (Number(g.projection_revenue) || 0),
         0
       );
 
-      // Get forecast
+      // Get forecast, filtered to period
       const forecast = forecasts.find((f) => f.listing_id === listing.id);
-      const totalForecast = forecast?.total_forecast as { p50?: number } | null;
-      const forecastedRevenue = totalForecast?.p50 || 0;
+      let forecastedRevenue = 0;
+      
+      if (selectedMonth === null) {
+        // Full year forecast
+        const totalForecast = forecast?.total_forecast as { p50?: number } | null;
+        forecastedRevenue = totalForecast?.p50 || 0;
+      } else {
+        // Monthly forecast
+        const monthlyForecasts = (forecast?.monthly_forecasts as any[]) || [];
+        const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+        const monthForecast = monthlyForecasts.find((mf: any) => mf.month === monthKey);
+        forecastedRevenue = monthForecast?.total_forecast_p50 || 0;
+      }
+      
       const forecastUpdatedAt = forecast?.generated_at || null;
 
       // Calculate achievement percentages
@@ -296,15 +376,12 @@ export default function PropertiesBulkEdit() {
 
       // Calculate goal lock status
       const hasGoals = projectionTotal > 0;
-      const hasLockedGoals = listingGoals.some(g => g.locked);
-      const goalsLockedCount = listingGoals.filter(g => g.locked).length;
+      const hasLockedGoals = periodGoals.some((g: any) => g.locked);
+      const goalsLockedCount = periodGoals.filter((g: any) => g.locked).length;
 
-      // Calculate occupancy, ADR, RevPAR using reservation nights data
-      const listingNightsCount = reservationNights.filter(
-        n => n.listing_id === listing.id
-      ).length || 0;
-      const occupancy = daysInRange > 0 ? (listingNightsCount / daysInRange) * 100 : 0;
-      const adr = listingNightsCount > 0 ? actualRevenue / listingNightsCount : 0;
+      // Calculate occupancy, ADR, RevPAR using past nights only
+      const occupancy = daysInRange > 0 ? (pastNights.length / daysInRange) * 100 : 0;
+      const adr = pastNights.length > 0 ? actualRevenue / pastNights.length : 0;
       const revpar = daysInRange > 0 ? actualRevenue / daysInRange : 0;
 
       return {
@@ -314,6 +391,7 @@ export default function PropertiesBulkEdit() {
         address: listing.address,
         propertyType: listing.property_type,
         actualRevenue,
+        onTheBooksRevenue,
         projectionTotal,
         forecastedRevenue,
         forecastUpdatedAt,
@@ -329,7 +407,7 @@ export default function PropertiesBulkEdit() {
         revpar,
       };
     });
-  }, [listings, goals, forecasts, reservationNights, daysInRange, goalsByListing]);
+  }, [listings, goals, forecasts, reservationNights, daysInRange, goalsByListing, periodInfo, selectedMonth, selectedYear]);
 
   // Filter and sort properties
   const filteredProperties = useMemo(() => {
@@ -392,6 +470,9 @@ export default function PropertiesBulkEdit() {
         case "actual":
           comparison = a.actualRevenue - b.actualRevenue;
           break;
+        case "onTheBooks":
+          comparison = a.onTheBooksRevenue - b.onTheBooksRevenue;
+          break;
         case "occupancy":
           comparison = (a.occupancy ?? 0) - (b.occupancy ?? 0);
           break;
@@ -425,11 +506,13 @@ export default function PropertiesBulkEdit() {
     return propertyMetrics.reduce(
       (acc, property) => ({
         actualRevenue: acc.actualRevenue + property.actualRevenue,
+        onTheBooksRevenue: acc.onTheBooksRevenue + property.onTheBooksRevenue,
         projectionTotal: acc.projectionTotal + property.projectionTotal,
         forecastedRevenue: acc.forecastedRevenue + property.forecastedRevenue,
       }),
       {
         actualRevenue: 0,
+        onTheBooksRevenue: 0,
         projectionTotal: 0,
         forecastedRevenue: 0,
       }
@@ -656,7 +739,7 @@ export default function PropertiesBulkEdit() {
             <div className="flex items-center gap-4">
               <h1 className="text-3xl font-bold">Portfolio Overview</h1>
               <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-[100px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -664,9 +747,23 @@ export default function PropertiesBulkEdit() {
                   <SelectItem value={(currentYear + 1).toString()}>{currentYear + 1}</SelectItem>
                 </SelectContent>
               </Select>
+              <Select 
+                value={selectedMonth === null ? "full-year" : selectedMonth.toString()} 
+                onValueChange={(value) => setSelectedMonth(value === "full-year" ? null : parseInt(value))}
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="full-year">Full Year</SelectItem>
+                  {MONTH_NAMES.map((month, idx) => (
+                    <SelectItem key={idx + 1} value={(idx + 1).toString()}>{month}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <p className="text-muted-foreground">
-              View and compare revenue metrics across all properties
+              {periodInfo.periodLabel} - View and compare revenue metrics across all properties
             </p>
           </div>
           <div className="flex gap-2">
@@ -741,12 +838,16 @@ export default function PropertiesBulkEdit() {
 
         <PropertyMetricsSummary
           totalActualRevenue={portfolioTotals.actualRevenue}
+          totalOnTheBooks={portfolioTotals.onTheBooksRevenue}
           totalProjection={portfolioTotals.projectionTotal}
           totalForecast={portfolioTotals.forecastedRevenue}
           propertiesCount={propertyMetrics.length}
           onTrackCount={propertyMetrics.filter((p) => p.status === "on-track").length}
           atRiskCount={propertyMetrics.filter((p) => p.status === "at-risk").length}
           behindCount={propertyMetrics.filter((p) => p.status === "behind").length}
+          periodLabel={periodInfo.periodLabel}
+          isPastPeriod={periodInfo.isPastPeriod}
+          isFuturePeriod={periodInfo.isFuturePeriod}
         />
 
         {currentAccountId && (
@@ -1114,6 +1215,11 @@ export default function PropertiesBulkEdit() {
           columnOrder={columnOrder}
           onColumnConfigChange={handleColumnConfigChange}
           showColumnConfig={true}
+          periodLabel={periodInfo.periodLabel}
+          isPastPeriod={periodInfo.isPastPeriod}
+          isFuturePeriod={periodInfo.isFuturePeriod}
+          showActualColumn={!periodInfo.isFuturePeriod}
+          showOnTheBooksColumn={!periodInfo.isPastPeriod}
           referrer={{
             path: '/properties/bulk-edit',
             label: 'Portfolio View',
