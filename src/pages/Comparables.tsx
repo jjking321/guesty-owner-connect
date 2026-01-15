@@ -159,15 +159,38 @@ export default function Comparables() {
     }
   });
 
-  // Fetch stats
-  const stats = {
-    totalCached: comparables.length,
-    totalSelected: comparables.filter(c => c.is_selected).length,
-    withMetrics: comparables.filter(c => c.is_selected && c.metrics_fetched_at).length,
-    withFutureRates: comparables.filter(c => c.is_selected && c.future_rates_fetched_at).length,
+  // Deduplicate comparables by airroi_listing_id for display
+  const deduplicateByAirroiId = (comps: ComparableWithListing[]): ComparableWithListing[] => {
+    const seen = new Map<string, ComparableWithListing>();
+    for (const comp of comps) {
+      const existing = seen.get(comp.airroi_listing_id);
+      // Keep the most recently fetched version
+      if (!existing || 
+          (comp.metrics_fetched_at && (!existing.metrics_fetched_at || 
+           new Date(comp.metrics_fetched_at) > new Date(existing.metrics_fetched_at)))) {
+        seen.set(comp.airroi_listing_id, comp);
+      }
+    }
+    return Array.from(seen.values());
   };
 
   const selectedComparables = comparables.filter(c => c.is_selected);
+  const uniqueSelectedComparables = deduplicateByAirroiId(selectedComparables);
+
+  // Count how many properties use each airroi_listing_id
+  const usageCountByAirroiId = new Map<string, number>();
+  selectedComparables.forEach(c => {
+    usageCountByAirroiId.set(c.airroi_listing_id, (usageCountByAirroiId.get(c.airroi_listing_id) || 0) + 1);
+  });
+
+  // Fetch stats
+  const stats = {
+    totalCached: comparables.length,
+    totalSelected: selectedComparables.length,
+    uniqueSelected: uniqueSelectedComparables.length,
+    withMetrics: uniqueSelectedComparables.filter(c => c.metrics_fetched_at).length,
+    withFutureRates: uniqueSelectedComparables.filter(c => c.future_rates_fetched_at).length,
+  };
 
   // Filter comparables based on search
   const filteredComparables = comparables.filter(c => 
@@ -176,9 +199,8 @@ export default function Comparables() {
     c.host_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredSelected = selectedComparables.filter(c =>
+  const filteredSelected = uniqueSelectedComparables.filter(c =>
     c.listing_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.listings?.nickname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.host_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -365,7 +387,7 @@ export default function Comparables() {
               <Settings2 className="h-4 w-4 mr-1" />
               Setup ({filteredListingsForSetup.length})
             </TabsTrigger>
-            <TabsTrigger value="selected">All Selected ({stats.totalSelected})</TabsTrigger>
+            <TabsTrigger value="selected">All Selected ({stats.uniqueSelected})</TabsTrigger>
             <TabsTrigger value="cached">All Cached ({stats.totalCached})</TabsTrigger>
             <TabsTrigger value="bulk">Bulk Actions</TabsTrigger>
             <TabsTrigger value="templates">Templates ({templates.length})</TabsTrigger>
@@ -620,7 +642,7 @@ export default function Comparables() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Comparable</TableHead>
-                    <TableHead>Property</TableHead>
+                    <TableHead>Used By</TableHead>
                     <TableHead>Bedrooms</TableHead>
                     <TableHead>TTM Revenue</TableHead>
                     <TableHead>TTM ADR</TableHead>
@@ -638,7 +660,7 @@ export default function Comparables() {
                     </TableRow>
                   ) : (
                     filteredSelected.map((comp) => (
-                      <TableRow key={comp.id}>
+                      <TableRow key={comp.airroi_listing_id}>
                         <TableCell>
                           <div>
                             <div className="font-medium">{comp.listing_name || "Unknown"}</div>
@@ -646,12 +668,9 @@ export default function Comparables() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Link 
-                            to={`/listings/${comp.listing_id}`}
-                            className="text-primary hover:underline"
-                          >
-                            {comp.listings?.nickname || comp.listing_id}
-                          </Link>
+                          <Badge variant="outline">
+                            {usageCountByAirroiId.get(comp.airroi_listing_id) || 1} {usageCountByAirroiId.get(comp.airroi_listing_id) === 1 ? 'property' : 'properties'}
+                          </Badge>
                         </TableCell>
                         <TableCell>{getBedrooms(comp)}</TableCell>
                         <TableCell>{formatCurrency(comp.ttm_revenue)}</TableCell>
