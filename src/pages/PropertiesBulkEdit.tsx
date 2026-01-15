@@ -1221,7 +1221,7 @@ export default function PropertiesBulkEdit() {
           isPastPeriod={periodInfo.isPastPeriod}
           isFuturePeriod={periodInfo.isFuturePeriod}
           showActualColumn={!periodInfo.isFuturePeriod}
-          showOnTheBooksColumn={!periodInfo.isPastPeriod}
+          showOnTheBooksColumn={true}
           referrer={{
             path: '/properties/bulk-edit',
             label: 'Portfolio View',
