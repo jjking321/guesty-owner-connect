@@ -72,7 +72,7 @@ export default function PropertiesBulkEdit() {
     unlocked: true,
   });
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
-  const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("name");
+  const [sortBy, setSortBy] = useState<"name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
@@ -405,6 +405,18 @@ export default function PropertiesBulkEdit() {
           break;
         case "actual":
           comparison = a.actualRevenue - b.actualRevenue;
+          break;
+        case "occupancy":
+          comparison = (a.occupancy ?? 0) - (b.occupancy ?? 0);
+          break;
+        case "adr":
+          comparison = (a.adr ?? 0) - (b.adr ?? 0);
+          break;
+        case "revpar":
+          comparison = (a.revpar ?? 0) - (b.revpar ?? 0);
+          break;
+        case "goal":
+          comparison = a.projectionTotal - b.projectionTotal;
           break;
         case "forecast":
           comparison = a.forecastedRevenue - b.forecastedRevenue;

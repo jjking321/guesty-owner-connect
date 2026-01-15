@@ -70,9 +70,9 @@ interface PropertyMetrics {
 interface PropertiesTableProps {
   properties: PropertyMetrics[];
   isLoading: boolean;
-  sortBy?: "name" | "actual" | "forecast" | "goalProgress" | "status";
+  sortBy?: "name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status";
   sortDirection?: "asc" | "desc";
-  onSort?: (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => void;
+  onSort?: (field: "name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status") => void;
   referrer?: NavigationReferrer;
   selectable?: boolean;
   selectedIds?: Set<string>;
@@ -142,7 +142,7 @@ export function PropertiesTable({
   };
 
   const SortableHeader = ({ field, children, align = "left" }: { 
-    field: "name" | "actual" | "forecast" | "goalProgress" | "status"; 
+    field: "name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status"; 
     children: React.ReactNode;
     align?: "left" | "right" | "center";
   }) => {
@@ -204,13 +204,13 @@ export function PropertiesTable({
       case 'actual':
         return <SortableHeader field="actual" align="right">Actual YTD</SortableHeader>;
       case 'occupancy':
-        return <TableHead className="text-right">Occ %</TableHead>;
+        return <SortableHeader field="occupancy" align="right">Occ %</SortableHeader>;
       case 'adr':
-        return <TableHead className="text-right">ADR</TableHead>;
+        return <SortableHeader field="adr" align="right">ADR</SortableHeader>;
       case 'revpar':
-        return <TableHead className="text-right">RevPAR</TableHead>;
+        return <SortableHeader field="revpar" align="right">RevPAR</SortableHeader>;
       case 'goal':
-        return <TableHead className="text-right">Goal</TableHead>;
+        return <SortableHeader field="goal" align="right">Goal</SortableHeader>;
       case 'forecast':
         return <SortableHeader field="forecast" align="right">Forecast</SortableHeader>;
       case 'goalProgress':
