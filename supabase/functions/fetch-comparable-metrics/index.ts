@@ -255,17 +255,34 @@ serve(async (req) => {
 
     console.log(`Found ${comparables.length} comparables to fetch metrics for`);
 
+    // DEDUPLICATION: Group comparables by airroi_listing_id to avoid redundant API calls
+    const airroiIdToRecords = new Map<string, Array<{ id: string; listing_id: string }>>();
+    
+    for (const comparable of comparables) {
+      const key = comparable.airroi_listing_id;
+      if (!airroiIdToRecords.has(key)) {
+        airroiIdToRecords.set(key, []);
+      }
+      airroiIdToRecords.get(key)!.push({
+        id: comparable.id,
+        listing_id: comparable.listing_id
+      });
+    }
+
+    console.log(`Deduplicated ${comparables.length} records to ${airroiIdToRecords.size} unique API calls`);
+
     let successCount = 0;
     let failedCount = 0;
+    let recordsUpdated = 0;
     const errors: string[] = [];
     const affectedListingIds = new Set<string>();
 
-    // Fetch metrics for each comparable
-    for (const comparable of comparables) {
+    // Fetch metrics for each UNIQUE airroi_listing_id
+    for (const [airroiListingId, records] of airroiIdToRecords.entries()) {
       try {
-        console.log(`Fetching metrics for airroi_listing_id: ${comparable.airroi_listing_id}`);
+        console.log(`Fetching metrics for airroi_listing_id: ${airroiListingId} (affects ${records.length} records)`);
 
-        const url = `${AIRROI_API_URL}?id=${comparable.airroi_listing_id}&num_months=60&currency=usd`;
+        const url = `${AIRROI_API_URL}?id=${airroiListingId}&num_months=60&currency=usd`;
         
         const response = await fetch(url, {
           method: 'GET',
@@ -277,20 +294,21 @@ serve(async (req) => {
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error(`API error for ${comparable.airroi_listing_id}: ${response.status} - ${errorText}`);
-          errors.push(`ID ${comparable.airroi_listing_id}: ${response.status}`);
+          console.error(`API error for ${airroiListingId}: ${response.status} - ${errorText}`);
+          errors.push(`ID ${airroiListingId}: ${response.status}`);
           failedCount++;
           continue;
         }
 
         const metricsData = await response.json();
-        console.log(`Received metrics data for ${comparable.airroi_listing_id}: ${JSON.stringify(metricsData).slice(0, 200)}...`);
+        console.log(`Received metrics data for ${airroiListingId}: ${JSON.stringify(metricsData).slice(0, 200)}...`);
 
         // Calculate TTM rollups
         const { ttmMetrics, priorTtmMetrics } = calculateTtmRollups(metricsData.results || []);
-        console.log(`Calculated TTM metrics for ${comparable.airroi_listing_id}:`, ttmMetrics);
+        console.log(`Calculated TTM metrics for ${airroiListingId}:`, ttmMetrics);
 
-        // Update the comparable with the historical metrics and rollups
+        // Update ALL records that share this airroi_listing_id
+        const recordIds = records.map(r => r.id);
         const { error: updateError } = await supabase
           .from('property_comparables')
           .update({
@@ -307,16 +325,18 @@ serve(async (req) => {
             metrics_fetched_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           } as any)
-          .eq('id', comparable.id);
+          .in('id', recordIds);
 
         if (updateError) {
-          console.error(`Failed to update comparable ${comparable.id}: ${updateError.message}`);
-          errors.push(`Update ${comparable.id}: ${updateError.message}`);
+          console.error(`Failed to update comparables for ${airroiListingId}: ${updateError.message}`);
+          errors.push(`Update ${airroiListingId}: ${updateError.message}`);
           failedCount++;
         } else {
-          console.log(`Successfully updated metrics for comparable ${comparable.id}`);
+          console.log(`Successfully updated ${records.length} records for airroi_listing_id ${airroiListingId}`);
           successCount++;
-          affectedListingIds.add(comparable.listing_id);
+          recordsUpdated += records.length;
+          // Track all affected listings for compset summary updates
+          records.forEach(r => affectedListingIds.add(r.listing_id));
         }
 
         // Small delay to avoid rate limiting
@@ -324,25 +344,27 @@ serve(async (req) => {
 
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`Error processing comparable ${comparable.id}:`, error);
-        errors.push(`Process ${comparable.airroi_listing_id}: ${errorMessage}`);
+        console.error(`Error processing airroi_listing_id ${airroiListingId}:`, error);
+        errors.push(`Process ${airroiListingId}: ${errorMessage}`);
         failedCount++;
       }
     }
 
     // Update compset summaries for all affected listings
+    console.log(`Updating compset summaries for ${affectedListingIds.size} affected listings`);
     for (const listingId of affectedListingIds) {
       await updateCompsetSummary(supabase, listingId);
     }
 
-    console.log(`Completed: ${successCount} success, ${failedCount} failed`);
+    console.log(`Completed: ${successCount} API calls, ${recordsUpdated} records updated, ${failedCount} failed`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        fetched: successCount,
+        api_calls_made: airroiIdToRecords.size,
+        records_updated: recordsUpdated,
         failed: failedCount,
-        total: comparables.length,
+        total_records: comparables.length,
         errors: errors.length > 0 ? errors : undefined,
       }),
       {
