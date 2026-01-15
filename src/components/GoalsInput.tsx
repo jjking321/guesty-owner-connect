@@ -383,7 +383,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
         <div className="flex items-center justify-between">
           <div>
             <CardTitle>Revenue Goals</CardTitle>
-            <CardDescription>Set monthly revenue projections</CardDescription>
+            <CardDescription>Set monthly revenue goals</CardDescription>
             <div className="mt-2 text-2xl font-bold text-primary">
               {new Intl.NumberFormat("en-US", {
                 style: "currency",
@@ -469,7 +469,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
 
           <div className="grid grid-cols-4 gap-4 font-medium text-sm text-muted-foreground pb-2 border-b">
             <div>Month</div>
-            <div>Projection</div>
+            <div>Goal</div>
             <div className="text-center">Source</div>
             <div className="text-center">Lock</div>
           </div>
@@ -492,7 +492,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
                         </Badge>
                       </TooltipTrigger>
                       <TooltipContent>
-                        Ramp-up period: New property, goal set to 70% of projection
+                        Ramp-up period: New property, goal set to 70% of target
                       </TooltipContent>
                     </Tooltip>
                   )}

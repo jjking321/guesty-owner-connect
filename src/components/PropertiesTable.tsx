@@ -160,7 +160,7 @@ export function PropertiesTable({
                 )}
                 <SortableHeader field="name">Property</SortableHeader>
                 <SortableHeader field="actual" align="right">Actual YTD</SortableHeader>
-                <TableHead className="text-right">Projection</TableHead>
+                <TableHead className="text-right">Goal</TableHead>
                 <SortableHeader field="forecast" align="right">Forecast</SortableHeader>
                 <SortableHeader field="goalProgress" align="center">Goal Progress</SortableHeader>
                 <SortableHeader field="status" align="center">Status</SortableHeader>

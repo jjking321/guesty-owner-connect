@@ -54,14 +54,14 @@ export function PropertyMetricsSummary({
         <CardContent>
           <div className="text-2xl font-bold">{formatCurrency(totalForecast)}</div>
           <p className="text-xs text-muted-foreground">
-            {goalAchievement.toFixed(1)}% of projection
+            {goalAchievement.toFixed(1)}% of goal
           </p>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Annual Projection</CardTitle>
+          <CardTitle className="text-sm font-medium">Annual Goal</CardTitle>
           <Target className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>

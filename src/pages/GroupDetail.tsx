@@ -1097,7 +1097,7 @@ export default function GroupDetail() {
                     </div>
 
                     <div>
-                      <h4 className="text-sm font-medium mb-4">Probability of Hitting Projection</h4>
+                      <h4 className="text-sm font-medium mb-4">Probability of Hitting Goal</h4>
                       <div className="flex justify-center">
                         {(() => {
                           const probability = goalProbabilities.projection;
@@ -1141,7 +1141,7 @@ export default function GroupDetail() {
                                 </div>
                               </div>
                               <div className="text-center">
-                                <p className="text-sm font-medium">Projection</p>
+                                <p className="text-sm font-medium">Goal</p>
                                 <p className="text-xs text-muted-foreground">
                                   ${target.toLocaleString()}
                                 </p>
