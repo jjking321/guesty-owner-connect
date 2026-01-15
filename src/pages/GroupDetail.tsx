@@ -406,8 +406,6 @@ export default function GroupDetail() {
   const hasNights = totalNights > 0;
   const isDataIncomplete = hasReservations && !hasNights;
 
-  const totalGoalRevenue = goals?.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0) || 0;
-  const totalBudgetRevenue = goals?.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0) || 0;
   const totalProjectionRevenue = goals?.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0) || 0;
 
   // Calculate aggregated forecast
@@ -455,19 +453,15 @@ export default function GroupDetail() {
 
   // Calculate goal probabilities (average across all properties)
   const avgGoalProbabilities = forecasts?.reduce((acc, f: any) => {
-    const probs = f.goal_probabilities || { budget: 0, projection: 0, goal: 0 };
+    const probs = f.goal_probabilities || { projection: 0 };
     return {
-      budget: acc.budget + probs.budget,
       projection: acc.projection + probs.projection,
-      goal: acc.goal + probs.goal,
       count: acc.count + 1,
     };
-  }, { budget: 0, projection: 0, goal: 0, count: 0 });
+  }, { projection: 0, count: 0 });
 
   const goalProbabilities = avgGoalProbabilities?.count ? {
-    budget: avgGoalProbabilities.budget / avgGoalProbabilities.count,
     projection: avgGoalProbabilities.projection / avgGoalProbabilities.count,
-    goal: avgGoalProbabilities.goal / avgGoalProbabilities.count,
   } : null;
 
   // Calculate year-over-year revenue data
@@ -1103,13 +1097,11 @@ export default function GroupDetail() {
                     </div>
 
                     <div>
-                      <h4 className="text-sm font-medium mb-4">Average Probability of Hitting Targets</h4>
-                      <div className="grid grid-cols-3 gap-4">
-                        {['budget', 'projection', 'goal'].map((type) => {
-                          const probability = goalProbabilities[type as keyof typeof goalProbabilities];
-                          const target = type === 'budget' ? totalBudgetRevenue : 
-                                        type === 'projection' ? totalProjectionRevenue : 
-                                        totalGoalRevenue;
+                      <h4 className="text-sm font-medium mb-4">Probability of Hitting Projection</h4>
+                      <div className="flex justify-center">
+                        {(() => {
+                          const probability = goalProbabilities.projection;
+                          const target = totalProjectionRevenue;
                           const getColor = (prob: number) => {
                             if (prob >= 70) return "text-green-600";
                             if (prob >= 40) return "text-yellow-600";
@@ -1117,7 +1109,7 @@ export default function GroupDetail() {
                           };
 
                           return (
-                            <div key={type} className="flex flex-col items-center space-y-2">
+                            <div className="flex flex-col items-center space-y-2">
                               <div className="relative w-24 h-24">
                                 <svg className="transform -rotate-90 w-24 h-24">
                                   <circle
@@ -1149,14 +1141,14 @@ export default function GroupDetail() {
                                 </div>
                               </div>
                               <div className="text-center">
-                                <p className="text-sm font-medium capitalize">{type}</p>
+                                <p className="text-sm font-medium">Projection</p>
                                 <p className="text-xs text-muted-foreground">
                                   ${target.toLocaleString()}
                                 </p>
                               </div>
                             </div>
                           );
-                        })}
+                        })()}
                       </div>
                     </div>
 

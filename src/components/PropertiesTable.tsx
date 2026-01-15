@@ -24,17 +24,11 @@ interface PropertyMetrics {
   actualRevenue: number;
   directRevenue?: number;
   attributedRevenue?: number;
-  budgetTotal: number;
   projectionTotal: number;
-  goalTotal: number;
   forecastedRevenue: number;
   forecastUpdatedAt: string | null;
-  budgetAchievement: number;
   projectionAchievement: number;
-  goalAchievement: number;
-  forecastBudgetAchievement: number;
   forecastProjectionAchievement: number;
-  forecastGoalAchievement: number;
   status: "on-track" | "at-risk" | "behind";
   hasGoals: boolean;
   hasLockedGoals: boolean;
@@ -166,9 +160,7 @@ export function PropertiesTable({
                 )}
                 <SortableHeader field="name">Property</SortableHeader>
                 <SortableHeader field="actual" align="right">Actual YTD</SortableHeader>
-                <TableHead className="text-right">Budget</TableHead>
                 <TableHead className="text-right">Projection</TableHead>
-                <TableHead className="text-right">Goal</TableHead>
                 <SortableHeader field="forecast" align="right">Forecast</SortableHeader>
                 <SortableHeader field="goalProgress" align="center">Goal Progress</SortableHeader>
                 <SortableHeader field="status" align="center">Status</SortableHeader>
@@ -256,13 +248,7 @@ export function PropertiesTable({
                   </div>
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground">
-                  {formatCurrency(property.budgetTotal)}
-                </TableCell>
-                <TableCell className="text-right text-muted-foreground">
                   {formatCurrency(property.projectionTotal)}
-                </TableCell>
-                <TableCell className="text-right text-muted-foreground">
-                  {formatCurrency(property.goalTotal)}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-2">

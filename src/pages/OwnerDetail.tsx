@@ -271,9 +271,7 @@ export default function OwnerDetail() {
 
   const calculateMetrics = () => {
     let totalActualRevenue = 0;
-    let totalBudget = 0;
     let totalProjection = 0;
-    let totalGoal = 0;
     let totalForecast = 0;
     let onTrackCount = 0;
     let atRiskCount = 0;
@@ -288,13 +286,9 @@ export default function OwnerDetail() {
 
       // Get goals for this listing
       const listingGoals = goals?.filter(g => g.listing_id === listing.id && g.year === currentYear) || [];
-      const budget = listingGoals.reduce((sum, g) => sum + (Number(g.budget_revenue) || 0), 0);
       const projection = listingGoals.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0);
-      const goal = listingGoals.reduce((sum, g) => sum + (Number(g.goal_revenue) || 0), 0);
       
-      totalBudget += budget;
       totalProjection += projection;
-      totalGoal += goal;
 
       // Get forecast
       const listingForecast = forecasts?.find(f => f.listing_id === listing.id && f.year === currentYear);
@@ -312,9 +306,7 @@ export default function OwnerDetail() {
 
     return {
       totalActualRevenue,
-      totalBudget,
       totalProjection,
-      totalGoal,
       totalForecast,
       propertiesCount: listings?.length || 0,
       onTrackCount,
