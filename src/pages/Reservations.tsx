@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -572,53 +572,56 @@ export default function Reservations() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Property</label>
-                  <Select value={selectedProperty} onValueChange={setSelectedProperty}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Properties" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Properties</SelectItem>
-                      {listings.map((listing) => (
-                        <SelectItem key={listing.id} value={listing.id}>
-                          {listing.nickname}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={selectedProperty}
+                    onValueChange={setSelectedProperty}
+                    options={[
+                      { value: "all", label: "All Properties" },
+                      ...listings.map((listing) => ({
+                        value: listing.id,
+                        label: listing.nickname || listing.id,
+                      })),
+                    ]}
+                    placeholder="All Properties"
+                    searchPlaceholder="Search properties..."
+                    emptyMessage="No properties found."
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Source</label>
-                  <Select value={selectedSource} onValueChange={setSelectedSource}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Sources" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Sources</SelectItem>
-                      {uniqueSources.map((source) => (
-                        <SelectItem key={source} value={source}>
-                          {source}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={selectedSource}
+                    onValueChange={setSelectedSource}
+                    options={[
+                      { value: "all", label: "All Sources" },
+                      ...uniqueSources.map((source) => ({
+                        value: source,
+                        label: source,
+                      })),
+                    ]}
+                    placeholder="All Sources"
+                    searchPlaceholder="Search sources..."
+                    emptyMessage="No sources found."
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Status</label>
-                  <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="All Statuses" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      {uniqueStatuses.map((status) => (
-                        <SelectItem key={status} value={status}>
-                          {status}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={selectedStatus}
+                    onValueChange={setSelectedStatus}
+                    options={[
+                      { value: "all", label: "All Statuses" },
+                      ...uniqueStatuses.map((status) => ({
+                        value: status,
+                        label: status.charAt(0).toUpperCase() + status.slice(1).replace("_", " "),
+                      })),
+                    ]}
+                    placeholder="All Statuses"
+                    searchPlaceholder="Search statuses..."
+                    emptyMessage="No statuses found."
+                  />
                 </div>
 
                 <div className="space-y-2">
