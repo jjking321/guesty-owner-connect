@@ -15,11 +15,6 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const airroiApiKey = Deno.env.get('AIRROI_API_KEY');
-
-    if (!airroiApiKey) {
-      throw new Error('AIRROI_API_KEY not configured');
-    }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -42,7 +37,7 @@ serve(async (req) => {
     if (!template) throw new Error('Template not found');
 
     const airroiListingIds = template.airroi_listing_ids as string[];
-    console.log(`Template has ${airroiListingIds.length} comparable(s)`);
+    console.log(`Template has ${airroiListingIds.length} comparable(s): ${airroiListingIds.join(', ')}`);
 
     if (airroiListingIds.length === 0) {
       return new Response(
@@ -51,90 +46,70 @@ serve(async (req) => {
       );
     }
 
-    // Fetch each listing from Air ROI API
-    const AIRROI_API_URL = 'https://api.airroi.com/v1/listings';
-    const appliedComparables = [];
+    // Find existing comparable data in the database instead of calling Air ROI API
+    const { data: existingComparables, error: fetchError } = await supabase
+      .from('property_comparables')
+      .select('*')
+      .in('airroi_listing_id', airroiListingIds);
 
-    for (const airroiId of airroiListingIds) {
-      try {
-        console.log(`Fetching listing ${airroiId} from Air ROI`);
-        
-        const response = await fetch(`${AIRROI_API_URL}/${airroiId}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${airroiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          console.error(`Failed to fetch listing ${airroiId}: ${response.status}`);
-          continue;
-        }
-
-        const listingData = await response.json();
-        console.log(`Successfully fetched listing ${airroiId}`);
-
-        // Map the response to our database schema
-        const comparable = {
-          listing_id: listing_id,
-          airroi_listing_id: String(airroiId),
-          listing_name: listingData.listing_name || null,
-          listing_type: listingData.listing_type || null,
-          room_type: listingData.room_type || null,
-          cover_photo_url: listingData.cover_photo_url || null,
-          host_name: listingData.host_name || null,
-          superhost: listingData.superhost || false,
-          location_info: listingData.location || null,
-          property_details: {
-            guests: listingData.guests,
-            bedrooms: listingData.bedrooms,
-            beds: listingData.beds,
-            baths: listingData.baths,
-            amenities: listingData.amenities || [],
-          },
-          pricing_info: {
-            currency: listingData.currency,
-            cleaning_fee: listingData.cleaning_fee,
-            extra_guest_fee: listingData.extra_guest_fee,
-          },
-          ratings: {
-            num_reviews: listingData.num_reviews,
-            rating_overall: listingData.rating_overall,
-            rating_accuracy: listingData.rating_accuracy,
-            rating_checkin: listingData.rating_checkin,
-            rating_cleanliness: listingData.rating_cleanliness,
-            rating_communication: listingData.rating_communication,
-            rating_location: listingData.rating_location,
-            rating_value: listingData.rating_value,
-          },
-          booking_settings: {
-            min_nights: listingData.min_nights,
-            max_nights: listingData.max_nights,
-            instant_book: listingData.instant_book,
-          },
-          performance_metrics: {
-            ttm_revenue: listingData.ttm_revenue,
-            ttm_occupancy: listingData.ttm_occupancy,
-            ttm_adr: listingData.ttm_adr,
-            ttm_revpar: listingData.ttm_revpar,
-            ttm_days_available: listingData.ttm_days_available,
-            ttm_days_reserved: listingData.ttm_days_reserved,
-            ttm_days_blocked: listingData.ttm_days_blocked,
-          },
-          is_selected: true,
-          selected_at: new Date().toISOString(),
-          fetched_at: new Date().toISOString(),
-        };
-
-        appliedComparables.push(comparable);
-      } catch (err) {
-        console.error(`Error fetching listing ${airroiId}:`, err);
-      }
-
-      // Add delay between requests to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 200));
+    if (fetchError) {
+      console.error('Error fetching existing comparables:', fetchError);
+      throw fetchError;
     }
+
+    console.log(`Found ${existingComparables?.length || 0} existing comparable records in database`);
+
+    // Group by airroi_listing_id to get unique comparables (pick most recently fetched)
+    const uniqueComparables = new Map();
+    for (const comp of existingComparables || []) {
+      const existing = uniqueComparables.get(comp.airroi_listing_id);
+      if (!existing || new Date(comp.fetched_at || 0) > new Date(existing.fetched_at || 0)) {
+        uniqueComparables.set(comp.airroi_listing_id, comp);
+      }
+    }
+
+    console.log(`Unique comparables found: ${uniqueComparables.size}`);
+
+    // Check for missing comparables
+    const foundIds = new Set(Array.from(uniqueComparables.keys()));
+    const missingIds = airroiListingIds.filter(id => !foundIds.has(id));
+
+    if (missingIds.length > 0) {
+      console.warn(`Missing comparables for airroi_listing_ids: ${missingIds.join(', ')}`);
+    }
+
+    // Create new records for the target listing
+    const appliedComparables = Array.from(uniqueComparables.values()).map(comp => ({
+      listing_id: listing_id,
+      airroi_listing_id: comp.airroi_listing_id,
+      listing_name: comp.listing_name,
+      listing_type: comp.listing_type,
+      room_type: comp.room_type,
+      cover_photo_url: comp.cover_photo_url,
+      host_name: comp.host_name,
+      superhost: comp.superhost,
+      location_info: comp.location_info,
+      property_details: comp.property_details,
+      pricing_info: comp.pricing_info,
+      ratings: comp.ratings,
+      booking_settings: comp.booking_settings,
+      performance_metrics: comp.performance_metrics,
+      historical_metrics: comp.historical_metrics,
+      future_rates: comp.future_rates,
+      future_rates_fetched_at: comp.future_rates_fetched_at,
+      metrics_fetched_at: comp.metrics_fetched_at,
+      ttm_revenue: comp.ttm_revenue,
+      ttm_occupancy: comp.ttm_occupancy,
+      ttm_adr: comp.ttm_adr,
+      ttm_revpar: comp.ttm_revpar,
+      prior_ttm_revenue: comp.prior_ttm_revenue,
+      prior_ttm_occupancy: comp.prior_ttm_occupancy,
+      prior_ttm_adr: comp.prior_ttm_adr,
+      prior_ttm_revpar: comp.prior_ttm_revpar,
+      is_selected: true,
+      selected_at: new Date().toISOString(),
+      fetched_at: comp.fetched_at,
+    }));
 
     console.log(`Prepared ${appliedComparables.length} comparables for upsert`);
 
@@ -146,16 +121,20 @@ serve(async (req) => {
           onConflict: 'listing_id,airroi_listing_id',
         });
 
-      if (upsertError) throw upsertError;
+      if (upsertError) {
+        console.error('Upsert error:', upsertError);
+        throw upsertError;
+      }
     }
 
-    console.log(`Successfully applied ${appliedComparables.length} comparables`);
+    console.log(`Successfully applied ${appliedComparables.length} comparables from template`);
 
     return new Response(
       JSON.stringify({
         success: true,
         applied: appliedComparables.length,
         total: airroiListingIds.length,
+        missing: missingIds,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
