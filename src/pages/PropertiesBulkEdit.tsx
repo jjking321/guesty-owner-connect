@@ -98,7 +98,16 @@ export default function PropertiesBulkEdit() {
   });
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() => {
     const saved = localStorage.getItem('portfolio-columns-order');
-    return saved ? JSON.parse(saved) : DEFAULT_COLUMN_ORDER;
+    if (saved) {
+      const parsed = JSON.parse(saved) as ColumnKey[];
+      // Ensure onTheBooks is in the order (added in recent update)
+      if (!parsed.includes('onTheBooks')) {
+        const actualIndex = parsed.indexOf('actual');
+        parsed.splice(actualIndex + 1, 0, 'onTheBooks');
+      }
+      return parsed;
+    }
+    return DEFAULT_COLUMN_ORDER;
   });
 
   const handleColumnConfigChange = (visible: ColumnKey[], order: ColumnKey[]) => {
