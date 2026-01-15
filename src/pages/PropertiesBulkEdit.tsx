@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { PropertiesTable } from "@/components/PropertiesTable";
+import { PropertiesTable, type ColumnKey } from "@/components/PropertiesTable";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { BulkGoalsUpload } from "@/components/BulkGoalsUpload";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
@@ -24,6 +24,9 @@ import {
 import { toast } from "sonner";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
+const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['property', 'actual', 'occupancy', 'adr', 'revpar', 'goal', 'forecast', 'goalProgress', 'status'];
+const DEFAULT_COLUMN_ORDER: ColumnKey[] = ['property', 'actual', 'occupancy', 'adr', 'revpar', 'goal', 'forecast', 'goalProgress', 'status'];
+
 interface PropertyMetrics {
   id: string;
   nickname: string;
@@ -41,6 +44,9 @@ interface PropertyMetrics {
   hasLockedGoals: boolean;
   goalsLockedCount: number;
   archived: boolean;
+  occupancy?: number;
+  adr?: number;
+  revpar?: number;
 }
 
 export default function PropertiesBulkEdit() {
@@ -71,6 +77,23 @@ export default function PropertiesBulkEdit() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
+
+  // Column configuration state with localStorage persistence
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(() => {
+    const saved = localStorage.getItem('portfolio-columns-visible');
+    return saved ? JSON.parse(saved) : DEFAULT_VISIBLE_COLUMNS;
+  });
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() => {
+    const saved = localStorage.getItem('portfolio-columns-order');
+    return saved ? JSON.parse(saved) : DEFAULT_COLUMN_ORDER;
+  });
+
+  const handleColumnConfigChange = (visible: ColumnKey[], order: ColumnKey[]) => {
+    setVisibleColumns(visible);
+    setColumnOrder(order);
+    localStorage.setItem('portfolio-columns-visible', JSON.stringify(visible));
+    localStorage.setItem('portfolio-columns-order', JSON.stringify(order));
+  };
 
   // Fetch current guesty account ID for progress tracking
   useEffect(() => {
@@ -187,6 +210,34 @@ export default function PropertiesBulkEdit() {
     },
   });
 
+  // Fetch reservation nights for occupancy/ADR/RevPAR calculations
+  const { data: reservationNights = [] } = useQuery({
+    queryKey: ["reservation-nights-ytd-portfolio", selectedYear],
+    queryFn: async () => {
+      const startDate = `${selectedYear}-01-01`;
+      const today = new Date().toISOString().split('T')[0];
+      const endDate = selectedYear === new Date().getFullYear() ? today : `${selectedYear}-12-31`;
+      
+      const { data, error } = await supabase
+        .from("reservation_nights")
+        .select("listing_id, night_date, revenue_allocation")
+        .gte("night_date", startDate)
+        .lte("night_date", endDate);
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Calculate days in range for occupancy calculations
+  const daysInRange = useMemo(() => {
+    const startDate = new Date(`${selectedYear}-01-01`);
+    const today = new Date();
+    const endDate = selectedYear === today.getFullYear() 
+      ? today 
+      : new Date(`${selectedYear}-12-31`);
+    return Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  }, [selectedYear]);
+
   // Realtime: refetch goals when new rows for the selected year are inserted/updated
   useEffect(() => {
     const channel = supabase
@@ -262,6 +313,14 @@ export default function PropertiesBulkEdit() {
       const hasLockedGoals = listingGoals.some(g => g.locked);
       const goalsLockedCount = listingGoals.filter(g => g.locked).length;
 
+      // Calculate occupancy, ADR, RevPAR using reservation nights data
+      const listingNightsCount = reservationNights.filter(
+        n => n.listing_id === listing.id
+      ).length || 0;
+      const occupancy = daysInRange > 0 ? (listingNightsCount / daysInRange) * 100 : 0;
+      const adr = listingNightsCount > 0 ? actualRevenue / listingNightsCount : 0;
+      const revpar = daysInRange > 0 ? actualRevenue / daysInRange : 0;
+
       return {
         id: listing.id,
         nickname: listing.nickname || "Unnamed Property",
@@ -279,9 +338,12 @@ export default function PropertiesBulkEdit() {
         hasLockedGoals,
         goalsLockedCount,
         archived: listing.archived || false,
+        occupancy,
+        adr,
+        revpar,
       };
     });
-  }, [listings, ytdRevenueData, goals, forecasts]);
+  }, [listings, ytdRevenueData, goals, forecasts, reservationNights, daysInRange]);
 
   // Filter and sort properties
   const filteredProperties = useMemo(() => {
@@ -1050,6 +1112,10 @@ export default function PropertiesBulkEdit() {
           selectedIds={selectedIds}
           onSelectProperty={handleSelectProperty}
           onSelectAll={handleSelectAll}
+          visibleColumns={visibleColumns}
+          columnOrder={columnOrder}
+          onColumnConfigChange={handleColumnConfigChange}
+          showColumnConfig={true}
           referrer={{
             path: '/properties/bulk-edit',
             label: 'Portfolio View',
