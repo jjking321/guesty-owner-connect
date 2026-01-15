@@ -33,10 +33,64 @@ interface ComparableWithListing {
   selected_at: string | null;
   property_details: any;
   location_info: any;
-  listings: {
-    id: string;
-    nickname: string | null;
-  };
+}
+
+// Helper to paginate through Supabase's 1000-row limit
+async function fetchAllComparables(): Promise<ComparableWithListing[]> {
+  const PAGE_SIZE = 1000;
+  const allRows: ComparableWithListing[] = [];
+  let page = 0;
+  
+  while (true) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    
+    const { data, error } = await supabase
+      .from('property_comparables')
+      .select('id, listing_id, airroi_listing_id, listing_name, host_name, is_selected, ttm_revenue, ttm_adr, ttm_occupancy, metrics_fetched_at, future_rates_fetched_at, fetched_at, selected_at, property_details, location_info')
+      .order('fetched_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to);
+    
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    
+    allRows.push(...(data as ComparableWithListing[]));
+    
+    if (data.length < PAGE_SIZE) break;
+    page++;
+  }
+  
+  console.log(`Fetched ${allRows.length} total comparables across ${page + 1} pages`);
+  return allRows;
+}
+
+// Helper to paginate comp counts for Setup tab
+async function fetchAllCompCounts(): Promise<{ listing_id: string; is_selected: boolean | null }[]> {
+  const PAGE_SIZE = 1000;
+  const allRows: { listing_id: string; is_selected: boolean | null }[] = [];
+  let page = 0;
+  
+  while (true) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    
+    const { data, error } = await supabase
+      .from('property_comparables')
+      .select('listing_id, is_selected')
+      .order('listing_id', { ascending: true })
+      .range(from, to);
+    
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    
+    allRows.push(...data);
+    
+    if (data.length < PAGE_SIZE) break;
+    page++;
+  }
+  
+  return allRows;
 }
 
 interface Template {
@@ -90,19 +144,10 @@ export default function Comparables() {
     archived: false,
   });
 
-  // Fetch all comparables with their associated listings
+  // Fetch all comparables with pagination to bypass 1000-row limit
   const { data: comparables = [], isLoading: loadingComparables, refetch: refetchComparables } = useQuery({
     queryKey: ['all-comparables'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('property_comparables')
-        .select('*, listings!inner(id, nickname)')
-        .order('fetched_at', { ascending: false })
-        .limit(10000);
-      
-      if (error) throw error;
-      return data as ComparableWithListing[];
-    }
+    queryFn: fetchAllComparables
   });
 
   // Fetch all listings with comp stats for Setup tab
@@ -116,16 +161,12 @@ export default function Comparables() {
       
       if (listingsError) throw listingsError;
 
-      // Get comp counts per listing
-      const { data: compCounts, error: compError } = await supabase
-        .from('property_comparables')
-        .select('listing_id, is_selected');
-      
-      if (compError) throw compError;
+      // Get comp counts per listing with pagination
+      const compCounts = await fetchAllCompCounts();
 
       // Aggregate counts
       const countMap = new Map<string, { cached: number; selected: number }>();
-      compCounts?.forEach(c => {
+      compCounts.forEach(c => {
         const existing = countMap.get(c.listing_id) || { cached: 0, selected: 0 };
         existing.cached++;
         if (c.is_selected) existing.selected++;
@@ -164,6 +205,8 @@ export default function Comparables() {
   const deduplicateByAirroiId = (comps: ComparableWithListing[]): ComparableWithListing[] => {
     const seen = new Map<string, ComparableWithListing>();
     for (const comp of comps) {
+      // Skip if no valid airroi_listing_id
+      if (!comp.airroi_listing_id) continue;
       if (!seen.has(comp.airroi_listing_id)) {
         seen.set(comp.airroi_listing_id, comp);
       }
@@ -173,6 +216,9 @@ export default function Comparables() {
 
   const selectedComparables = comparables.filter(c => c.is_selected);
   const uniqueSelectedComparables = deduplicateByAirroiId(selectedComparables);
+  
+  // Debug logging
+  console.log(`Comparables: ${comparables.length} total, ${selectedComparables.length} selected, ${uniqueSelectedComparables.length} unique selected`);
 
   // Count how many properties use each airroi_listing_id
   const usageCountByAirroiId = new Map<string, number>();
@@ -189,10 +235,13 @@ export default function Comparables() {
     withFutureRates: uniqueSelectedComparables.filter(c => c.future_rates_fetched_at).length,
   };
 
+  // Create lookup for listing nicknames (for "All Cached" tab)
+  const listingNicknameById = new Map(listingsForSetup.map(l => [l.id, l.nickname]));
+
   // Filter comparables based on search
   const filteredComparables = comparables.filter(c => 
     c.listing_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.listings?.nickname?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    listingNicknameById.get(c.listing_id)?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.host_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -745,7 +794,7 @@ export default function Comparables() {
                             to={`/listings/${comp.listing_id}`}
                             className="text-primary hover:underline"
                           >
-                            {comp.listings?.nickname || comp.listing_id}
+                            {listingNicknameById.get(comp.listing_id) || comp.listing_id}
                           </Link>
                         </TableCell>
                         <TableCell>{getBedrooms(comp)}</TableCell>
