@@ -18,7 +18,7 @@ import { TrendingUp, TrendingDown, Minus, Lock, ArrowUpDown, ArrowUp, ArrowDown,
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSmartNavigation, type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
-export type ColumnKey = 'property' | 'actual' | 'occupancy' | 'adr' | 'revpar' | 'goal' | 'forecast' | 'goalProgress' | 'status';
+export type ColumnKey = 'property' | 'actual' | 'onTheBooks' | 'occupancy' | 'adr' | 'revpar' | 'goal' | 'forecast' | 'goalProgress' | 'status';
 
 interface ColumnConfig {
   key: ColumnKey;
@@ -29,7 +29,8 @@ interface ColumnConfig {
 
 const ALL_COLUMNS: ColumnConfig[] = [
   { key: 'property', label: 'Property', defaultVisible: true, canHide: false },
-  { key: 'actual', label: 'Actual YTD', defaultVisible: true, canHide: true },
+  { key: 'actual', label: 'Actual', defaultVisible: true, canHide: true },
+  { key: 'onTheBooks', label: 'On the Books', defaultVisible: true, canHide: true },
   { key: 'occupancy', label: 'Occ %', defaultVisible: true, canHide: true },
   { key: 'adr', label: 'ADR', defaultVisible: true, canHide: true },
   { key: 'revpar', label: 'RevPAR', defaultVisible: true, canHide: true },
@@ -49,6 +50,7 @@ interface PropertyMetrics {
   address: any;
   propertyType: string | null;
   actualRevenue: number;
+  onTheBooksRevenue: number;
   directRevenue?: number;
   attributedRevenue?: number;
   projectionTotal: number;
@@ -70,9 +72,9 @@ interface PropertyMetrics {
 interface PropertiesTableProps {
   properties: PropertyMetrics[];
   isLoading: boolean;
-  sortBy?: "name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status";
+  sortBy?: "name" | "actual" | "onTheBooks" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status";
   sortDirection?: "asc" | "desc";
-  onSort?: (field: "name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status") => void;
+  onSort?: (field: "name" | "actual" | "onTheBooks" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status") => void;
   referrer?: NavigationReferrer;
   selectable?: boolean;
   selectedIds?: Set<string>;
@@ -82,6 +84,11 @@ interface PropertiesTableProps {
   columnOrder?: ColumnKey[];
   onColumnConfigChange?: (visible: ColumnKey[], order: ColumnKey[]) => void;
   showColumnConfig?: boolean;
+  periodLabel?: string;
+  isPastPeriod?: boolean;
+  isFuturePeriod?: boolean;
+  showActualColumn?: boolean;
+  showOnTheBooksColumn?: boolean;
 }
 
 export function PropertiesTable({ 
@@ -99,15 +106,26 @@ export function PropertiesTable({
   columnOrder = DEFAULT_COLUMN_ORDER,
   onColumnConfigChange,
   showColumnConfig = false,
+  periodLabel,
+  isPastPeriod = false,
+  isFuturePeriod = false,
+  showActualColumn = true,
+  showOnTheBooksColumn = true,
 }: PropertiesTableProps) {
   const navigate = useNavigate();
   const { navigateToProperty } = useSmartNavigation();
   const [configOpen, setConfigOpen] = useState(false);
 
   // Order columns according to columnOrder, only show visible ones
+  // Also filter based on period (hide actual for future, hide on-the-books for past)
   const orderedVisibleColumns = useMemo(() => {
-    return columnOrder.filter(key => visibleColumns.includes(key));
-  }, [columnOrder, visibleColumns]);
+    return columnOrder.filter(key => {
+      if (!visibleColumns.includes(key)) return false;
+      if (key === 'actual' && !showActualColumn) return false;
+      if (key === 'onTheBooks' && !showOnTheBooksColumn) return false;
+      return true;
+    });
+  }, [columnOrder, visibleColumns, showActualColumn, showOnTheBooksColumn]);
 
   const toggleColumnVisibility = (key: ColumnKey) => {
     const col = ALL_COLUMNS.find(c => c.key === key);
@@ -142,7 +160,7 @@ export function PropertiesTable({
   };
 
   const SortableHeader = ({ field, children, align = "left" }: { 
-    field: "name" | "actual" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status"; 
+    field: "name" | "actual" | "onTheBooks" | "occupancy" | "adr" | "revpar" | "goal" | "forecast" | "goalProgress" | "status"; 
     children: React.ReactNode;
     align?: "left" | "right" | "center";
   }) => {
@@ -198,11 +216,16 @@ export function PropertiesTable({
   };
 
   const renderColumnHeader = (key: ColumnKey) => {
+    const actualLabel = periodLabel ? `Actual${periodLabel ? ` - ${periodLabel}` : ''}` : 'Actual';
+    const onTheBooksLabel = periodLabel ? `On the Books${periodLabel ? ` - ${periodLabel}` : ''}` : 'On the Books';
+    
     switch (key) {
       case 'property':
         return <SortableHeader field="name">Property</SortableHeader>;
       case 'actual':
-        return <SortableHeader field="actual" align="right">Actual YTD</SortableHeader>;
+        return <SortableHeader field="actual" align="right">{actualLabel}</SortableHeader>;
+      case 'onTheBooks':
+        return <SortableHeader field="onTheBooks" align="right">{onTheBooksLabel}</SortableHeader>;
       case 'occupancy':
         return <SortableHeader field="occupancy" align="right">Occ %</SortableHeader>;
       case 'adr':
@@ -283,6 +306,12 @@ export function PropertiesTable({
                 </span>
               )}
             </div>
+          </TableCell>
+        );
+      case 'onTheBooks':
+        return (
+          <TableCell className="text-right font-medium text-blue-600 dark:text-blue-400">
+            {formatCurrency(property.onTheBooksRevenue)}
           </TableCell>
         );
       case 'occupancy':

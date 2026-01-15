@@ -1,24 +1,32 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DollarSign, TrendingUp, Target, AlertCircle, CheckCircle2 } from "lucide-react";
+import { DollarSign, TrendingUp, Target, CheckCircle2, Calendar } from "lucide-react";
 
 interface PropertyMetricsSummaryProps {
   totalActualRevenue: number;
+  totalOnTheBooks?: number;
   totalProjection: number;
   totalForecast: number;
   propertiesCount: number;
   onTrackCount: number;
   atRiskCount: number;
   behindCount: number;
+  periodLabel?: string;
+  isPastPeriod?: boolean;
+  isFuturePeriod?: boolean;
 }
 
 export function PropertyMetricsSummary({
   totalActualRevenue,
+  totalOnTheBooks = 0,
   totalProjection,
   totalForecast,
   propertiesCount,
   onTrackCount,
   atRiskCount,
   behindCount,
+  periodLabel,
+  isPastPeriod = false,
+  isFuturePeriod = false,
 }: PropertyMetricsSummaryProps) {
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -31,24 +39,50 @@ export function PropertyMetricsSummary({
 
   const goalAchievement = totalProjection > 0 ? (totalForecast / totalProjection) * 100 : 0;
 
+  // Show actual only if not a purely future period
+  const showActual = !isFuturePeriod;
+  // Show on-the-books only if not a purely past period
+  const showOnTheBooks = !isPastPeriod && totalOnTheBooks > 0;
+
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Total Revenue YTD</CardTitle>
-          <DollarSign className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{formatCurrency(totalActualRevenue)}</div>
-          <p className="text-xs text-muted-foreground">
-            Across {propertiesCount} properties
-          </p>
-        </CardContent>
-      </Card>
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      {showActual && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              {periodLabel ? `Actual - ${periodLabel}` : 'Total Revenue'}
+            </CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(totalActualRevenue)}</div>
+            <p className="text-xs text-muted-foreground">
+              Across {propertiesCount} properties
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {showOnTheBooks && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">On the Books</CardTitle>
+            <Calendar className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {formatCurrency(totalOnTheBooks)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Future confirmed revenue
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Forecasted Year-End</CardTitle>
+          <CardTitle className="text-sm font-medium">Forecasted</CardTitle>
           <TrendingUp className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
@@ -61,13 +95,13 @@ export function PropertyMetricsSummary({
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Annual Goal</CardTitle>
+          <CardTitle className="text-sm font-medium">Goal</CardTitle>
           <Target className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">{formatCurrency(totalProjection)}</div>
           <p className="text-xs text-muted-foreground mt-1">
-            Target for the year
+            {periodLabel || 'Annual'} target
           </p>
         </CardContent>
       </Card>

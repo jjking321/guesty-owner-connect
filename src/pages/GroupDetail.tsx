@@ -1377,6 +1377,7 @@ export default function GroupDetail() {
                     thumbnail: listing.thumbnail,
                     propertyType: listing.property_type,
                     actualRevenue: ytdRevenue,
+                    onTheBooksRevenue: 0,
                     directRevenue: revenueData.direct,
                     attributedRevenue: revenueData.attributed,
                     budgetTotal: budget,
