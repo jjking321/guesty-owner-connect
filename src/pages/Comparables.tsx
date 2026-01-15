@@ -97,7 +97,8 @@ export default function Comparables() {
       const { data, error } = await supabase
         .from('property_comparables')
         .select('*, listings!inner(id, nickname)')
-        .order('fetched_at', { ascending: false });
+        .order('fetched_at', { ascending: false })
+        .limit(10000);
       
       if (error) throw error;
       return data as ComparableWithListing[];
@@ -163,11 +164,7 @@ export default function Comparables() {
   const deduplicateByAirroiId = (comps: ComparableWithListing[]): ComparableWithListing[] => {
     const seen = new Map<string, ComparableWithListing>();
     for (const comp of comps) {
-      const existing = seen.get(comp.airroi_listing_id);
-      // Keep the most recently fetched version
-      if (!existing || 
-          (comp.metrics_fetched_at && (!existing.metrics_fetched_at || 
-           new Date(comp.metrics_fetched_at) > new Date(existing.metrics_fetched_at)))) {
+      if (!seen.has(comp.airroi_listing_id)) {
         seen.set(comp.airroi_listing_id, comp);
       }
     }
@@ -204,20 +201,19 @@ export default function Comparables() {
     c.host_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Get filtered comparables for bulk actions
-  const filteredMetricsComparables = getFilteredByDate(comparables, metricsFilter, 'metrics_fetched_at');
-  const filteredFutureRatesComparables = getFilteredByDate(comparables, futureRatesFilter, 'future_rates_fetched_at');
+  // Get filtered comparables for bulk actions (use deduplicated list)
+  const filteredMetricsComparables = getFilteredByDate(uniqueSelectedComparables, metricsFilter, 'metrics_fetched_at');
+  const filteredFutureRatesComparables = getFilteredByDate(uniqueSelectedComparables, futureRatesFilter, 'future_rates_fetched_at');
 
-  // Calculate filter counts for display
+  // Calculate filter counts for display (use deduplicated list)
   const getFilterCounts = (dateField: 'metrics_fetched_at' | 'future_rates_fetched_at') => {
     const now = new Date();
-    const selected = comparables.filter(c => c.is_selected);
     return {
-      all: selected.length,
-      never: selected.filter(c => !c[dateField]).length,
-      days7: selected.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 7)).length,
-      days30: selected.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 30)).length,
-      days90: selected.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 90)).length,
+      all: uniqueSelectedComparables.length,
+      never: uniqueSelectedComparables.filter(c => !c[dateField]).length,
+      days7: uniqueSelectedComparables.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 7)).length,
+      days30: uniqueSelectedComparables.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 30)).length,
+      days90: uniqueSelectedComparables.filter(c => !c[dateField] || new Date(c[dateField]!) < subDays(now, 90)).length,
     };
   };
 
@@ -781,10 +777,13 @@ export default function Comparables() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Total Selected</CardTitle>
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Unique Selected</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{stats.totalSelected}</div>
+                  <div className="text-2xl font-bold">{stats.uniqueSelected}</div>
+                  <p className="text-xs text-muted-foreground">
+                    {stats.totalSelected} total across properties
+                  </p>
                 </CardContent>
               </Card>
               <Card>
@@ -794,7 +793,7 @@ export default function Comparables() {
                 <CardContent>
                   <div className="text-2xl font-bold">{stats.withMetrics}</div>
                   <p className="text-xs text-muted-foreground">
-                    {stats.totalSelected - stats.withMetrics} need fetch
+                    {stats.uniqueSelected - stats.withMetrics} need fetch
                   </p>
                 </CardContent>
               </Card>
@@ -805,7 +804,7 @@ export default function Comparables() {
                 <CardContent>
                   <div className="text-2xl font-bold">{stats.withFutureRates}</div>
                   <p className="text-xs text-muted-foreground">
-                    {stats.totalSelected - stats.withFutureRates} need fetch
+                    {stats.uniqueSelected - stats.withFutureRates} need fetch
                   </p>
                 </CardContent>
               </Card>
