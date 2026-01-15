@@ -48,20 +48,20 @@ async function fetchAllComparables(): Promise<ComparableWithListing[]> {
     const { data, error } = await supabase
       .from('property_comparables')
       .select('id, listing_id, airroi_listing_id, listing_name, host_name, is_selected, ttm_revenue, ttm_adr, ttm_occupancy, metrics_fetched_at, future_rates_fetched_at, fetched_at, selected_at, property_details, location_info')
-      .order('fetched_at', { ascending: false })
-      .order('id', { ascending: false })
+      .order('id', { ascending: true })
       .range(from, to);
     
     if (error) throw error;
     if (!data || data.length === 0) break;
     
     allRows.push(...(data as ComparableWithListing[]));
+    console.log(`Comparables page ${page + 1}: fetched ${data.length} rows, total so far: ${allRows.length}`);
     
     if (data.length < PAGE_SIZE) break;
     page++;
   }
   
-  console.log(`Fetched ${allRows.length} total comparables across ${page + 1} pages`);
+  console.log(`COMPLETE: Fetched ${allRows.length} total comparables across ${page + 1} pages`);
   return allRows;
 }
 
