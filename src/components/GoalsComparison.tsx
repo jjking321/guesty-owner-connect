@@ -918,7 +918,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     <Legend />
                     <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
                     {showGoals && (
-                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
+                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
                     )}
                     {showForecast && (
                       <>
@@ -993,7 +993,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     <Legend />
                     <Line type="monotone" dataKey="actual" stroke="hsl(var(--primary))" strokeWidth={3} name="Actual" />
                     {showGoals && (
-                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Projection" />
+                      <Line type="monotone" dataKey="projection" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" name="Goal" />
                     )}
                     {showForecast && (
                       <>

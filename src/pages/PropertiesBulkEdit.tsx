@@ -531,9 +531,9 @@ export default function PropertiesBulkEdit() {
       "Type",
       "Location",
       "Actual Revenue",
-      "Projection",
+      "Goal",
       "Forecast",
-      "Projection Achievement %",
+      "Goal Achievement %",
       "Status",
     ];
     

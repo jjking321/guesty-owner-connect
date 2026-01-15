@@ -218,9 +218,9 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Upload 2025 Projections from CSV</DialogTitle>
+          <DialogTitle>Upload 2025 Goals from CSV</DialogTitle>
           <DialogDescription>
-            Upload a CSV file to bulk update projection values for all properties.
+            Upload a CSV file to bulk update goal values for all properties.
             All updated goals will be locked.
           </DialogDescription>
         </DialogHeader>
@@ -242,7 +242,7 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
                 />
               </label>
               <p className="text-sm text-muted-foreground mt-2">
-                CSV must have Unit Alias in column 1 and monthly projections in columns 3-14
+                CSV must have Unit Alias in column 1 and monthly goals in columns 3-14
               </p>
             </div>
           )}
@@ -284,7 +284,7 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
                         <tr>
                           <th className="text-left p-2">Property</th>
                           <th className="text-right p-2">Months</th>
-                          <th className="text-right p-2">Total Projection</th>
+                          <th className="text-right p-2">Total Goal</th>
                         </tr>
                       </thead>
                       <tbody>

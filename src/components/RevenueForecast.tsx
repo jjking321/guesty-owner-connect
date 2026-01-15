@@ -415,10 +415,10 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
             {/* Goal Probabilities */}
             <div>
-              <h4 className="text-sm font-medium mb-4">Probability of Hitting Projection</h4>
+              <h4 className="text-sm font-medium mb-4">Probability of Hitting Goal</h4>
               <div className="flex justify-center">
                 <ProbabilityGauge 
-                  label="Projection" 
+                  label="Goal" 
                   probability={forecast.goalProbabilities?.projection || 0} 
                   target={forecast.goalTargets?.projection || 0}
                 />

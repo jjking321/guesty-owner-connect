@@ -668,7 +668,7 @@ export default function PropertyDetail() {
                       {percentage.toFixed(0)}%
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      Projection Goal Achievement
+                      Goal Achievement
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
                       ${projectedRevenue.toLocaleString('en-US', { maximumFractionDigits: 0 })} / ${projectionGoal.toLocaleString('en-US', { maximumFractionDigits: 0 })}
