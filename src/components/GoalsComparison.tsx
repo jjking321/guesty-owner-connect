@@ -20,9 +20,7 @@ interface GoalsComparisonProps {
 interface GoalData {
   month: string;
   actual: number;
-  budget: number;
   projection: number;
-  goal: number;
   forecastP25?: number;
   forecastP50?: number;
   forecastP75?: number;
@@ -591,9 +589,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
           }, 0);
 
         // Aggregate goals for group-level or use single goal
-        const budget = monthGoals.reduce((sum, g) => sum + (Number(g?.budget_revenue) || 0), 0);
         const projection = monthGoals.reduce((sum, g) => sum + (Number(g?.projection_revenue) || 0), 0);
-        const goal = monthGoals.reduce((sum, g) => sum + (Number(g?.goal_revenue) || 0), 0);
 
         // Aggregate forecast for this month with confidence intervals
         let forecastP25 = 0, forecastP50 = 0, forecastP75 = 0;
@@ -625,9 +621,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         monthly.push({
           month: monthNames[month],
           actual: Math.round(actualRevenue),
-          budget: Math.round(budget),
           projection: Math.round(projection),
-          goal: Math.round(goal),
           forecastP25: isFutureMonth ? Math.round(forecastP25) : undefined,
           forecastP50: isFutureMonth ? Math.round(forecastP50) : undefined,
           forecastP75: isFutureMonth ? Math.round(forecastP75) : undefined,
@@ -637,9 +631,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
 
         // Cumulative data
         cumulativeActual += actualRevenue;
-        cumulativeBudget += budget;
         cumulativeProjection += projection;
-        cumulativeGoal += goal;
         cumulativeForecastP25 += forecastP25;
         cumulativeForecastP50 += forecastP50;
         cumulativeForecastP75 += forecastP75;
@@ -649,9 +641,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         cumulative.push({
           month: monthNames[month],
           actual: Math.round(cumulativeActual),
-          budget: Math.round(cumulativeBudget),
           projection: Math.round(cumulativeProjection),
-          goal: Math.round(cumulativeGoal),
           forecastP25: isFutureMonth ? Math.round(cumulativeForecastP25) : undefined,
           forecastP50: isFutureMonth ? Math.round(cumulativeForecastP50) : undefined,
           forecastP75: isFutureMonth ? Math.round(cumulativeForecastP75) : undefined,
@@ -780,15 +770,11 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
       monthlyData.slice(0, currentMonth + 1).reduce((acc, curr) => ({
         month: 'YTD',
         actual: acc.actual + curr.actual,
-        budget: acc.budget + curr.budget,
         projection: acc.projection + curr.projection,
-        goal: acc.goal + curr.goal,
-      }), { month: 'YTD', actual: 0, budget: 0, projection: 0, goal: 0 });
+      }), { month: 'YTD', actual: 0, projection: 0 });
 
     return {
-      vsBudget: ytdData.budget > 0 ? ((ytdData.actual - ytdData.budget) / ytdData.budget) * 100 : 0,
       vsProjection: ytdData.projection > 0 ? ((ytdData.actual - ytdData.projection) / ytdData.projection) * 100 : 0,
-      vsGoal: ytdData.goal > 0 ? ((ytdData.actual - ytdData.goal) / ytdData.goal) * 100 : 0,
     };
   };
 

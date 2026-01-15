@@ -31,17 +31,11 @@ interface PropertyMetrics {
   address: any;
   propertyType: string | null;
   actualRevenue: number;
-  budgetTotal: number;
   projectionTotal: number;
-  goalTotal: number;
   forecastedRevenue: number;
   forecastUpdatedAt: string | null;
-  budgetAchievement: number;
   projectionAchievement: number;
-  goalAchievement: number;
-  forecastBudgetAchievement: number;
   forecastProjectionAchievement: number;
-  forecastGoalAchievement: number;
   status: "on-track" | "at-risk" | "behind";
   hasGoals: boolean;
   hasLockedGoals: boolean;
@@ -235,19 +229,11 @@ export default function PropertiesBulkEdit() {
           listing_id: listing.id,
           total_goals_fetched: goals.length,
           listingGoalsCount: listingGoals.length,
-          sample: (listingGoals as any[]).slice(0, 3).map((g: any) => ({ month: g.month, budget: g.budget_revenue, projection: g.projection_revenue, goal: g.goal_revenue })),
+          sample: (listingGoals as any[]).slice(0, 3).map((g: any) => ({ month: g.month, projection: g.projection_revenue })),
         });
       }
-      const budgetTotal = listingGoals.reduce(
-        (sum, g) => sum + (Number(g.budget_revenue) || 0),
-        0
-      );
       const projectionTotal = listingGoals.reduce(
         (sum, g) => sum + (Number(g.projection_revenue) || 0),
-        0
-      );
-      const goalTotal = listingGoals.reduce(
-        (sum, g) => sum + (Number(g.goal_revenue) || 0),
         0
       );
 
@@ -258,14 +244,10 @@ export default function PropertiesBulkEdit() {
       const forecastUpdatedAt = forecast?.generated_at || null;
 
       // Calculate achievement percentages
-      const budgetAchievement = budgetTotal > 0 ? (actualRevenue / budgetTotal) * 100 : 0;
       const projectionAchievement = projectionTotal > 0 ? (actualRevenue / projectionTotal) * 100 : 0;
-      const goalAchievement = goalTotal > 0 ? (actualRevenue / goalTotal) * 100 : 0;
 
-      // Calculate forecast achievement percentages
-      const forecastBudgetAchievement = budgetTotal > 0 ? (forecastedRevenue / budgetTotal) * 100 : 0;
+      // Calculate forecast achievement percentage
       const forecastProjectionAchievement = projectionTotal > 0 ? (forecastedRevenue / projectionTotal) * 100 : 0;
-      const forecastGoalAchievement = projectionTotal > 0 ? (forecastedRevenue / projectionTotal) * 100 : 0;
 
       // Determine status based on forecast vs projection
       let status: "on-track" | "at-risk" | "behind" = "on-track";
@@ -276,7 +258,7 @@ export default function PropertiesBulkEdit() {
       }
 
       // Calculate goal lock status
-      const hasGoals = goalTotal > 0;
+      const hasGoals = projectionTotal > 0;
       const hasLockedGoals = listingGoals.some(g => g.locked);
       const goalsLockedCount = listingGoals.filter(g => g.locked).length;
 
@@ -287,17 +269,11 @@ export default function PropertiesBulkEdit() {
         address: listing.address,
         propertyType: listing.property_type,
         actualRevenue,
-        budgetTotal,
         projectionTotal,
-        goalTotal,
         forecastedRevenue,
         forecastUpdatedAt,
-        budgetAchievement,
         projectionAchievement,
-        goalAchievement,
-        forecastBudgetAchievement,
         forecastProjectionAchievement,
-        forecastGoalAchievement,
         status,
         hasGoals,
         hasLockedGoals,
@@ -555,13 +531,9 @@ export default function PropertiesBulkEdit() {
       "Type",
       "Location",
       "Actual Revenue",
-      "Budget",
       "Projection",
-      "Goal",
       "Forecast",
-      "Budget Achievement %",
       "Projection Achievement %",
-      "Goal Achievement %",
       "Status",
     ];
     
@@ -570,13 +542,9 @@ export default function PropertiesBulkEdit() {
       p.propertyType || "",
       p.address?.city || "",
       p.actualRevenue.toFixed(2),
-      p.budgetTotal.toFixed(2),
       p.projectionTotal.toFixed(2),
-      p.goalTotal.toFixed(2),
       p.forecastedRevenue.toFixed(2),
-      p.budgetAchievement.toFixed(1),
       p.projectionAchievement.toFixed(1),
-      p.goalAchievement.toFixed(1),
       p.status,
     ]);
 
