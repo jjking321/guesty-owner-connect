@@ -202,22 +202,37 @@ export default function PropertiesBulkEdit() {
     },
   });
 
-  // Fetch reservation nights for the FULL YEAR (past + future) for occupancy/ADR/RevPAR and on-the-books calculations
-  const { data: reservationNights = [] } = useQuery({
-    queryKey: ["reservation-nights-portfolio", selectedYear],
+  // Fetch aggregated reservation metrics using RPC to avoid 1000 row limit
+  const { data: portfolioMetrics = [] } = useQuery({
+    queryKey: ["portfolio-night-metrics", selectedYear, selectedMonth],
     queryFn: async () => {
-      const startDate = `${selectedYear}-01-01`;
-      const endDate = `${selectedYear}-12-31`; // Full year to get future bookings too
-      
-      const { data, error } = await supabase
-        .from("reservation_nights")
-        .select("listing_id, night_date, revenue_allocation")
-        .gte("night_date", startDate)
-        .lte("night_date", endDate);
+      const { data, error } = await supabase.rpc('get_portfolio_night_metrics', {
+        p_year: selectedYear,
+        p_month: selectedMonth // null for full year, 1-12 for specific month
+      });
       if (error) throw error;
       return data || [];
     },
   });
+
+  // Create lookup map for fast access to pre-aggregated metrics
+  const metricsMap = useMemo(() => {
+    const map = new Map<string, {
+      actual_revenue: number;
+      otb_revenue: number;
+      past_nights: number;
+      future_nights: number;
+    }>();
+    for (const m of portfolioMetrics) {
+      map.set(m.listing_id, {
+        actual_revenue: Number(m.actual_revenue) || 0,
+        otb_revenue: Number(m.otb_revenue) || 0,
+        past_nights: Number(m.past_nights) || 0,
+        future_nights: Number(m.future_nights) || 0,
+      });
+    }
+    return map;
+  }, [portfolioMetrics]);
 
   // Calculate period info based on selected month
   const periodInfo = useMemo(() => {
@@ -305,31 +320,18 @@ export default function PropertiesBulkEdit() {
   const propertyMetrics = useMemo(() => {
     if (!listings.length) return [];
 
-    const today = new Date().toISOString().split('T')[0];
-
     return listings.map((listing): PropertyMetrics => {
-      // Filter nights to selected period
-      const periodNights = reservationNights.filter(n => 
-        n.listing_id === listing.id && 
-        n.night_date >= periodInfo.start && 
-        n.night_date <= periodInfo.end
-      );
+      // Get pre-aggregated metrics from RPC (avoids 1000 row limit)
+      const metrics = metricsMap.get(listing.id) || {
+        actual_revenue: 0,
+        otb_revenue: 0,
+        past_nights: 0,
+        future_nights: 0,
+      };
       
-      // Split into past (actual) and future (on the books)
-      const pastNights = periodNights.filter(n => n.night_date < today);
-      const futureNights = periodNights.filter(n => n.night_date >= today);
-      
-      // Actual revenue = sum of past nights only
-      const actualRevenue = pastNights.reduce(
-        (sum, n) => sum + (Number(n.revenue_allocation) || 0),
-        0
-      );
-      
-      // On the books revenue = sum of future nights
-      const onTheBooksRevenue = futureNights.reduce(
-        (sum, n) => sum + (Number(n.revenue_allocation) || 0),
-        0
-      );
+      const actualRevenue = metrics.actual_revenue;
+      const onTheBooksRevenue = metrics.otb_revenue;
+      const pastNightsCount = metrics.past_nights;
 
       // Calculate goals using precomputed map, filtered to selected period
       const listingGoals = goalsByListing.get(String(listing.id)) || [];
@@ -379,9 +381,9 @@ export default function PropertiesBulkEdit() {
       const hasLockedGoals = periodGoals.some((g: any) => g.locked);
       const goalsLockedCount = periodGoals.filter((g: any) => g.locked).length;
 
-      // Calculate occupancy, ADR, RevPAR using past nights only
-      const occupancy = daysInRange > 0 ? (pastNights.length / daysInRange) * 100 : 0;
-      const adr = pastNights.length > 0 ? actualRevenue / pastNights.length : 0;
+      // Calculate occupancy, ADR, RevPAR using past nights count from RPC
+      const occupancy = daysInRange > 0 ? (pastNightsCount / daysInRange) * 100 : 0;
+      const adr = pastNightsCount > 0 ? actualRevenue / pastNightsCount : 0;
       const revpar = daysInRange > 0 ? actualRevenue / daysInRange : 0;
 
       return {
@@ -407,7 +409,7 @@ export default function PropertiesBulkEdit() {
         revpar,
       };
     });
-  }, [listings, goals, forecasts, reservationNights, daysInRange, goalsByListing, periodInfo, selectedMonth, selectedYear]);
+  }, [listings, forecasts, daysInRange, goalsByListing, metricsMap, selectedMonth, selectedYear]);
 
   // Filter and sort properties
   const filteredProperties = useMemo(() => {

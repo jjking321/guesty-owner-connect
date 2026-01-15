@@ -1558,6 +1558,16 @@ export type Database = {
         Args: { p_end_date: string; p_listing_id: string; p_start_date: string }
         Returns: number
       }
+      get_portfolio_night_metrics: {
+        Args: { p_month?: number; p_year: number }
+        Returns: {
+          actual_revenue: number
+          future_nights: number
+          listing_id: string
+          otb_revenue: number
+          past_nights: number
+        }[]
+      }
       get_user_owner_id: { Args: { _user_id: string }; Returns: string }
       get_ytd_revenue_by_listing: {
         Args: { end_date: string; target_year: number }
