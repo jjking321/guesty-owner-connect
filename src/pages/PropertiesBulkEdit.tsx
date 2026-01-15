@@ -133,20 +133,7 @@ export default function PropertiesBulkEdit() {
   // Derived: listing IDs for scoping goals query and avoiding pagination truncation
   const listingIds: string[] = useMemo(() => listings.map((l: any) => String(l.id)), [listings]);
 
-  const { data: ytdRevenueData = [], isLoading: ytdRevenueLoading } = useQuery({
-    queryKey: ["ytd-revenue", selectedYear],
-    queryFn: async () => {
-      const today = new Date().toISOString().split('T')[0];
-      const endDate = selectedYear === new Date().getFullYear() ? today : `${selectedYear}-12-31`;
-      const { data, error } = await supabase
-        .rpc("get_ytd_revenue_by_listing", {
-          target_year: selectedYear,
-          end_date: endDate
-        });
-      if (error) throw error;
-      return data || [];
-    },
-  });
+  // Removed: ytdRevenueData RPC query - now using reservation_nights for accurate per-night revenue
 
   const { data: goals = [], isLoading: goalsLoading, refetch: refetchGoals } = useQuery({
     queryKey: ["property_goals", selectedYear, listingIds],
@@ -262,14 +249,13 @@ export default function PropertiesBulkEdit() {
   const propertyMetrics = useMemo(() => {
     if (!listings.length) return [];
 
-    // Create a map of listing_id to YTD revenue
-    const revenueMap = new Map(
-      ytdRevenueData.map((item: any) => [item.listing_id, Number(item.total_revenue) || 0])
-    );
-
     return listings.map((listing): PropertyMetrics => {
-      // Get actual revenue from the aggregated data
-      const actualRevenue = revenueMap.get(listing.id) || 0;
+      // Get actual revenue from reservation_nights (per-night allocation, matching forecasting module)
+      const listingNights = reservationNights.filter(n => n.listing_id === listing.id);
+      const actualRevenue = listingNights.reduce(
+        (sum, n) => sum + (Number(n.revenue_allocation) || 0),
+        0
+      );
 
       // Calculate annual goals using precomputed map
       const listingGoals = goalsByListing.get(String(listing.id)) || [];
@@ -343,7 +329,7 @@ export default function PropertiesBulkEdit() {
         revpar,
       };
     });
-  }, [listings, ytdRevenueData, goals, forecasts, reservationNights, daysInRange]);
+  }, [listings, goals, forecasts, reservationNights, daysInRange, goalsByListing]);
 
   // Filter and sort properties
   const filteredProperties = useMemo(() => {
@@ -635,7 +621,7 @@ export default function PropertiesBulkEdit() {
     window.URL.revokeObjectURL(url);
   };
 
-  const isLoading = listingsLoading || ytdRevenueLoading || goalsLoading || forecastsLoading;
+  const isLoading = listingsLoading || goalsLoading || forecastsLoading;
 
   const handleSort = (field: typeof sortBy) => {
     if (sortBy === field) {
