@@ -86,7 +86,15 @@ export default function PropertiesBulkEdit() {
   // Column configuration state with localStorage persistence
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(() => {
     const saved = localStorage.getItem('portfolio-columns-visible');
-    return saved ? JSON.parse(saved) : DEFAULT_VISIBLE_COLUMNS;
+    if (saved) {
+      const parsed = JSON.parse(saved) as ColumnKey[];
+      // Ensure onTheBooks is always included (added in recent update)
+      if (!parsed.includes('onTheBooks')) {
+        parsed.splice(parsed.indexOf('actual') + 1 || 1, 0, 'onTheBooks');
+      }
+      return parsed;
+    }
+    return DEFAULT_VISIBLE_COLUMNS;
   });
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() => {
     const saved = localStorage.getItem('portfolio-columns-order');
