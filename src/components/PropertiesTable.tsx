@@ -35,6 +35,9 @@ interface PropertyMetrics {
   goalsLockedCount: number;
   archived?: boolean;
   isComposite?: boolean;
+  occupancy?: number;
+  adr?: number;
+  revpar?: number;
 }
 
 interface PropertiesTableProps {
@@ -160,6 +163,9 @@ export function PropertiesTable({
                 )}
                 <SortableHeader field="name">Property</SortableHeader>
                 <SortableHeader field="actual" align="right">Actual YTD</SortableHeader>
+                <TableHead className="text-right">Occ %</TableHead>
+                <TableHead className="text-right">ADR</TableHead>
+                <TableHead className="text-right">RevPAR</TableHead>
                 <TableHead className="text-right">Goal</TableHead>
                 <SortableHeader field="forecast" align="right">Forecast</SortableHeader>
                 <SortableHeader field="goalProgress" align="center">Goal Progress</SortableHeader>
@@ -246,6 +252,15 @@ export function PropertiesTable({
                       </span>
                     )}
                   </div>
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {property.occupancy !== undefined ? `${property.occupancy.toFixed(1)}%` : '--'}
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {property.adr !== undefined ? formatCurrency(property.adr) : '--'}
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {property.revpar !== undefined ? formatCurrency(property.revpar) : '--'}
                 </TableCell>
                 <TableCell className="text-right text-muted-foreground">
                   {formatCurrency(property.projectionTotal)}

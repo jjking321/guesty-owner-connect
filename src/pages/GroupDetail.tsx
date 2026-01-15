@@ -1362,6 +1362,14 @@ export default function GroupDetail() {
                   const forecastProjectionAchievement = projection > 0 ? (forecast / projection) * 100 : 0;
                   const forecastGoalAchievement = goal > 0 ? (forecast / goal) * 100 : 0;
 
+                  // Calculate occupancy, ADR, RevPAR using existing reservationNights data
+                  const listingNightsCount = reservationNights?.filter(
+                    n => n.listing_id === listing.id
+                  ).length || 0;
+                  const occupancy = daysInRange > 0 ? (listingNightsCount / daysInRange) * 100 : 0;
+                  const adr = listingNightsCount > 0 ? ytdRevenue / listingNightsCount : 0;
+                  const revpar = daysInRange > 0 ? ytdRevenue / daysInRange : 0;
+
                   return {
                     id: listing.id,
                     nickname: listing.nickname,
@@ -1387,6 +1395,9 @@ export default function GroupDetail() {
                     hasLockedGoals: lockedGoals.length > 0,
                     goalsLockedCount: lockedGoals.length,
                     isComposite: listing.is_composite,
+                    occupancy,
+                    adr,
+                    revpar,
                   };
                 }).sort((a, b) => {
                   let comparison = 0;
