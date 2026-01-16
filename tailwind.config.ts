@@ -57,28 +57,6 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
-        status: {
-          success: {
-            DEFAULT: "hsl(var(--status-success))",
-            bg: "hsl(var(--status-success-bg))",
-          },
-          warning: {
-            DEFAULT: "hsl(var(--status-warning))",
-            bg: "hsl(var(--status-warning-bg))",
-          },
-          danger: {
-            DEFAULT: "hsl(var(--status-danger))",
-            bg: "hsl(var(--status-danger-bg))",
-          },
-          neutral: {
-            DEFAULT: "hsl(var(--status-neutral))",
-            bg: "hsl(var(--status-neutral-bg))",
-          },
-          info: {
-            DEFAULT: "hsl(var(--status-info))",
-            bg: "hsl(var(--status-info-bg))",
-          },
-        },
       },
       borderRadius: {
         lg: "var(--radius)",

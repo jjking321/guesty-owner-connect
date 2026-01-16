@@ -498,8 +498,8 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
           <div
             className={`flex items-center gap-1 text-sm font-medium ${
               isPositive
-                ? "text-status-success"
-                : "text-status-danger"
+                ? "text-green-600 dark:text-green-500"
+                : "text-red-600 dark:text-red-500"
             }`}
           >
             <TrendIcon className="h-4 w-4" />

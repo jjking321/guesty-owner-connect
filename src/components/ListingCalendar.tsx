@@ -377,14 +377,14 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
     
     // Green: 10%+ below compset (opportunity to raise prices)
     if (percentDiff <= -10) {
-      return 'ring-2 ring-status-success ring-inset';
+      return 'ring-2 ring-emerald-500 ring-inset';
     }
     // Red: 10%+ above compset (priced higher than market)
     if (percentDiff >= 10) {
-      return 'ring-2 ring-status-danger ring-inset';
+      return 'ring-2 ring-red-500 ring-inset';
     }
-    // Amber: within ±10% (competitive)
-    return 'ring-2 ring-status-warning ring-inset';
+    // Yellow: within ±10% (competitive)
+    return 'ring-2 ring-amber-400 ring-inset';
   };
 
   // Calculate comparison summary stats
@@ -429,24 +429,24 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
     
     // Check reservations table FIRST - this is the source of truth for booked dates
     if (reservedDates.has(dateStr)) {
-      return `bg-status-neutral border-status-neutral ${baseStyle}`;
+      return `bg-teal-500 dark:bg-teal-600 border-teal-600 dark:border-teal-700 ${baseStyle}`;
     }
     
     // Then check capacity_calendar
     if (day) {
-      // Booked - neutral slate background (occupied, not "good")
+      // Booked - solid teal/green background
       if (day.status === 'booked' || day.block_reason === 'reservation') {
-        return `bg-status-neutral border-status-neutral ${baseStyle}`;
+        return `bg-teal-500 dark:bg-teal-600 border-teal-600 dark:border-teal-700 ${baseStyle}`;
       }
       
       // Blocked - grey striped pattern
       if (day.status === 'unavailable' || day.block_reason === 'blocked') {
-        return `blocked-stripe border-muted ${baseStyle}`;
+        return `blocked-stripe border-slate-300 dark:border-slate-600 ${baseStyle}`;
       }
       
       // Available - white/light background
       if (day.is_available) {
-        return `bg-card border-border ${baseStyle}`;
+        return `bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 ${baseStyle}`;
       }
     }
     
@@ -465,7 +465,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
       if (day.status === 'booked' || day.block_reason === 'reservation') {
         return { day: 'text-white/80', price: 'text-white' };
       }
-      return { day: 'text-muted-foreground', price: 'text-status-success' };
+      return { day: 'text-slate-500 dark:text-slate-400', price: 'text-emerald-600 dark:text-emerald-400' };
     }
     
     return { day: 'text-muted-foreground', price: 'text-muted-foreground' };

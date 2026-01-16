@@ -38,18 +38,6 @@ All colors MUST be HSL.
 
     --radius: 0.75rem;
 
-    /* Semantic status colors */
-    --status-success: 152 69% 38%;
-    --status-success-bg: 152 69% 95%;
-    --status-warning: 38 92% 50%;
-    --status-warning-bg: 38 92% 95%;
-    --status-danger: 0 72% 51%;
-    --status-danger-bg: 0 72% 95%;
-    --status-neutral: 215 14% 45%;
-    --status-neutral-bg: 215 14% 95%;
-    --status-info: 220 70% 50%;
-    --status-info-bg: 220 70% 95%;
-
     /* Chart palette (used by Recharts via hsl(var(--chart-n))) */
     --chart-1: 220 70% 50%;
     --chart-2: 180 55% 45%;
@@ -62,12 +50,19 @@ All colors MUST be HSL.
     --shadow-medium: 0 8px 24px -8px hsl(220 20% 10% / 0.12);
 
     --sidebar-background: 0 0% 98%;
+
     --sidebar-foreground: 240 5.3% 26.1%;
+
     --sidebar-primary: 240 5.9% 10%;
+
     --sidebar-primary-foreground: 0 0% 98%;
+
     --sidebar-accent: 240 4.8% 95.9%;
+
     --sidebar-accent-foreground: 240 5.9% 10%;
+
     --sidebar-border: 220 13% 91%;
+
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
 
@@ -99,18 +94,6 @@ All colors MUST be HSL.
     --border: 220 15% 18%;
     --input: 220 15% 18%;
     --ring: 220 70% 55%;
-
-    /* Semantic status colors (dark) */
-    --status-success: 152 69% 45%;
-    --status-success-bg: 152 40% 15%;
-    --status-warning: 38 92% 55%;
-    --status-warning-bg: 38 50% 15%;
-    --status-danger: 0 72% 55%;
-    --status-danger-bg: 0 50% 15%;
-    --status-neutral: 215 14% 55%;
-    --status-neutral-bg: 215 14% 20%;
-    --status-info: 220 70% 60%;
-    --status-info-bg: 220 50% 15%;
 
     /* Chart palette (dark) */
     --chart-1: 220 70% 60%;
