@@ -322,11 +322,11 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
   const getSourceIcon = (source?: string) => {
     switch (source) {
       case 'actuals':
-        return <Database className="h-3 w-3 text-green-600" />;
+        return <Database className="h-3 w-3 text-status-success" />;
       case 'compset':
-        return <BarChart3 className="h-3 w-3 text-blue-600" />;
+        return <BarChart3 className="h-3 w-3 text-status-info" />;
       case 'fallback':
-        return <AlertCircle className="h-3 w-3 text-amber-600" />;
+        return <AlertCircle className="h-3 w-3 text-status-warning" />;
       default:
         return null;
     }
@@ -418,13 +418,13 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
           <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t">
             <Badge variant="outline" className="text-xs">
               {generationMetadata.dataSource === 'actuals' && (
-                <><Database className="h-3 w-3 mr-1 text-green-600" /> Based on {year - 1} actuals</>
+                <><Database className="h-3 w-3 mr-1 text-status-success" /> Based on {year - 1} actuals</>
               )}
               {generationMetadata.dataSource === 'compset' && (
-                <><BarChart3 className="h-3 w-3 mr-1 text-blue-600" /> Based on compset data</>
+                <><BarChart3 className="h-3 w-3 mr-1 text-status-info" /> Based on compset data</>
               )}
               {generationMetadata.dataSource === 'fallback' && (
-                <><AlertCircle className="h-3 w-3 mr-1 text-amber-600" /> Limited data available</>
+                <><AlertCircle className="h-3 w-3 mr-1 text-status-warning" /> Limited data available</>
               )}
             </Badge>
             {generationMetadata.hasFullYearActuals && (
@@ -434,7 +434,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
               </Badge>
             )}
             {generationMetadata.rampUpMonths > 0 && (
-              <Badge variant="secondary" className="text-xs text-amber-700">
+              <Badge variant="secondary" className="text-xs text-status-warning">
                 {generationMetadata.rampUpMonths} ramp-up months (70%)
               </Badge>
             )}
@@ -487,7 +487,7 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
                   {goal.isRampUp && (
                     <Tooltip>
                       <TooltipTrigger>
-                        <Badge variant="outline" className="text-xs px-1 py-0 text-amber-700 border-amber-300">
+                        <Badge variant="outline" className="text-xs px-1 py-0 text-status-warning border-status-warning">
                           70%
                         </Badge>
                       </TooltipTrigger>
