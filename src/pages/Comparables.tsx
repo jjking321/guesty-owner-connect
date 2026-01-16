@@ -17,6 +17,7 @@ import { format, formatDistanceToNow, subDays } from "date-fns";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Link } from "react-router-dom";
 import { CompSelectionWizard } from "@/components/CompSelectionWizard";
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 interface ComparableWithListing {
   id: string;
   listing_id: string;
@@ -143,6 +144,20 @@ export default function Comparables() {
     unlisted: false,
     archived: false,
   });
+  const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
+
+  // Fetch guesty account ID for sync job association
+  useEffect(() => {
+    const fetchAccountId = async () => {
+      const { data } = await supabase
+        .from('guesty_accounts')
+        .select('id')
+        .limit(1)
+        .single();
+      if (data) setGuestyAccountId(data.id);
+    };
+    fetchAccountId();
+  }, []);
 
   // Fetch all comparables with pagination to bypass 1000-row limit
   const { data: comparables = [], isLoading: loadingComparables, refetch: refetchComparables } = useQuery({
@@ -292,15 +307,22 @@ export default function Comparables() {
       if (selectedIds.length === 0) throw new Error("No comparables match the filter");
       
       const { data, error } = await supabase.functions.invoke('fetch-comparable-metrics', {
-        body: { comparable_ids: selectedIds }
+        body: { 
+          comparable_ids: selectedIds,
+          guesty_account_id: guestyAccountId
+        }
       });
       
       if (error) throw error;
       return { ...data, targetCount: selectedIds.length };
     },
     onSuccess: (data) => {
-      toast.success(`Fetched historical metrics for ${data.processed || data.targetCount} comparables`);
-      refetchComparables();
+      if (data.syncJobId) {
+        toast.success(`Started fetching historical metrics for ${data.targetCount} comparables`);
+      } else {
+        toast.success(`Fetched historical metrics for ${data.processed || data.targetCount} comparables`);
+        refetchComparables();
+      }
     },
     onError: (error) => {
       toast.error(`Failed to fetch metrics: ${error.message}`);
@@ -315,15 +337,22 @@ export default function Comparables() {
       if (selectedIds.length === 0) throw new Error("No comparables match the filter");
       
       const { data, error } = await supabase.functions.invoke('fetch-comparable-future-rates', {
-        body: { comparable_ids: selectedIds }
+        body: { 
+          comparable_ids: selectedIds,
+          guesty_account_id: guestyAccountId
+        }
       });
       
       if (error) throw error;
       return { ...data, targetCount: selectedIds.length };
     },
     onSuccess: (data) => {
-      toast.success(`Fetched future rates for ${data.processed || data.targetCount} comparables`);
-      refetchComparables();
+      if (data.syncJobId) {
+        toast.success(`Started fetching future rates for ${data.targetCount} comparables`);
+      } else {
+        toast.success(`Fetched future rates for ${data.processed || data.targetCount} comparables`);
+        refetchComparables();
+      }
     },
     onError: (error) => {
       toast.error(`Failed to fetch future rates: ${error.message}`);
@@ -823,6 +852,22 @@ export default function Comparables() {
 
           {/* Bulk Actions Tab */}
           <TabsContent value="bulk" className="space-y-4">
+            {/* Live Progress Cards */}
+            {guestyAccountId && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <SyncProgressCard 
+                  accountId={guestyAccountId} 
+                  syncType="comparable_historical"
+                  onComplete={() => refetchComparables()}
+                />
+                <SyncProgressCard 
+                  accountId={guestyAccountId} 
+                  syncType="comparable_future_rates"
+                  onComplete={() => refetchComparables()}
+                />
+              </div>
+            )}
+            
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <Card>
                 <CardHeader className="pb-2">
