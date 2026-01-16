@@ -42,15 +42,10 @@ function calculateTtmRollups(results: HistoricalMetric[]): { ttmMetrics: TtmMetr
     };
   }
 
-  // Get current date and determine the last complete month
   const now = new Date();
   const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth(); // 0-indexed
+  const currentMonth = now.getMonth();
 
-  // Last complete month is one month before current
-  // TTM: Last 12 complete months
-  // Prior TTM: 12 months before that (months 13-24)
-  
   const ttmData: HistoricalMetric[] = [];
   const priorTtmData: HistoricalMetric[] = [];
 
@@ -58,32 +53,23 @@ function calculateTtmRollups(results: HistoricalMetric[]): { ttmMetrics: TtmMetr
     const recordDate = new Date(record.date);
     const recordYear = recordDate.getFullYear();
     const recordMonth = recordDate.getMonth();
-
-    // Calculate months ago from current month (excluding current incomplete month)
     const monthsAgo = (currentYear - recordYear) * 12 + (currentMonth - recordMonth);
 
-    // TTM: 1-12 months ago (excludes current month which is incomplete)
     if (monthsAgo >= 1 && monthsAgo <= 12) {
       ttmData.push(record);
-    }
-    // Prior TTM: 13-24 months ago
-    else if (monthsAgo >= 13 && monthsAgo <= 24) {
+    } else if (monthsAgo >= 13 && monthsAgo <= 24) {
       priorTtmData.push(record);
     }
   }
-
-  console.log(`TTM data points: ${ttmData.length}, Prior TTM data points: ${priorTtmData.length}`);
 
   const calculateMetrics = (data: HistoricalMetric[]): TtmMetrics => {
     if (data.length === 0) {
       return { revenue: null, adr: null, occupancy: null, revpar: null };
     }
 
-    // Revenue is SUM
     const revenueValues = data.filter(d => d.revenue != null).map(d => d.revenue!);
     const revenue = revenueValues.length > 0 ? revenueValues.reduce((a, b) => a + b, 0) : null;
 
-    // ADR, Occupancy, RevPAR are simple averages
     const adrValues = data.filter(d => d.average_daily_rate != null).map(d => d.average_daily_rate!);
     const adr = adrValues.length > 0 ? adrValues.reduce((a, b) => a + b, 0) / adrValues.length : null;
 
@@ -110,13 +96,9 @@ interface MonthlyAverage {
   revpar: number;
 }
 
-async function updateCompsetSummary(
-  supabase: any,
-  listingId: string
-): Promise<void> {
+async function updateCompsetSummary(supabase: any, listingId: string): Promise<void> {
   console.log(`Updating compset summary for listing ${listingId}`);
 
-  // Get all selected comparables with TTM data AND historical metrics
   const { data: selectedComps, error: selectError } = await supabase
     .from('property_comparables')
     .select('ttm_revenue, ttm_adr, ttm_occupancy, ttm_revpar, prior_ttm_revenue, prior_ttm_adr, prior_ttm_occupancy, prior_ttm_revpar, historical_metrics')
@@ -129,33 +111,26 @@ async function updateCompsetSummary(
     return;
   }
 
-  // Cast to proper type since new columns may not be in generated types yet
   const comps = (selectedComps || []) as unknown as (ComparableWithTtm & { historical_metrics?: { results?: HistoricalMetric[] } })[];
 
   if (comps.length === 0) {
     console.log(`No selected comparables with TTM data for listing ${listingId}`);
-    // Delete any existing summary
-    await supabase
-      .from('property_compset_summary')
-      .delete()
-      .eq('listing_id', listingId);
+    await supabase.from('property_compset_summary').delete().eq('listing_id', listingId);
     return;
   }
 
-  // Calculate simple averages for TTM metrics
   const avg = (arr: (number | null)[]): number | null => {
     const valid = arr.filter((v): v is number => v != null);
     return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
   };
 
-  // Calculate monthly averages from historical_metrics
   const monthlyDataMap = new Map<string, { revenue: number[]; adr: number[]; occupancy: number[]; revpar: number[] }>();
 
   for (const comp of comps) {
     const results = comp.historical_metrics?.results || [];
     for (const record of results) {
       if (!record.date) continue;
-      const monthKey = record.date; // Already in "YYYY-MM" format
+      const monthKey = record.date;
       
       if (!monthlyDataMap.has(monthKey)) {
         monthlyDataMap.set(monthKey, { revenue: [], adr: [], occupancy: [], revpar: [] });
@@ -169,7 +144,6 @@ async function updateCompsetSummary(
     }
   }
 
-  // Convert to array of monthly averages
   const monthlyAverages: MonthlyAverage[] = [];
   for (const [month, data] of monthlyDataMap.entries()) {
     monthlyAverages.push({
@@ -181,10 +155,7 @@ async function updateCompsetSummary(
     });
   }
 
-  // Sort by month descending (most recent first)
   monthlyAverages.sort((a, b) => b.month.localeCompare(a.month));
-
-  console.log(`Calculated ${monthlyAverages.length} monthly averages for listing ${listingId}`);
 
   const summary = {
     listing_id: listingId,
@@ -202,7 +173,6 @@ async function updateCompsetSummary(
     updated_at: new Date().toISOString(),
   };
 
-  // Use upsert with any type to avoid type issues with new table
   const { error: upsertError } = await (supabase as any)
     .from('property_compset_summary')
     .upsert(summary, { onConflict: 'listing_id' });
@@ -210,12 +180,103 @@ async function updateCompsetSummary(
   if (upsertError) {
     console.error(`Failed to upsert compset summary: ${upsertError.message}`);
   } else {
-    console.log(`Updated compset summary for listing ${listingId} with ${comps.length} comparables and ${monthlyAverages.length} monthly averages`);
+    console.log(`Updated compset summary for listing ${listingId} with ${comps.length} comparables`);
   }
 }
 
+async function processComparables(
+  supabase: any,
+  airroiApiKey: string,
+  airroiIdToRecords: Map<string, Array<{ id: string; listing_id: string }>>,
+  syncJobId: string | null
+): Promise<{ successCount: number; recordsUpdated: number; errors: string[]; affectedListingIds: Set<string> }> {
+  let successCount = 0;
+  let recordsUpdated = 0;
+  const errors: string[] = [];
+  const affectedListingIds = new Set<string>();
+  const totalItems = airroiIdToRecords.size;
+
+  for (const [airroiListingId, records] of airroiIdToRecords.entries()) {
+    try {
+      console.log(`Fetching metrics for airroi_listing_id: ${airroiListingId} (affects ${records.length} records)`);
+
+      const url = `${AIRROI_API_URL}?id=${airroiListingId}&num_months=60&currency=usd`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'x-api-key': airroiApiKey,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`API error for ${airroiListingId}: ${response.status} - ${errorText}`);
+        errors.push(`ID ${airroiListingId}: ${response.status}`);
+        continue;
+      }
+
+      const metricsData = await response.json();
+      console.log(`Received metrics data for ${airroiListingId}`);
+
+      const { ttmMetrics, priorTtmMetrics } = calculateTtmRollups(metricsData.results || []);
+
+      // Update ALL records that share this airroi_listing_id IMMEDIATELY (save as we go)
+      const recordIds = records.map(r => r.id);
+      const { error: updateError } = await supabase
+        .from('property_comparables')
+        .update({
+          historical_metrics: metricsData,
+          ttm_revenue: ttmMetrics.revenue,
+          ttm_adr: ttmMetrics.adr,
+          ttm_occupancy: ttmMetrics.occupancy,
+          ttm_revpar: ttmMetrics.revpar,
+          prior_ttm_revenue: priorTtmMetrics.revenue,
+          prior_ttm_adr: priorTtmMetrics.adr,
+          prior_ttm_occupancy: priorTtmMetrics.occupancy,
+          prior_ttm_revpar: priorTtmMetrics.revpar,
+          rollups_calculated_at: new Date().toISOString(),
+          metrics_fetched_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as any)
+        .in('id', recordIds);
+
+      if (updateError) {
+        console.error(`Failed to update comparables for ${airroiListingId}: ${updateError.message}`);
+        errors.push(`Update ${airroiListingId}: ${updateError.message}`);
+      } else {
+        console.log(`Successfully updated ${records.length} records for airroi_listing_id ${airroiListingId}`);
+        successCount++;
+        recordsUpdated += records.length;
+        records.forEach(r => affectedListingIds.add(r.listing_id));
+      }
+
+      // Update sync job progress after each successful fetch
+      if (syncJobId) {
+        await supabase
+          .from('sync_jobs')
+          .update({
+            items_synced: successCount,
+            progress_message: `Fetched metrics for ${successCount}/${totalItems} comparables`,
+          })
+          .eq('id', syncJobId);
+      }
+
+      // Rate limiting delay
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error processing airroi_listing_id ${airroiListingId}:`, error);
+      errors.push(`Process ${airroiListingId}: ${errorMessage}`);
+    }
+  }
+
+  return { successCount, recordsUpdated, errors, affectedListingIds };
+}
+
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -230,8 +291,7 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    const { comparable_ids } = await req.json();
+    const { comparable_ids, guesty_account_id } = await req.json();
 
     if (!comparable_ids || !Array.isArray(comparable_ids) || comparable_ids.length === 0) {
       throw new Error('comparable_ids array is required');
@@ -239,7 +299,7 @@ serve(async (req) => {
 
     console.log(`Fetching historical metrics for ${comparable_ids.length} comparables`);
 
-    // Fetch the comparables to get their airroi_listing_ids and listing_id
+    // Fetch comparables
     const { data: comparables, error: fetchError } = await supabase
       .from('property_comparables')
       .select('id, airroi_listing_id, listing_id')
@@ -253,9 +313,7 @@ serve(async (req) => {
       throw new Error('No comparables found with the provided IDs');
     }
 
-    console.log(`Found ${comparables.length} comparables to fetch metrics for`);
-
-    // DEDUPLICATION: Group comparables by airroi_listing_id to avoid redundant API calls
+    // Deduplicate by airroi_listing_id
     const airroiIdToRecords = new Map<string, Array<{ id: string; listing_id: string }>>();
     
     for (const comparable of comparables) {
@@ -271,120 +329,109 @@ serve(async (req) => {
 
     console.log(`Deduplicated ${comparables.length} records to ${airroiIdToRecords.size} unique API calls`);
 
-    let successCount = 0;
-    let failedCount = 0;
-    let recordsUpdated = 0;
-    const errors: string[] = [];
-    const affectedListingIds = new Set<string>();
+    // If guesty_account_id provided, create sync job and process in background
+    if (guesty_account_id) {
+      const { data: syncJob, error: jobError } = await supabase
+        .from('sync_jobs')
+        .insert({
+          guesty_account_id,
+          sync_type: 'comparable_historical',
+          status: 'running',
+          total_items: airroiIdToRecords.size,
+          items_synced: 0,
+          progress_message: `Starting historical metrics fetch for ${airroiIdToRecords.size} comparables...`,
+        })
+        .select()
+        .single();
 
-    // Fetch metrics for each UNIQUE airroi_listing_id
-    for (const [airroiListingId, records] of airroiIdToRecords.entries()) {
-      try {
-        console.log(`Fetching metrics for airroi_listing_id: ${airroiListingId} (affects ${records.length} records)`);
+      if (jobError) {
+        console.error('Error creating sync job:', jobError);
+      } else {
+        console.log(`Created sync job ${syncJob.id}`);
 
-        const url = `${AIRROI_API_URL}?id=${airroiListingId}&num_months=60&currency=usd`;
-        
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'x-api-key': airroiApiKey,
-            'Content-Type': 'application/json',
-          },
-        });
+        // Process in background
+        EdgeRuntime.waitUntil((async () => {
+          try {
+            const { successCount, recordsUpdated, errors, affectedListingIds } = await processComparables(
+              supabase,
+              airroiApiKey,
+              airroiIdToRecords,
+              syncJob.id
+            );
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`API error for ${airroiListingId}: ${response.status} - ${errorText}`);
-          errors.push(`ID ${airroiListingId}: ${response.status}`);
-          failedCount++;
-          continue;
-        }
+            // Update compset summaries for all affected listings
+            console.log(`Updating compset summaries for ${affectedListingIds.size} affected listings`);
+            for (const listingId of affectedListingIds) {
+              await updateCompsetSummary(supabase, listingId);
+            }
 
-        const metricsData = await response.json();
-        console.log(`Received metrics data for ${airroiListingId}: ${JSON.stringify(metricsData).slice(0, 200)}...`);
+            // Mark job as completed
+            await supabase
+              .from('sync_jobs')
+              .update({
+                status: errors.length > 0 ? 'completed_with_errors' : 'completed',
+                completed_at: new Date().toISOString(),
+                items_synced: successCount,
+                progress_message: `Completed: ${successCount}/${airroiIdToRecords.size} API calls, ${recordsUpdated} records updated`,
+                error_message: errors.length > 0 ? errors.slice(0, 5).join('; ') : null,
+              })
+              .eq('id', syncJob.id);
+          } catch (error: any) {
+            console.error('Background processing error:', error);
+            await supabase
+              .from('sync_jobs')
+              .update({
+                status: 'failed',
+                completed_at: new Date().toISOString(),
+                error_message: error.message,
+              })
+              .eq('id', syncJob.id);
+          }
+        })());
 
-        // Calculate TTM rollups
-        const { ttmMetrics, priorTtmMetrics } = calculateTtmRollups(metricsData.results || []);
-        console.log(`Calculated TTM metrics for ${airroiListingId}:`, ttmMetrics);
-
-        // Update ALL records that share this airroi_listing_id
-        const recordIds = records.map(r => r.id);
-        const { error: updateError } = await supabase
-          .from('property_comparables')
-          .update({
-            historical_metrics: metricsData,
-            ttm_revenue: ttmMetrics.revenue,
-            ttm_adr: ttmMetrics.adr,
-            ttm_occupancy: ttmMetrics.occupancy,
-            ttm_revpar: ttmMetrics.revpar,
-            prior_ttm_revenue: priorTtmMetrics.revenue,
-            prior_ttm_adr: priorTtmMetrics.adr,
-            prior_ttm_occupancy: priorTtmMetrics.occupancy,
-            prior_ttm_revpar: priorTtmMetrics.revpar,
-            rollups_calculated_at: new Date().toISOString(),
-            metrics_fetched_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          } as any)
-          .in('id', recordIds);
-
-        if (updateError) {
-          console.error(`Failed to update comparables for ${airroiListingId}: ${updateError.message}`);
-          errors.push(`Update ${airroiListingId}: ${updateError.message}`);
-          failedCount++;
-        } else {
-          console.log(`Successfully updated ${records.length} records for airroi_listing_id ${airroiListingId}`);
-          successCount++;
-          recordsUpdated += records.length;
-          // Track all affected listings for compset summary updates
-          records.forEach(r => affectedListingIds.add(r.listing_id));
-        }
-
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`Error processing airroi_listing_id ${airroiListingId}:`, error);
-        errors.push(`Process ${airroiListingId}: ${errorMessage}`);
-        failedCount++;
+        // Return immediately with job ID
+        return new Response(
+          JSON.stringify({
+            success: true,
+            sync_job_id: syncJob.id,
+            message: `Started fetching metrics for ${airroiIdToRecords.size} comparables`,
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+        );
       }
     }
 
-    // Update compset summaries for all affected listings
-    console.log(`Updating compset summaries for ${affectedListingIds.size} affected listings`);
+    // Fallback: synchronous processing (no guesty_account_id)
+    const { successCount, recordsUpdated, errors, affectedListingIds } = await processComparables(
+      supabase,
+      airroiApiKey,
+      airroiIdToRecords,
+      null
+    );
+
+    // Update compset summaries
     for (const listingId of affectedListingIds) {
       await updateCompsetSummary(supabase, listingId);
     }
-
-    console.log(`Completed: ${successCount} API calls, ${recordsUpdated} records updated, ${failedCount} failed`);
 
     return new Response(
       JSON.stringify({
         success: true,
         api_calls_made: airroiIdToRecords.size,
         records_updated: recordsUpdated,
-        failed: failedCount,
+        failed: errors.length,
         total_records: comparables.length,
         errors: errors.length > 0 ? errors : undefined,
       }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      }
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     );
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('Error in fetch-comparable-metrics:', error);
     return new Response(
-      JSON.stringify({
-        success: false,
-        error: errorMessage,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
-      }
+      JSON.stringify({ success: false, error: errorMessage }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     );
   }
 });

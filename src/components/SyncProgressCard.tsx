@@ -5,6 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { CheckCircle2, XCircle, Loader2, X, StopCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface SyncJob {
   id: string;
@@ -19,11 +20,24 @@ interface SyncJob {
 
 interface SyncProgressCardProps {
   accountId: string;
-  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'goal_recalculation' | 'capacity_calendar';
+  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'goal_recalculation' | 'capacity_calendar' | 'comparable_historical' | 'comparable_future_rates';
+  onComplete?: () => void;
 }
 
-export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps) {
+const getSyncTypeName = (type: string): string => {
+  switch (type) {
+    case 'goal_recalculation': return 'Goal Recalculation';
+    case 'capacity_calendar': return 'Calendar Sync';
+    case 'comparable_historical': return 'Historical Metrics Fetch';
+    case 'comparable_future_rates': return 'Future Rates Fetch';
+    case 'new_reservations': return 'New Reservations Sync';
+    default: return `${type.charAt(0).toUpperCase() + type.slice(1)} Sync`;
+  }
+};
+
+export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgressCardProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [syncJob, setSyncJob] = useState<SyncJob | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -59,7 +73,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
         .eq('guesty_account_id', accountId)
         .eq('sync_type', syncType)
         .gte('started_at', fiveMinutesAgo)
-        .in('status', ['completed', 'failed'])
+        .in('status', ['completed', 'completed_with_errors', 'failed'])
         .order('started_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -92,8 +106,18 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
             setSyncJob(job);
             setDismissed(false); // Show new job, clear any previous dismissal
             
-            // Auto-clear after completed/failed
-            if (job.status === 'completed' || job.status === 'failed') {
+            // Auto-clear after completed/failed and trigger callbacks
+            if (job.status === 'completed' || job.status === 'completed_with_errors' || job.status === 'failed') {
+              // Invalidate comparables query to refresh data
+              if (syncType === 'comparable_historical' || syncType === 'comparable_future_rates') {
+                queryClient.invalidateQueries({ queryKey: ['all-comparables'] });
+              }
+              
+              // Call onComplete callback
+              if (onComplete) {
+                onComplete();
+              }
+              
               setTimeout(() => setSyncJob(null), 30000); // 30 seconds
             }
           }
@@ -104,7 +128,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [accountId, syncType]);
+  }, [accountId, syncType, queryClient, onComplete]);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -199,6 +223,8 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
     : undefined;
 
   const showProgress = syncJob.status === 'running' && (syncJob.items_synced !== null || syncJob.total_items !== null);
+  const isCompleted = syncJob.status === 'completed' || syncJob.status === 'completed_with_errors';
+  const isFailed = syncJob.status === 'failed';
 
   return (
     <Card className="border-primary/50 bg-primary/5">
@@ -209,14 +235,14 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
               {syncJob.status === 'running' && (
                 <Loader2 className="h-4 w-4 animate-spin text-primary" />
               )}
-              {syncJob.status === 'completed' && (
+              {isCompleted && (
                 <CheckCircle2 className="h-4 w-4 text-green-600" />
               )}
-              {syncJob.status === 'failed' && (
+              {isFailed && (
                 <XCircle className="h-4 w-4 text-destructive" />
               )}
-              <p className="font-medium text-sm capitalize">
-                {syncType === 'goal_recalculation' ? 'Goal Recalculation' : syncType === 'capacity_calendar' ? 'Calendar Sync' : `${syncType} Sync`} - {syncJob.status}
+              <p className="font-medium text-sm">
+                {getSyncTypeName(syncType)} - {syncJob.status === 'completed_with_errors' ? 'Completed with errors' : syncJob.status}
               </p>
             </div>
             
@@ -244,7 +270,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
               )}
               
               {/* Resume button - only show for failed goal_recalculation */}
-              {syncJob.status === 'failed' && syncType === 'goal_recalculation' && (
+              {isFailed && syncType === 'goal_recalculation' && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -258,7 +284,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
               )}
               
               {/* Resume button - only show for failed capacity_calendar */}
-              {syncJob.status === 'failed' && syncType === 'capacity_calendar' && (
+              {isFailed && syncType === 'capacity_calendar' && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -272,7 +298,7 @@ export function SyncProgressCard({ accountId, syncType }: SyncProgressCardProps)
               )}
               
               {/* Dismiss button - only show for completed/failed */}
-              {(syncJob.status === 'completed' || syncJob.status === 'failed') && (
+              {(isCompleted || isFailed) && (
                 <Button
                   variant="ghost"
                   size="icon"
