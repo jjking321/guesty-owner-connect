@@ -140,7 +140,7 @@ export function GlobalSearch() {
     setSearch("");
     switch (type) {
       case "property":
-        navigate(`/property/${id}`);
+        navigate(`/listings/${id}`);
         break;
       case "group":
         navigate(`/groups/${id}`);
