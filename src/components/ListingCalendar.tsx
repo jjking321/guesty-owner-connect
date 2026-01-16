@@ -92,6 +92,39 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
     },
   });
 
+  // Fetch reservations for the displayed month (for historical dates without capacity_calendar data)
+  const { data: reservationsData } = useQuery({
+    queryKey: ['listing-reservations-calendar', listingId, format(currentMonth, 'yyyy-MM')],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reservations')
+        .select('check_in, check_out, confirmation_code, status')
+        .eq('listing_id', listingId)
+        .in('status', ['confirmed', 'checked_in', 'checked_out'])
+        .not('confirmation_code', 'is', null)
+        .lte('check_in', format(monthEnd, 'yyyy-MM-dd'))
+        .gte('check_out', format(monthStart, 'yyyy-MM-dd'));
+      
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Create a set of reserved dates from reservations table
+  const reservedDates = useMemo(() => {
+    const dates = new Set<string>();
+    reservationsData?.forEach(res => {
+      if (!res.check_in || !res.check_out) return;
+      let current = new Date(res.check_in);
+      const checkOut = new Date(res.check_out);
+      while (current < checkOut) {
+        dates.add(format(current, 'yyyy-MM-dd'));
+        current.setDate(current.getDate() + 1);
+      }
+    });
+    return dates;
+  }, [reservationsData]);
+
   // Fetch booking probabilities
   const { data: probabilityData, isLoading: probabilitiesLoading } = useQuery({
     queryKey: ['booking-probabilities', listingId, format(currentMonth, 'yyyy-MM')],
@@ -389,39 +422,52 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   }, [compareToCompset, hasCompsetData, calendarData, compsetAverages]);
 
   // Get status styling - color-coded cells
-  const getStatusStyle = (day: CalendarDay | undefined, date: Date) => {
+  const getStatusStyle = (day: CalendarDay | undefined, date: Date, dateStr: string) => {
     const isPast = isBefore(date, new Date()) && !isToday(date);
     const baseStyle = isPast ? 'opacity-50' : '';
     
-    if (!day) return `bg-muted/30 border-border ${baseStyle}`;
+    // Check capacity_calendar first
+    if (day) {
+      // Booked - solid teal/green background
+      if (day.status === 'booked' || day.block_reason === 'reservation') {
+        return `bg-teal-500 dark:bg-teal-600 border-teal-600 dark:border-teal-700 ${baseStyle}`;
+      }
+      
+      // Blocked - grey striped pattern
+      if (day.status === 'unavailable' || day.block_reason === 'blocked') {
+        return `blocked-stripe border-slate-300 dark:border-slate-600 ${baseStyle}`;
+      }
+      
+      // Available - white/light background
+      if (day.is_available) {
+        return `bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 ${baseStyle}`;
+      }
+    }
     
-    // Booked - solid teal/green background
-    if (day.status === 'booked' || day.block_reason === 'reservation') {
+    // Fall back to checking reservations table for historical dates
+    if (reservedDates.has(dateStr)) {
       return `bg-teal-500 dark:bg-teal-600 border-teal-600 dark:border-teal-700 ${baseStyle}`;
-    }
-    
-    // Blocked - grey striped pattern
-    if (day.status === 'unavailable' || day.block_reason === 'blocked') {
-      return `blocked-stripe border-slate-300 dark:border-slate-600 ${baseStyle}`;
-    }
-    
-    // Available - white/light background
-    if (day.is_available) {
-      return `bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 ${baseStyle}`;
     }
     
     return `bg-muted/30 border-border ${baseStyle}`;
   };
 
   // Get text color based on status
-  const getTextColors = (day: CalendarDay | undefined) => {
-    if (!day) return { day: 'text-muted-foreground', price: 'text-muted-foreground' };
+  const getTextColors = (day: CalendarDay | undefined, dateStr: string) => {
+    // Check capacity_calendar first
+    if (day) {
+      if (day.status === 'booked' || day.block_reason === 'reservation') {
+        return { day: 'text-white/80', price: 'text-white' };
+      }
+      return { day: 'text-slate-500 dark:text-slate-400', price: 'text-emerald-600 dark:text-emerald-400' };
+    }
     
-    if (day.status === 'booked' || day.block_reason === 'reservation') {
+    // Fall back to checking reservations table for historical dates
+    if (reservedDates.has(dateStr)) {
       return { day: 'text-white/80', price: 'text-white' };
     }
     
-    return { day: 'text-slate-500 dark:text-slate-400', price: 'text-emerald-600 dark:text-emerald-400' };
+    return { day: 'text-muted-foreground', price: 'text-muted-foreground' };
   };
 
   // Format price
@@ -621,7 +667,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
               {daysInMonth.map((date) => {
                 const dateStr = format(date, 'yyyy-MM-dd');
                 const dayData = calendarMap.get(dateStr);
-                const textColors = getTextColors(dayData);
+                const textColors = getTextColors(dayData, dateStr);
                 const compsetAvg = compsetAverages.get(dateStr);
                 const showComparison = compareToCompset && hasCompsetData && dayData?.price && dayData.is_available && compsetAvg;
                 const compsetInfo = compsetDailyDetails.get(dateStr);
@@ -632,7 +678,7 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
                     onClick={() => setSelectedDate(dateStr)}
                     className={`
                       relative h-20 p-1.5 border flex flex-col cursor-pointer hover:opacity-90 transition-opacity
-                      ${getStatusStyle(dayData, date)}
+                      ${getStatusStyle(dayData, date, dateStr)}
                       ${isToday(date) && !showComparison ? 'ring-2 ring-primary ring-inset' : ''}
                       ${showComparison ? getComparisonStyle(dayData?.price ?? null, compsetAvg) : ''}
                     `}
