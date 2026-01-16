@@ -324,12 +324,12 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
     const currentBookableDays = Math.max(0, currentTotalDays - currentOwnerNights - currentBlockedNights);
     const lastBookableDays = Math.max(0, lastTotalDays - lastOwnerNights - lastBlockedNights);
 
-    // Adjusted Occupancy = Guest nights / Bookable days
+    // Adjusted Occupancy = Guest nights / Bookable days (capped at 100%)
     const currentAdjustedOccupancy = currentBookableDays > 0 
-      ? (currentNights / currentBookableDays) * 100 
+      ? Math.min(100, (currentNights / currentBookableDays) * 100) 
       : 0;
     const lastAdjustedOccupancy = lastBookableDays > 0 
-      ? (lastNights / lastBookableDays) * 100 
+      ? Math.min(100, (lastNights / lastBookableDays) * 100) 
       : 0;
     const adjustedOccupancyChange = lastAdjustedOccupancy > 0
       ? ((currentAdjustedOccupancy - lastAdjustedOccupancy) / lastAdjustedOccupancy) * 100
