@@ -5,7 +5,7 @@ import { RefreshCw, ChevronLeft, ChevronRight, Moon, Users, BarChart3 } from "lu
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday, isBefore } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths, isToday, isBefore, parseISO } from "date-fns";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -111,12 +111,13 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
   });
 
   // Create a set of reserved dates from reservations table
+  // Use parseISO to correctly handle date strings without timezone shifts
   const reservedDates = useMemo(() => {
     const dates = new Set<string>();
     reservationsData?.forEach(res => {
       if (!res.check_in || !res.check_out) return;
-      let current = new Date(res.check_in);
-      const checkOut = new Date(res.check_out);
+      let current = parseISO(res.check_in);
+      const checkOut = parseISO(res.check_out);
       while (current < checkOut) {
         dates.add(format(current, 'yyyy-MM-dd'));
         current.setDate(current.getDate() + 1);
