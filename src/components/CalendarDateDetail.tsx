@@ -64,13 +64,13 @@ export function CalendarDateDetail({
   const getMyStatus = () => {
     if (!myDayData) return { label: 'No data', color: 'bg-muted' };
     if (myDayData.status === 'booked' || myDayData.block_reason === 'reservation') {
-      return { label: 'Booked', color: 'bg-teal-500' };
+      return { label: 'Booked', color: 'bg-status-neutral' };
     }
     if (myDayData.status === 'unavailable' || myDayData.block_reason === 'blocked') {
-      return { label: 'Blocked', color: 'bg-slate-400' };
+      return { label: 'Blocked', color: 'bg-muted-foreground' };
     }
     if (myDayData.is_available) {
-      return { label: 'Available', color: 'bg-emerald-500' };
+      return { label: 'Available', color: 'bg-status-success' };
     }
     return { label: 'Unknown', color: 'bg-muted' };
   };
@@ -147,15 +147,15 @@ export function CalendarDateDetail({
                 </div>
                 {priceDiff !== null && (
                   <div className={`flex items-center gap-2 p-3 rounded-lg ${
-                    priceDiff > 10 ? 'bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-400' :
-                    priceDiff < -10 ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400' :
-                    'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400'
+                    priceDiff > 10 ? 'bg-status-danger-bg text-status-danger' :
+                    priceDiff < -10 ? 'bg-status-success-bg text-status-success' :
+                    'bg-status-warning-bg text-status-warning'
                   }`}>
                     <span className="text-sm">Your price is</span>
                     <Badge variant="secondary" className={`font-semibold ${
-                      priceDiff > 10 ? 'bg-red-600 text-white' :
-                      priceDiff < -10 ? 'bg-emerald-600 text-white' :
-                      'bg-amber-600 text-white'
+                      priceDiff > 10 ? 'bg-status-danger text-white' :
+                      priceDiff < -10 ? 'bg-status-success text-white' :
+                      'bg-status-warning text-white'
                     }`}>
                       {priceDiff > 0 ? '+' : ''}{priceDiff.toFixed(1)}%
                     </Badge>
@@ -196,12 +196,12 @@ export function CalendarDateDetail({
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{comp.name}</div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-sm font-semibold ${comp.available ? 'text-emerald-600' : 'text-foreground'}`}>
+                          <span className={`text-sm font-semibold ${comp.available ? 'text-status-success' : 'text-foreground'}`}>
                             {formatPrice(comp.rate, myDayData?.currency)}
                           </span>
                           <Badge 
                             variant={comp.available ? "outline" : "secondary"}
-                            className={`text-xs ${comp.available ? 'border-emerald-500 text-emerald-600' : 'bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-400'}`}
+                            className={`text-xs ${comp.available ? 'border-status-success text-status-success' : 'bg-status-neutral-bg text-status-neutral'}`}
                           >
                             {comp.available ? 'Available' : 'Booked'}
                           </Badge>
@@ -209,7 +209,7 @@ export function CalendarDateDetail({
                       </div>
                       {comp.diffFromYou !== null && myPrice && (
                         <div className={`text-sm font-medium ${
-                          comp.diffFromYou < 0 ? 'text-red-600' : 'text-emerald-600'
+                          comp.diffFromYou < 0 ? 'text-status-danger' : 'text-status-success'
                         }`}>
                           {comp.diffFromYou < 0 ? '+' : ''}{formatPrice(-comp.diffFromYou, myDayData?.currency)}
                         </div>

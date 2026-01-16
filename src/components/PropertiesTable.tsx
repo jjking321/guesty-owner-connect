@@ -193,9 +193,9 @@ export function PropertiesTable({
 
   const getStatusBadge = (status: string) => {
     const variants = {
-      "on-track": { label: "On Track", className: "bg-green-500/10 text-green-700 dark:text-green-400" },
-      "at-risk": { label: "At Risk", className: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400" },
-      behind: { label: "Behind", className: "bg-red-500/10 text-red-700 dark:text-red-400" },
+      "on-track": { label: "On Track", className: "bg-status-success-bg text-status-success" },
+      "at-risk": { label: "At Risk", className: "bg-status-warning-bg text-status-warning" },
+      behind: { label: "Behind", className: "bg-status-danger-bg text-status-danger" },
     };
     const variant = variants[status as keyof typeof variants] || variants["on-track"];
     return (
@@ -207,11 +207,11 @@ export function PropertiesTable({
 
   const getAchievementIndicator = (percentage: number) => {
     if (percentage >= 95) {
-      return <TrendingUp className="h-4 w-4 text-green-600" />;
+      return <TrendingUp className="h-4 w-4 text-status-success" />;
     } else if (percentage >= 80) {
-      return <Minus className="h-4 w-4 text-yellow-600" />;
+      return <Minus className="h-4 w-4 text-status-warning" />;
     } else {
-      return <TrendingDown className="h-4 w-4 text-red-600" />;
+      return <TrendingDown className="h-4 w-4 text-status-danger" />;
     }
   };
 
@@ -281,7 +281,7 @@ export function PropertiesTable({
                 {property.hasLockedGoals && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Lock className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      <Lock className="h-4 w-4 text-status-success flex-shrink-0" />
                     </TooltipTrigger>
                     <TooltipContent>
                       <p>{property.goalsLockedCount} of 12 goals locked</p>
@@ -310,7 +310,7 @@ export function PropertiesTable({
         );
       case 'onTheBooks':
         return (
-          <TableCell className="text-right font-medium text-blue-600 dark:text-blue-400">
+          <TableCell className="text-right font-medium text-status-info">
             {formatCurrency(property.onTheBooksRevenue)}
           </TableCell>
         );
@@ -360,10 +360,10 @@ export function PropertiesTable({
                 <div
                   className={`h-full transition-all ${
                     property.forecastProjectionAchievement >= 95
-                      ? "bg-green-600"
+                      ? "bg-status-success"
                       : property.forecastProjectionAchievement >= 80
-                      ? "bg-yellow-600"
-                      : "bg-red-600"
+                      ? "bg-status-warning"
+                      : "bg-status-danger"
                   }`}
                   style={{
                     width: `${Math.min(property.forecastProjectionAchievement, 100)}%`,
