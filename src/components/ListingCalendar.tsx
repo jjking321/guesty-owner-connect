@@ -426,7 +426,12 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
     const isPast = isBefore(date, new Date()) && !isToday(date);
     const baseStyle = isPast ? 'opacity-50' : '';
     
-    // Check capacity_calendar first
+    // Check reservations table FIRST - this is the source of truth for booked dates
+    if (reservedDates.has(dateStr)) {
+      return `bg-teal-500 dark:bg-teal-600 border-teal-600 dark:border-teal-700 ${baseStyle}`;
+    }
+    
+    // Then check capacity_calendar
     if (day) {
       // Booked - solid teal/green background
       if (day.status === 'booked' || day.block_reason === 'reservation') {
@@ -444,27 +449,22 @@ export function ListingCalendar({ listingId }: ListingCalendarProps) {
       }
     }
     
-    // Fall back to checking reservations table for historical dates
-    if (reservedDates.has(dateStr)) {
-      return `bg-teal-500 dark:bg-teal-600 border-teal-600 dark:border-teal-700 ${baseStyle}`;
-    }
-    
     return `bg-muted/30 border-border ${baseStyle}`;
   };
 
   // Get text color based on status
   const getTextColors = (day: CalendarDay | undefined, dateStr: string) => {
-    // Check capacity_calendar first
+    // Check reservations table FIRST - this is the source of truth for booked dates
+    if (reservedDates.has(dateStr)) {
+      return { day: 'text-white/80', price: 'text-white' };
+    }
+    
+    // Then check capacity_calendar
     if (day) {
       if (day.status === 'booked' || day.block_reason === 'reservation') {
         return { day: 'text-white/80', price: 'text-white' };
       }
       return { day: 'text-slate-500 dark:text-slate-400', price: 'text-emerald-600 dark:text-emerald-400' };
-    }
-    
-    // Fall back to checking reservations table for historical dates
-    if (reservedDates.has(dateStr)) {
-      return { day: 'text-white/80', price: 'text-white' };
     }
     
     return { day: 'text-muted-foreground', price: 'text-muted-foreground' };
