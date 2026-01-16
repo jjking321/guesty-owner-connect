@@ -426,7 +426,7 @@ export default function PropertyDetail() {
 
     // Calculate adjusted occupancy (excluding owner nights and blocked days)
     const bookableDays = Math.max(0, totalDaysInRange - ownerNights - blockedNights);
-    const adjustedOccupancy = bookableDays > 0 ? (totalNights / bookableDays) * 100 : 0;
+    const adjustedOccupancy = bookableDays > 0 ? Math.min(100, (totalNights / bookableDays) * 100) : 0;
 
     // Calculate RevPAR = ADR × Occupancy Rate
     const revPAR = averageADR * (overallOccupancy / 100);
