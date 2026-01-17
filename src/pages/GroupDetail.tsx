@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -23,7 +23,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus, Info as InfoIcon } from "lucide-react";
+import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus, Info as InfoIcon, Copy } from "lucide-react";
+import { CopyGoalsDialog } from "@/components/CopyGoalsDialog";
 import { MetricCard } from "@/components/MetricCard";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,6 +41,7 @@ export default function GroupDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isCreateSubGroupOpen, setIsCreateSubGroupOpen] = useState(false);
   const [isEditingProperties, setIsEditingProperties] = useState(false);
   const [subGroupName, setSubGroupName] = useState("");
@@ -57,6 +59,7 @@ export default function GroupDetail() {
   const [sortBy, setSortBy] = useState<"name" | "actual" | "forecast" | "goalProgress" | "status">("actual");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [showDistributedRevenue, setShowDistributedRevenue] = useState(false);
+  const [isCopyGoalsOpen, setIsCopyGoalsOpen] = useState(false);
 
   // Effective date range with fallbacks for "All time" (undefined dates)
   const effectiveDateRange = useMemo(() => ({
@@ -897,6 +900,12 @@ export default function GroupDetail() {
               </TooltipProvider>
             )}
             <StripeDateRangePicker value={dateRange} onChange={setDateRange} />
+            {listingIds.length >= 2 && (
+              <Button variant="outline" onClick={() => setIsCopyGoalsOpen(true)}>
+                <Copy className="mr-2 h-4 w-4" />
+                Copy Goals
+              </Button>
+            )}
             {directListingIds.length > 0 && (
               <Dialog open={isCreateSubGroupOpen} onOpenChange={setIsCreateSubGroupOpen}>
                 <DialogTrigger asChild>
@@ -1457,6 +1466,16 @@ export default function GroupDetail() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <CopyGoalsDialog
+          open={isCopyGoalsOpen}
+          onOpenChange={setIsCopyGoalsOpen}
+          listingIds={listingIds}
+          groupName={group.name}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ['group-goals'] });
+          }}
+        />
       </div>
     </DashboardLayout>
   );
