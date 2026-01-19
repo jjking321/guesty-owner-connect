@@ -313,21 +313,39 @@ serve(async (req) => {
       throw new Error('No comparables found with the provided IDs');
     }
 
-    // Deduplicate by airroi_listing_id
+    // Extract unique airroi_listing_ids from passed comparables
+    const uniqueAirroiIds = [...new Set(comparables.map(c => c.airroi_listing_id))];
+    console.log(`Found ${uniqueAirroiIds.length} unique airroi_listing_ids from ${comparables.length} passed records`);
+
+    // Fetch ALL property_comparables records that share these airroi_listing_ids
+    // This ensures we update ALL records across ALL properties, not just the passed ones
+    const { data: allMatchingRecords, error: matchError } = await supabase
+      .from('property_comparables')
+      .select('id, airroi_listing_id, listing_id')
+      .in('airroi_listing_id', uniqueAirroiIds);
+
+    if (matchError) {
+      console.error(`Failed to fetch matching records: ${matchError.message}`);
+    }
+
+    const recordsToProcess = allMatchingRecords || comparables;
+    console.log(`Found ${recordsToProcess.length} total records across all properties sharing these ${uniqueAirroiIds.length} airroi_listing_ids`);
+
+    // Build the map using ALL matching records
     const airroiIdToRecords = new Map<string, Array<{ id: string; listing_id: string }>>();
     
-    for (const comparable of comparables) {
-      const key = comparable.airroi_listing_id;
+    for (const record of recordsToProcess) {
+      const key = record.airroi_listing_id;
       if (!airroiIdToRecords.has(key)) {
         airroiIdToRecords.set(key, []);
       }
       airroiIdToRecords.get(key)!.push({
-        id: comparable.id,
-        listing_id: comparable.listing_id
+        id: record.id,
+        listing_id: record.listing_id
       });
     }
 
-    console.log(`Deduplicated ${comparables.length} records to ${airroiIdToRecords.size} unique API calls`);
+    console.log(`Will make ${airroiIdToRecords.size} API calls, updating ${recordsToProcess.length} total records`);
 
     // If guesty_account_id provided, create sync job and process in background
     if (guesty_account_id) {
