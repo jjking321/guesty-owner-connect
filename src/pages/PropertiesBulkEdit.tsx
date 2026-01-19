@@ -617,32 +617,6 @@ export default function PropertiesBulkEdit() {
     }
   };
 
-  const handleRecalculateGoals = async () => {
-    const confirmed = window.confirm(
-      `⚠️ This will recalculate ALL goals for ${selectedYear}:\n\n` +
-      `• Goal = Current Projection\n` +
-      `• Projection = 85% of Current Projection\n` +
-      `• Budget = 75% of Current Projection\n\n` +
-      `This affects ${propertyMetrics.length} properties. Continue?`
-    );
-
-    if (!confirmed) return;
-
-    try {
-      const { data, error } = await supabase.functions.invoke("recalculate-goals", {
-        body: { year: selectedYear },
-      });
-
-      if (error) throw error;
-
-      toast.success("Goal recalculation started", { 
-        description: `Processing ${data.totalGoals} goals. Watch the progress card above.`,
-      });
-    } catch (error: any) {
-      toast.error(error.message || "Failed to start recalculation");
-    }
-  };
-
   const handleSelectAll = () => {
     if (selectedIds.size === filteredProperties.length) {
       setSelectedIds(new Set());
@@ -811,10 +785,6 @@ export default function PropertiesBulkEdit() {
                   <Sparkles className="h-4 w-4 mr-2" />
                   Generate Missing Goals
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleRecalculateGoals}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Recalculate Goals
-                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem 
                   onClick={handleGenerateBulkGoals}
@@ -869,12 +839,6 @@ export default function PropertiesBulkEdit() {
           isFuturePeriod={periodInfo.isFuturePeriod}
         />
 
-        {currentAccountId && (
-          <SyncProgressCard 
-            accountId={currentAccountId} 
-            syncType="goal_recalculation" 
-          />
-        )}
 
         <div className="space-y-3">
           <div className="flex gap-3 items-center">

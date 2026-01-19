@@ -20,13 +20,12 @@ interface SyncJob {
 
 interface SyncProgressCardProps {
   accountId: string;
-  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'goal_recalculation' | 'capacity_calendar' | 'comparable_historical' | 'comparable_future_rates';
+  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'capacity_calendar' | 'comparable_historical' | 'comparable_future_rates';
   onComplete?: () => void;
 }
 
 const getSyncTypeName = (type: string): string => {
   switch (type) {
-    case 'goal_recalculation': return 'Goal Recalculation';
     case 'capacity_calendar': return 'Calendar Sync';
     case 'comparable_historical': return 'Historical Metrics Fetch';
     case 'comparable_future_rates': return 'Future Rates Fetch';
@@ -159,37 +158,6 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
     }
   };
 
-  const handleResume = async () => {
-    if (!syncJob) return;
-    
-    try {
-      setStopping(true);
-      const { data, error } = await supabase.functions.invoke('recalculate-goals', {
-        body: {
-          year: new Date().getFullYear(),
-          offset: syncJob.last_synced_offset || 0,
-          limit: 1000,
-          syncJobId: syncJob.id
-        }
-      });
-      
-      if (error) throw error;
-      
-      toast({
-        title: "Recalculation resumed",
-        description: "Goal recalculation has been resumed from where it left off",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Failed to resume recalculation",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setStopping(false);
-    }
-  };
-
   const handleResumeCalendar = async () => {
     if (!syncJob) return;
     
@@ -269,19 +237,6 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
                 </Button>
               )}
               
-              {/* Resume button - only show for failed goal_recalculation */}
-              {isFailed && syncType === 'goal_recalculation' && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={handleResume}
-                  disabled={stopping}
-                >
-                  <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
-                  Resume
-                </Button>
-              )}
               
               {/* Resume button - only show for failed capacity_calendar */}
               {isFailed && syncType === 'capacity_calendar' && (
