@@ -388,6 +388,23 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     }
   };
 
+  // These hooks must be before any early returns
+  const totalGoal = useMemo(() => goals.reduce((sum, goal) => sum + goal.projection, 0), [goals]);
+  
+  const percentDiffFromLastYear = useMemo(() => {
+    if (!lastYearActuals?.total || lastYearActuals.total === 0) return null;
+    return ((totalGoal - lastYearActuals.total) / lastYearActuals.total) * 100;
+  }, [totalGoal, lastYearActuals?.total]);
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
   if (isLoading || isLoadingDetails) {
     return <div>Loading goals...</div>;
   }
@@ -419,22 +436,6 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
       </Card>
     );
   }
-
-  const totalGoal = useMemo(() => goals.reduce((sum, goal) => sum + goal.projection, 0), [goals]);
-  
-  const percentDiffFromLastYear = useMemo(() => {
-    if (!lastYearActuals?.total || lastYearActuals.total === 0) return null;
-    return ((totalGoal - lastYearActuals.total) / lastYearActuals.total) * 100;
-  }, [totalGoal, lastYearActuals?.total]);
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
 
   return (
     <Card>
