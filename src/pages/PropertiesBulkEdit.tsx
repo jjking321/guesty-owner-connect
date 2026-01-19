@@ -508,7 +508,7 @@ export default function PropertiesBulkEdit() {
           comparison = a.forecastedRevenue - b.forecastedRevenue;
           break;
         case "goalProgress":
-          comparison = a.projectionAchievement - b.projectionAchievement;
+          comparison = a.forecastProjectionAchievement - b.forecastProjectionAchievement;
           break;
         case "status":
           const statusOrder = { "behind": 0, "at-risk": 1, "on-track": 2 };
