@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Settings, Archive, ArchiveRestore } from "lucide-react";
+import { Settings, Archive, ArchiveRestore, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,9 +20,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { GoalsInput } from "@/components/GoalsInput";
+import { CopyGoalsFromPropertyDialog } from "@/components/CopyGoalsFromPropertyDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface PropertySettingsProps {
   listingId: string;
@@ -31,23 +33,27 @@ interface PropertySettingsProps {
 export function PropertySettings({ listingId }: PropertySettingsProps) {
   const [open, setOpen] = useState(false);
   const [archived, setArchived] = useState(false);
+  const [listingName, setListingName] = useState("");
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
+  const [showCopyGoalsDialog, setShowCopyGoalsDialog] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
-    loadArchiveStatus();
+    loadListingData();
   }, [listingId]);
 
-  const loadArchiveStatus = async () => {
+  const loadListingData = async () => {
     const { data, error } = await supabase
       .from("listings")
-      .select("archived")
+      .select("archived, nickname")
       .eq("id", listingId)
       .single();
 
     if (!error && data) {
       setArchived(data.archived || false);
+      setListingName(data.nickname || "This Property");
     }
   };
 
@@ -85,6 +91,11 @@ export function PropertySettings({ listingId }: PropertySettingsProps) {
     }
   };
 
+  const handleCopyGoalsSuccess = () => {
+    // Invalidate property goals queries to refresh the goals input
+    queryClient.invalidateQueries({ queryKey: ["property-goals", listingId] });
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={setOpen}>
@@ -103,7 +114,17 @@ export function PropertySettings({ listingId }: PropertySettingsProps) {
           
           <div className="space-y-6">
             <div>
-              <h3 className="text-lg font-semibold mb-4">Revenue Goals</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Revenue Goals</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCopyGoalsDialog(true)}
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy from Another Property
+                </Button>
+              </div>
               <GoalsInput listingId={listingId} />
             </div>
 
@@ -160,6 +181,14 @@ export function PropertySettings({ listingId }: PropertySettingsProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CopyGoalsFromPropertyDialog
+        open={showCopyGoalsDialog}
+        onOpenChange={setShowCopyGoalsDialog}
+        targetListingId={listingId}
+        targetListingName={listingName}
+        onSuccess={handleCopyGoalsSuccess}
+      />
     </>
   );
 }
