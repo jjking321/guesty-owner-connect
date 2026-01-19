@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Database, BarChart3, AlertCircle, TrendingUp, ChevronUp, ChevronDown, Building2 } from "lucide-react";
+import { Save, Copy, Sparkles, Lock, Unlock, LockOpen, Database, BarChart3, AlertCircle, TrendingUp, ChevronUp, ChevronDown, Building2, History, Users } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 
@@ -60,6 +60,49 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
         .select("id, nickname, is_composite")
         .eq("id", listingId)
         .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!listingId,
+  });
+
+  // Fetch last year's actuals from reservation_nights
+  const { data: lastYearActuals } = useQuery({
+    queryKey: ["property-actuals", listingId, year - 1],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('reservation_nights')
+        .select('night_date, revenue_allocation')
+        .eq('listing_id', listingId)
+        .gte('night_date', `${year - 1}-01-01`)
+        .lte('night_date', `${year - 1}-12-31`);
+
+      if (error) throw error;
+
+      // Aggregate by month
+      const byMonth: Record<number, number> = {};
+      data?.forEach(night => {
+        const month = new Date(night.night_date).getMonth() + 1;
+        byMonth[month] = (byMonth[month] || 0) + Number(night.revenue_allocation);
+      });
+
+      const total = Object.values(byMonth).reduce((a, b) => a + b, 0);
+
+      return { byMonth, total };
+    },
+    enabled: !!listingId,
+  });
+
+  // Fetch compset summary
+  const { data: compsetSummary } = useQuery({
+    queryKey: ["property-compset-summary", listingId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('property_compset_summary')
+        .select('avg_ttm_revenue, monthly_averages, selected_comparables_count')
+        .eq('listing_id', listingId)
+        .maybeSingle();
+      
       if (error) throw error;
       return data;
     },
@@ -377,6 +420,22 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
     );
   }
 
+  const totalGoal = useMemo(() => goals.reduce((sum, goal) => sum + goal.projection, 0), [goals]);
+  
+  const percentDiffFromLastYear = useMemo(() => {
+    if (!lastYearActuals?.total || lastYearActuals.total === 0) return null;
+    return ((totalGoal - lastYearActuals.total) / lastYearActuals.total) * 100;
+  }, [totalGoal, lastYearActuals?.total]);
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -385,12 +444,55 @@ export function GoalsInput({ listingId }: GoalsInputProps) {
             <CardTitle>Revenue Goals</CardTitle>
             <CardDescription>Set monthly revenue goals</CardDescription>
             <div className="mt-2 text-2xl font-bold text-primary">
-              {new Intl.NumberFormat("en-US", {
-                style: "currency",
-                currency: "USD",
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0,
-              }).format(goals.reduce((sum, goal) => sum + goal.projection, 0))}
+              {formatCurrency(totalGoal)}
+            </div>
+            
+            {/* Reference data: Last Year Actuals and Compset */}
+            <div className="flex flex-wrap gap-4 mt-2 text-sm">
+              {lastYearActuals && lastYearActuals.total > 0 && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-1.5 text-muted-foreground cursor-help">
+                        <History className="h-3.5 w-3.5" />
+                        <span>{year - 1} Actual:</span>
+                        <span className="font-medium text-foreground">
+                          {formatCurrency(lastYearActuals.total)}
+                        </span>
+                        {percentDiffFromLastYear !== null && (
+                          <span className={percentDiffFromLastYear >= 0 ? 'text-green-600' : 'text-red-600'}>
+                            ({percentDiffFromLastYear >= 0 ? '+' : ''}{percentDiffFromLastYear.toFixed(1)}%)
+                          </span>
+                        )}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <p>Actual revenue from {year - 1} based on reservation nights.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+              {compsetSummary && compsetSummary.avg_ttm_revenue && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex items-center gap-1.5 text-muted-foreground cursor-help">
+                        <Users className="h-3.5 w-3.5" />
+                        <span>Compset TTM:</span>
+                        <span className="font-medium text-foreground">
+                          {formatCurrency(compsetSummary.avg_ttm_revenue)}
+                        </span>
+                        <span className="text-xs">
+                          ({compsetSummary.selected_comparables_count} props)
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <p>Average trailing twelve month revenue from {compsetSummary.selected_comparables_count} selected comparable properties.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
