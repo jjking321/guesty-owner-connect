@@ -89,3 +89,6 @@ verify_jwt = true
 
 [functions.batch-ai-select-comparables]
 verify_jwt = true
+
+[functions.sync-listing-reservations]
+verify_jwt = false
