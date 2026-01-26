@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,6 +49,7 @@ export function GoalsReviewTable({
   onSelectionChange,
   onGoalsSaved,
 }: GoalsReviewTableProps) {
+  const navigate = useNavigate();
   const [editedGoals, setEditedGoals] = useState<Record<string, number>>({});
   const [savingRows, setSavingRows] = useState<Set<string>>(new Set());
 
@@ -204,9 +206,9 @@ export function GoalsReviewTable({
                 onCheckedChange={handleSelectAll}
               />
             </TableHead>
-            <TableHead className="sticky left-10 bg-background z-20 min-w-[200px]">Property</TableHead>
+            <TableHead className="sticky left-10 bg-background z-20 min-w-[220px]">Property</TableHead>
             {MONTHS.map((month) => (
-              <TableHead key={month} className="text-center min-w-[140px]">
+              <TableHead key={month} className="text-center min-w-[180px]">
                 <div className="text-xs font-medium">{month}</div>
                 <div className="flex text-[10px] text-muted-foreground mt-1">
                   <span className="flex-1">Goal</span>
@@ -215,7 +217,7 @@ export function GoalsReviewTable({
                 </div>
               </TableHead>
             ))}
-            <TableHead className="text-center min-w-[120px]">
+            <TableHead className="text-center min-w-[140px]">
               <div className="text-xs font-medium">Totals</div>
               <div className="flex text-[10px] text-muted-foreground mt-1">
                 <span className="flex-1">Goal</span>
@@ -249,9 +251,12 @@ export function GoalsReviewTable({
                         className="w-8 h-8 rounded object-cover"
                       />
                     )}
-                    <span className="font-medium text-sm truncate max-w-[150px]">
+                    <button
+                      onClick={() => navigate(`/listings/${listing.id}`)}
+                      className="font-medium text-sm truncate max-w-[180px] hover:underline hover:text-primary text-left"
+                    >
                       {listing.nickname || listing.id}
-                    </span>
+                    </button>
                   </div>
                 </TableCell>
                 {MONTHS.map((_, monthIndex) => {
