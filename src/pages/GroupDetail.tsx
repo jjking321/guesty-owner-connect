@@ -762,7 +762,8 @@ export default function GroupDetail() {
           name: subGroupName,
           description: subGroupDescription,
           parent_group_id: id,
-        } as any)
+          user_id: session?.user?.id,
+        })
         .select()
         .single();
 
