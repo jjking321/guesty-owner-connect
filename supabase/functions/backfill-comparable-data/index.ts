@@ -37,9 +37,9 @@ interface ComparableRecord {
 }
 
 interface HistoricalMetric {
-  year_month: string;
+  date: string;
   revenue: number;
-  adr: number;
+  average_daily_rate: number;
   occupancy: number;
   revpar: number;
 }
@@ -106,14 +106,15 @@ async function updateCompsetSummary(supabase: SupabaseClient, listingId: string)
   const monthlyData: Record<string, { revenue: number[]; adr: number[]; occupancy: number[]; revpar: number[] }> = {};
   
   for (const comp of comparables) {
-    if (comp.historical_metrics && Array.isArray(comp.historical_metrics)) {
-      for (const metric of comp.historical_metrics as HistoricalMetric[]) {
-        const key = metric.year_month;
+    const metricsData = comp.historical_metrics as { results?: HistoricalMetric[] } | null;
+    if (metricsData?.results && Array.isArray(metricsData.results)) {
+      for (const metric of metricsData.results) {
+        const key = metric.date;
         if (!monthlyData[key]) {
           monthlyData[key] = { revenue: [], adr: [], occupancy: [], revpar: [] };
         }
         if (metric.revenue != null) monthlyData[key].revenue.push(metric.revenue);
-        if (metric.adr != null) monthlyData[key].adr.push(metric.adr);
+        if (metric.average_daily_rate != null) monthlyData[key].adr.push(metric.average_daily_rate);
         if (metric.occupancy != null) monthlyData[key].occupancy.push(metric.occupancy);
         if (metric.revpar != null) monthlyData[key].revpar.push(metric.revpar);
       }
@@ -121,14 +122,14 @@ async function updateCompsetSummary(supabase: SupabaseClient, listingId: string)
   }
 
   const monthlyAverages = Object.entries(monthlyData)
-    .map(([yearMonth, data]) => ({
-      year_month: yearMonth,
-      avg_revenue: data.revenue.length > 0 ? data.revenue.reduce((a, b) => a + b, 0) / data.revenue.length : null,
-      avg_adr: data.adr.length > 0 ? data.adr.reduce((a, b) => a + b, 0) / data.adr.length : null,
-      avg_occupancy: data.occupancy.length > 0 ? data.occupancy.reduce((a, b) => a + b, 0) / data.occupancy.length : null,
-      avg_revpar: data.revpar.length > 0 ? data.revpar.reduce((a, b) => a + b, 0) / data.revpar.length : null,
+    .map(([month, data]) => ({
+      month: month,
+      revenue: data.revenue.length > 0 ? data.revenue.reduce((a, b) => a + b, 0) / data.revenue.length : null,
+      adr: data.adr.length > 0 ? data.adr.reduce((a, b) => a + b, 0) / data.adr.length : null,
+      occupancy: data.occupancy.length > 0 ? data.occupancy.reduce((a, b) => a + b, 0) / data.occupancy.length : null,
+      revpar: data.revpar.length > 0 ? data.revpar.reduce((a, b) => a + b, 0) / data.revpar.length : null,
     }))
-    .sort((a, b) => a.year_month.localeCompare(b.year_month));
+    .sort((a, b) => a.month.localeCompare(b.month));
 
   // Calculate future monthly averages
   const futureMonthlyData: Record<string, { adr: number[]; occupancy: number[]; revpar: number[] }> = {};
