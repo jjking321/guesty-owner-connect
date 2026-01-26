@@ -1,85 +1,101 @@
 
 
-## Update Portfolio Summary Cards to Respect All Filters
+## Property-Level Reservation Sync Feature (Updated with Verified Rate Limiting)
 
 ### Overview
-Update the Portfolio Overview summary cards to reflect only the currently filtered/visible properties, rather than showing totals for all properties in the date range.
+Add a "Sync Reservations" button on the Property Detail page that fetches all reservations for that specific listing from Guesty, catching any missed bookings.
 
-### Current Behavior
-- Summary cards show metrics for ALL properties matching the date filter
-- Search query, status filters, and goal filters do NOT affect the summary cards
-- This can be confusing when users filter to specific properties but see portfolio-wide totals
+### Rate Limiting Implementation (Verified ✅)
 
-### New Behavior
-- Summary cards will update to show metrics for only the filtered properties
-- Searching for "Beach" will show totals only for beach properties
-- Filtering to "Behind" status will show totals only for behind properties
-- Property counts will match the number of visible rows in the table
+The new edge function will use the **exact same pattern** from `sync-new-reservations/index.ts` (lines 28-202), which follows the custom knowledge requirements:
+
+#### OAuth Token Fetching (`getGuestyAccessToken`)
+```text
+- MAX_RETRIES: 10 (not 5)
+- BASE_DELAY_MS: 2000ms
+- MAX_BACKOFF_MS: 30000ms (30s)
+- MAX_WAIT_TIME_MS: 55000ms (55s, under 60s edge timeout)
+- Exponential backoff: Math.min(2000 * Math.pow(2, attempt - 1), 30000)
+- Error prefixes: OAUTH_RATE_LIMIT:, SERVER_ERROR:, AUTH_FAILED:
+- Respects Retry-After headers (both numeric seconds and date formats)
+- User-facing messages: "Please wait 3-5 minutes before trying again"
+```
+
+#### Data Fetching (`fetchGuestyData`)
+```text
+- MAX_RETRIES: 5
+- BASE_DELAY_MS: 2000ms
+- MAX_BACKOFF_MS: 30000ms
+- MAX_WAIT_TIME_MS: 45000ms
+- Retry on: 429, 502, 503, 504
+- Logs rate limit headers: x-ratelimit-remaining-second/minute/hour
+- Returns rateLimits object for adaptive delays
+```
+
+#### Adaptive Pagination Delay (`getAdaptiveDelay`)
+```text
+- If sec < 3: delay 1500ms
+- If sec < 5: delay 1000ms
+- If min < 10: delay 750ms
+- Default: 500ms
+```
+
+#### Helper Functions
+```text
+- sleep(ms): Promise-based delay
+- parseRetryAfter(header): Handles both numeric seconds and date formats
+```
 
 ---
 
-### Changes Required
+### Files to Create/Modify
 
-**File: `src/pages/PropertiesBulkEdit.tsx`**
+#### 1. New Edge Function: `supabase/functions/sync-listing-reservations/index.ts`
 
-#### 1. Update Portfolio Totals Calculation (lines 524-539)
+Will copy these exact functions from `sync-new-reservations/index.ts`:
+- Lines 28-102: `getGuestyAccessToken()` 
+- Lines 104-106: `sleep()`
+- Lines 108-118: `parseRetryAfter()`
+- Lines 120-194: `fetchGuestyData()`
+- Lines 196-202: `getAdaptiveDelay()`
 
-Change the source from `propertyMetrics` to `filteredProperties`:
+Logic flow:
+1. Accept `listingId` parameter
+2. Query listings table to get `guesty_account_id`
+3. Query guesty_accounts to get credentials
+4. Call `getGuestyAccessToken()` with full retry logic
+5. Fetch reservations with filter: `listingIds=[listingId]`
+6. Paginate with `getAdaptiveDelay()` between pages
+7. Upsert into reservations table
+8. Database trigger auto-populates reservation_nights
 
-```typescript
-const portfolioTotals = useMemo(() => {
-  return filteredProperties.reduce(
-    (acc, property) => ({
-      actualRevenue: acc.actualRevenue + property.actualRevenue,
-      onTheBooksRevenue: acc.onTheBooksRevenue + property.onTheBooksRevenue,
-      projectionTotal: acc.projectionTotal + property.projectionTotal,
-      forecastedRevenue: acc.forecastedRevenue + property.forecastedRevenue,
-    }),
-    {
-      actualRevenue: 0,
-      onTheBooksRevenue: 0,
-      projectionTotal: 0,
-      forecastedRevenue: 0,
-    }
-  );
-}, [filteredProperties]);
+#### 2. Update: `supabase/config.toml`
+
+Add function configuration:
+```toml
+[functions.sync-listing-reservations]
+verify_jwt = false
 ```
 
-#### 2. Update PropertyMetricsSummary Props (lines 828-840)
+#### 3. Update: `src/pages/PropertyDetail.tsx`
 
-Change the counts to use `filteredProperties`:
-
-```typescript
-<PropertyMetricsSummary
-  totalActualRevenue={portfolioTotals.actualRevenue}
-  totalOnTheBooks={portfolioTotals.onTheBooksRevenue}
-  totalProjection={portfolioTotals.projectionTotal}
-  totalForecast={portfolioTotals.forecastedRevenue}
-  propertiesCount={filteredProperties.length}
-  onTrackCount={filteredProperties.filter((p) => p.status === "on-track").length}
-  atRiskCount={filteredProperties.filter((p) => p.status === "at-risk").length}
-  behindCount={filteredProperties.filter((p) => p.status === "behind").length}
-  periodLabel={periodInfo.periodLabel}
-  isPastPeriod={periodInfo.isPastPeriod}
-  isFuturePeriod={periodInfo.isFuturePeriod}
-/>
-```
+- Import `RefreshCw` icon from lucide-react
+- Add `useMutation` for sync operation
+- Add sync button in Reservations tab header
+- Show loading spinner during sync
+- Toast success/error messages
+- Invalidate `property-reservations` query on success
 
 ---
 
 ### Summary
 
-| Location | Change |
-|----------|--------|
-| `portfolioTotals` useMemo | Use `filteredProperties` instead of `propertyMetrics` |
-| `PropertyMetricsSummary` props | Use `filteredProperties` for all counts |
+| Component | Details |
+|-----------|---------|
+| `sync-listing-reservations/index.ts` | New edge function with **exact** rate limiting from sync-new-reservations |
+| `supabase/config.toml` | Register new function |
+| `src/pages/PropertyDetail.tsx` | Add sync button + mutation |
 
 ### Result
-When users apply any combination of:
-- Search query
-- Property status filters (active/inactive, listed/unlisted, archived)
-- Performance status filters (on-track, at-risk, behind)
-- Goals filters (has goals, no goals, locked, unlocked)
-
-The summary cards will immediately update to show totals and counts for only the matching properties.
+Users can click "Sync Reservations" on any property (like 102 Deleon) to fetch ALL reservations for that listing directly from Guesty, with the same robust rate limiting and retry logic used in the bulk sync.
 
