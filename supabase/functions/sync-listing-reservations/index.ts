@@ -69,8 +69,8 @@ async function getGuestyAccessToken(clientId: string, clientSecret: string): Pro
 
         if (Date.now() - start + waitMs > MAX_WAIT_TIME_MS) {
           if (status === 429) {
-            const estimatedWaitMinutes = Math.ceil(retryAfterMs / 60000) || 3;
-            throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${estimatedWaitMinutes}-5 minutes before trying again. This is a protective measure by Guesty's OAuth service.`);
+            const estimatedWaitMinutes = Math.max(3, Math.ceil(retryAfterMs / 60000));
+            throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${estimatedWaitMinutes} minutes before trying again.`);
           }
           throw new Error(`SERVER_ERROR:Guesty API temporarily unavailable (${status}). Please try again in 2 minutes.`);
         }
