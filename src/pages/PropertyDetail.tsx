@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -43,6 +43,7 @@ export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { navigateBack, getReferrer } = useSmartNavigation();
   const { role } = useUserRole();
   const referrer = getReferrer();
@@ -58,6 +59,33 @@ export default function PropertyDetail() {
   const [showAdjustedOccupancy, setShowAdjustedOccupancy] = useState(false);
   const [showAdjustedRevPAR, setShowAdjustedRevPAR] = useState(false);
   const [isMonthlyTableOpen, setIsMonthlyTableOpen] = useState(false);
+
+  // Sync reservations mutation
+  const syncReservationsMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('sync-listing-reservations', {
+        body: { listingId: id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Reservations synced",
+        description: `Successfully synced ${data.reservationsCount} reservations from Guesty.`,
+      });
+      // Reload property data to refresh reservations
+      loadPropertyData();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   // Fetch capacity calendar for blocked dates
   const { data: capacityCalendar } = useQuery({
@@ -895,11 +923,22 @@ export default function PropertyDetail() {
 
           <TabsContent value="reservations" className="space-y-6">
             <Card>
-              <CardHeader>
-                <CardTitle>Reservations</CardTitle>
-                <CardDescription>
-                  All confirmed reservations for this property
-                </CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Reservations</CardTitle>
+                  <CardDescription>
+                    All confirmed reservations for this property
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => syncReservationsMutation.mutate()}
+                  disabled={syncReservationsMutation.isPending}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${syncReservationsMutation.isPending ? 'animate-spin' : ''}`} />
+                  {syncReservationsMutation.isPending ? 'Syncing...' : 'Sync Reservations'}
+                </Button>
               </CardHeader>
               <CardContent>
                 {reservations.length === 0 ? (
