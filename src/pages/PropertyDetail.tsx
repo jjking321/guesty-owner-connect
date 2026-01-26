@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info, ChevronDown, ChevronRight, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -59,6 +59,8 @@ export default function PropertyDetail() {
   const [showAdjustedOccupancy, setShowAdjustedOccupancy] = useState(false);
   const [showAdjustedRevPAR, setShowAdjustedRevPAR] = useState(false);
   const [isMonthlyTableOpen, setIsMonthlyTableOpen] = useState(false);
+  const [reservationSortField, setReservationSortField] = useState<'check_in' | 'check_out' | 'nights' | 'guests' | 'adr' | 'total'>('check_in');
+  const [reservationSortDirection, setReservationSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Sync reservations mutation
   const syncReservationsMutation = useMutation({
@@ -479,6 +481,63 @@ export default function PropertyDetail() {
   };
 
   const metrics = calculateMetrics(metricsDateRange);
+
+  // Sorted reservations for the table
+  const sortedReservations = useMemo(() => {
+    return [...reservations].sort((a, b) => {
+      let aVal: number | string = 0;
+      let bVal: number | string = 0;
+      
+      switch (reservationSortField) {
+        case 'check_in':
+          aVal = a.check_in || '';
+          bVal = b.check_in || '';
+          break;
+        case 'check_out':
+          aVal = a.check_out || '';
+          bVal = b.check_out || '';
+          break;
+        case 'nights':
+          aVal = a.nights_count || 0;
+          bVal = b.nights_count || 0;
+          break;
+        case 'guests':
+          aVal = a.guests_count || 0;
+          bVal = b.guests_count || 0;
+          break;
+        case 'adr':
+          aVal = a.nights_count > 0 ? parseFloat(a.fare_accommodation_adjusted || 0) / a.nights_count : 0;
+          bVal = b.nights_count > 0 ? parseFloat(b.fare_accommodation_adjusted || 0) / b.nights_count : 0;
+          break;
+        case 'total':
+          aVal = parseFloat(a.fare_accommodation_adjusted || 0);
+          bVal = parseFloat(b.fare_accommodation_adjusted || 0);
+          break;
+      }
+      
+      if (aVal < bVal) return reservationSortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return reservationSortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [reservations, reservationSortField, reservationSortDirection]);
+
+  const handleReservationSort = (field: typeof reservationSortField) => {
+    if (reservationSortField === field) {
+      setReservationSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setReservationSortField(field);
+      setReservationSortDirection('desc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: typeof reservationSortField }) => {
+    if (reservationSortField !== field) {
+      return <ArrowUpDown className="h-3 w-3 ml-1 opacity-50" />;
+    }
+    return reservationSortDirection === 'asc' 
+      ? <ArrowUp className="h-3 w-3 ml-1" />
+      : <ArrowDown className="h-3 w-3 ml-1" />;
+  };
 
   // Calculate monthly metrics for the table
   const monthlyMetrics = useMemo(() => {
@@ -950,17 +1009,65 @@ export default function PropertyDetail() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Check In</TableHead>
-                          <TableHead>Check Out</TableHead>
-                          <TableHead>Nights</TableHead>
-                          <TableHead>Guests</TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50 select-none"
+                            onClick={() => handleReservationSort('check_in')}
+                          >
+                            <div className="flex items-center">
+                              Check In
+                              <SortIcon field="check_in" />
+                            </div>
+                          </TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50 select-none"
+                            onClick={() => handleReservationSort('check_out')}
+                          >
+                            <div className="flex items-center">
+                              Check Out
+                              <SortIcon field="check_out" />
+                            </div>
+                          </TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50 select-none"
+                            onClick={() => handleReservationSort('nights')}
+                          >
+                            <div className="flex items-center">
+                              Nights
+                              <SortIcon field="nights" />
+                            </div>
+                          </TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50 select-none"
+                            onClick={() => handleReservationSort('guests')}
+                          >
+                            <div className="flex items-center">
+                              Guests
+                              <SortIcon field="guests" />
+                            </div>
+                          </TableHead>
                           <TableHead>Source</TableHead>
-                          <TableHead>ADR</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50 select-none"
+                            onClick={() => handleReservationSort('adr')}
+                          >
+                            <div className="flex items-center">
+                              ADR
+                              <SortIcon field="adr" />
+                            </div>
+                          </TableHead>
+                          <TableHead 
+                            className="cursor-pointer hover:bg-muted/50 select-none text-right"
+                            onClick={() => handleReservationSort('total')}
+                          >
+                            <div className="flex items-center justify-end">
+                              Total
+                              <SortIcon field="total" />
+                            </div>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {reservations.map((reservation) => {
+                        {sortedReservations.map((reservation) => {
                           const adr = reservation.nights_count > 0
                             ? parseFloat(reservation.fare_accommodation_adjusted || 0) / reservation.nights_count
                             : 0;
