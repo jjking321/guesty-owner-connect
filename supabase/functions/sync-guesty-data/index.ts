@@ -48,96 +48,120 @@ interface GuestyListing {
   }>;
 }
 
-async function getGuestyAccessToken(clientId: string, clientSecret: string, retries = 5): Promise<string> {
-  let lastError: Error | null = null;
-  const MAX_WAIT_TIME = 45000; // 45 seconds max wait (edge functions timeout at 60s)
-  
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      if (attempt > 0) {
-        const backoffDelay = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
-        console.log(`Token retry attempt ${attempt}/${retries}, waiting ${backoffDelay}ms...`);
-        await sleep(backoffDelay);
-      } else {
-        console.log('Exchanging client credentials for access token...');
-      }
-      
-      const response = await fetch('https://open-api.guesty.com/oauth2/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json',
-        },
-        body: new URLSearchParams({
-          grant_type: 'client_credentials',
-          client_id: clientId,
-          client_secret: clientSecret,
-          scope: 'open-api',
-        }).toString(),
-      });
+const MAX_RETRIES = 5;
+const MAX_WAIT_TIME = 45000;
+const TOKEN_BUFFER_MS = 120000;
+const LOCK_STALE_MS = 90000;
+const LOCK_POLL_INTERVAL_MS = 1000;
+const LOCK_MAX_POLLS = 6;
 
-      if (!response.ok) {
-        const error = await response.text();
-        
-        // Check if it's a rate limit error (429) and we have retries left
-        if (response.status === 429 && attempt < retries) {
-          const retryAfter = response.headers.get('Retry-After');
-          let waitTime: number;
-          
-          if (retryAfter) {
-            const retryAfterNum = parseInt(retryAfter);
-            if (!isNaN(retryAfterNum)) {
-              waitTime = retryAfterNum * 1000;
-              
-              // Check if wait time is too long
-              if (waitTime > MAX_WAIT_TIME) {
-                const hoursToWait = Math.round(waitTime / 3600000);
-                console.error(`Rate limit requires waiting ${retryAfterNum}s (~${hoursToWait}h). Too long - failing.`);
-                throw new Error(`Guesty API rate limit: Please try again in ${hoursToWait} hour(s). Guesty has temporarily limited access to their API.`);
-              }
-              
-              console.log(`Token endpoint rate limited. Retry-After header: ${retryAfterNum}s (${waitTime}ms)`);
-            } else {
-              const retryDate = new Date(retryAfter);
-              waitTime = retryDate.getTime() - Date.now();
-              
-              if (waitTime > MAX_WAIT_TIME) {
-                const hoursToWait = Math.round(waitTime / 3600000);
-                console.error(`Rate limit until ${retryAfter}. Too long - failing.`);
-                throw new Error(`Guesty API rate limit: Please try again in ${hoursToWait} hour(s). Guesty has temporarily limited access to their API.`);
-              }
-              
-              console.log(`Token endpoint rate limited. Retry-After date: ${retryAfter} (${waitTime}ms)`);
-            }
-          } else {
-            waitTime = Math.min(2000 * Math.pow(2, attempt), 30000);
-            console.log(`Token endpoint rate limited (no Retry-After header). Using backoff: ${waitTime}ms`);
-          }
-          
-          console.error(`Rate limit error (${response.status}):`, error);
-          lastError = new Error(`Authentication failed: ${response.status} - ${error}`);
-          
-          await sleep(Math.max(waitTime, 0));
-          continue;
-        }
-        
-        console.error(`Failed to get access token (${response.status}):`, error);
-        throw new Error(`Authentication failed: ${response.status} - ${error}`);
-      }
+function parseRetryAfter(header: string | null): number {
+  if (!header) return 0;
+  const seconds = Number(header);
+  if (!Number.isNaN(seconds)) return seconds * 1000;
+  const dateMs = new Date(header).getTime();
+  if (!isNaN(dateMs)) {
+    const diff = dateMs - Date.now();
+    return diff > 0 ? diff : 0;
+  }
+  return 0;
+}
 
-      const data = await response.json();
-      console.log('Successfully obtained access token');
-      return data.access_token;
-      
-    } catch (error) {
-      if (attempt === retries) {
-        throw lastError || error;
+async function getGuestyAccessTokenCached(
+  supabaseAdmin: any,
+  accountId: string,
+  clientId: string,
+  clientSecret: string
+): Promise<string> {
+  const { data: tokenRow } = await supabaseAdmin
+    .from('guesty_oauth_tokens')
+    .select('*')
+    .eq('guesty_account_id', accountId)
+    .maybeSingle();
+
+  if (tokenRow) {
+    if (tokenRow.oauth_cooldown_until) {
+      const cooldownUntil = new Date(tokenRow.oauth_cooldown_until).getTime();
+      if (cooldownUntil > Date.now()) {
+        const waitMinutes = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 60000));
+        throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${waitMinutes} minutes before trying again.`);
       }
-      lastError = error as Error;
+    }
+    const expiresAt = new Date(tokenRow.expires_at).getTime();
+    if (expiresAt > Date.now() + TOKEN_BUFFER_MS) {
+      console.log('token_cache_hit: Using cached access token');
+      return tokenRow.access_token;
     }
   }
-  
-  throw lastError || new Error('Failed to obtain access token from Guesty');
+
+  console.log('token_cache_miss_refreshing: Token expired or not found, refreshing...');
+  const now = new Date().toISOString();
+  const staleThreshold = new Date(Date.now() - LOCK_STALE_MS).toISOString();
+
+  const { data: lockResult, error: lockError } = await supabaseAdmin
+    .from('guesty_oauth_tokens')
+    .update({ refresh_in_progress: true, refresh_started_at: now, updated_at: now })
+    .eq('guesty_account_id', accountId)
+    .or(`refresh_in_progress.eq.false,refresh_started_at.lt.${staleThreshold}`)
+    .select();
+
+  const lockAcquired = !lockError && lockResult && lockResult.length > 0;
+
+  if (!lockAcquired && tokenRow) {
+    for (let poll = 0; poll < LOCK_MAX_POLLS; poll++) {
+      await sleep(LOCK_POLL_INTERVAL_MS);
+      const { data: polledToken } = await supabaseAdmin.from('guesty_oauth_tokens').select('*').eq('guesty_account_id', accountId).maybeSingle();
+      if (polledToken && !polledToken.refresh_in_progress) {
+        const expiresAt = new Date(polledToken.expires_at).getTime();
+        if (expiresAt > Date.now() + TOKEN_BUFFER_MS) return polledToken.access_token;
+      }
+    }
+  }
+
+  try {
+    const token = await fetchGuestyOAuthToken(clientId, clientSecret);
+    const expiresAt = new Date(Date.now() + 55 * 60 * 1000).toISOString();
+    await supabaseAdmin.from('guesty_oauth_tokens').upsert({
+      guesty_account_id: accountId, access_token: token, expires_at: expiresAt,
+      oauth_cooldown_until: null, refresh_in_progress: false, refresh_started_at: null, updated_at: new Date().toISOString(),
+    }, { onConflict: 'guesty_account_id' });
+    return token;
+  } catch (error: any) {
+    if (error.message?.includes('OAUTH_RATE_LIMIT')) {
+      const cooldownUntil = new Date(Date.now() + 3 * 60 * 1000).toISOString();
+      await supabaseAdmin.from('guesty_oauth_tokens').upsert({
+        guesty_account_id: accountId, access_token: tokenRow?.access_token || '', expires_at: tokenRow?.expires_at || new Date().toISOString(),
+        oauth_cooldown_until: cooldownUntil, refresh_in_progress: false, refresh_started_at: null, updated_at: new Date().toISOString(),
+      }, { onConflict: 'guesty_account_id' });
+    } else {
+      await supabaseAdmin.from('guesty_oauth_tokens').update({ refresh_in_progress: false, refresh_started_at: null }).eq('guesty_account_id', accountId);
+    }
+    throw error;
+  }
+}
+
+async function fetchGuestyOAuthToken(clientId: string, clientSecret: string): Promise<string> {
+  const start = Date.now();
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const tokenResponse = await fetch('https://open-api.guesty.com/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret, scope: 'open-api' }),
+    });
+    if (tokenResponse.status === 429) {
+      const retryAfterMs = parseRetryAfter(tokenResponse.headers.get('retry-after'));
+      const waitTime = Math.max(Math.min(2000 * Math.pow(2, attempt - 1), 30000), retryAfterMs || 0);
+      if (Date.now() - start + waitTime > MAX_WAIT_TIME) {
+        throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${Math.max(3, Math.ceil(retryAfterMs / 60000))} minutes.`);
+      }
+      await sleep(waitTime);
+      continue;
+    }
+    if (!tokenResponse.ok) throw new Error(`Failed to get access token: ${tokenResponse.status}`);
+    const { access_token } = await tokenResponse.json();
+    return access_token;
+  }
+  throw new Error('OAUTH_RATE_LIMIT:Unable to authenticate after multiple attempts. Please wait 3 minutes.');
 }
 
 async function sleep(ms: number) {
@@ -526,7 +550,7 @@ Deno.serve(async (req) => {
 
     console.log(`Starting sync for account: ${account.account_name}, type: ${syncType}`);
 
-    const accessToken = await getGuestyAccessToken(account.client_id, account.client_secret);
+    const accessToken = await getGuestyAccessTokenCached(supabase, accountId, account.client_id, account.client_secret);
 
     let listingsCount = 0;
     let reservationsCount = 0;

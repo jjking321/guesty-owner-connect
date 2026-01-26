@@ -5,6 +5,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const MAX_RETRIES = 5;
+const MAX_WAIT_TIME = 45000;
+const TOKEN_BUFFER_MS = 120000;
+const LOCK_STALE_MS = 90000;
+const LOCK_POLL_INTERVAL_MS = 1000;
+const LOCK_MAX_POLLS = 6;
+
 interface GuestyReservation {
   _id: string;
   status: string;
@@ -25,82 +32,6 @@ interface GuestyReservation {
   };
 }
 
-async function getGuestyAccessToken(clientId: string, clientSecret: string): Promise<string> {
-  const MAX_RETRIES = 10; // Increased from 5 to 10 for better resilience
-  const BASE_DELAY_MS = 2000; // 2s
-  const MAX_BACKOFF_MS = 30000; // 30s
-  const MAX_WAIT_TIME_MS = 55000; // 55s to stay under 60s edge timeout
-
-  console.log('Exchanging client credentials for access token...');
-  const start = Date.now();
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const response = await fetch('https://open-api.guesty.com/oauth2/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json',
-        },
-        body: new URLSearchParams({
-          grant_type: 'client_credentials',
-          client_id: clientId,
-          client_secret: clientSecret,
-          scope: 'open-api',
-        }).toString(),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Successfully obtained access token');
-        return data.access_token;
-      }
-
-      const text = await response.text();
-      const status = response.status;
-      console.warn(`Token fetch failed (status ${status}) on attempt ${attempt}/${MAX_RETRIES}: ${text}`);
-
-      // Retry on 429 or 5xx
-      if (status === 429 || status >= 500) {
-        const retryAfterHeader = response.headers.get('retry-after');
-        const retryAfterMs = parseRetryAfter(retryAfterHeader);
-        const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
-        const waitMs = Math.max(backoff, retryAfterMs || 0);
-
-        if (Date.now() - start + waitMs > MAX_WAIT_TIME_MS) {
-          // OAuth rate limit specifically - needs longer cooldown
-          if (status === 429) {
-            const estimatedWaitMinutes = Math.ceil(retryAfterMs / 60000) || 3;
-            throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${estimatedWaitMinutes}-5 minutes before trying again. This is a protective measure by Guesty's OAuth service.`);
-          }
-          throw new Error(`SERVER_ERROR:Guesty API temporarily unavailable (${status}). Please try again in 2 minutes.`);
-        }
-
-        console.log(`Retrying token fetch in ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`);
-        await sleep(waitMs);
-        continue;
-      }
-
-      // Non-retryable error
-      throw new Error(`AUTH_FAILED:Authentication failed: ${status} - ${text}`);
-    } catch (err: any) {
-      if (attempt >= MAX_RETRIES || Date.now() - start > MAX_WAIT_TIME_MS) {
-        console.error('Token fetch failed after retries:', err?.message || err);
-        // Preserve error prefix if it exists
-        if (err?.message?.includes(':')) {
-          throw err;
-        }
-        throw new Error('OAUTH_RATE_LIMIT:Authentication failed due to rate limiting. Please wait 3-5 minutes before trying again.');
-      }
-      const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
-      console.log(`Network error getting token. Retrying in ${backoff}ms (attempt ${attempt}/${MAX_RETRIES})`);
-      await sleep(backoff);
-    }
-  }
-
-  throw new Error('OAUTH_RATE_LIMIT:Unable to authenticate with Guesty after multiple attempts. Please wait 3-5 minutes.');
-}
-
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -117,14 +48,211 @@ function parseRetryAfter(header: string | null): number {
   return 0;
 }
 
-async function fetchGuestyData(apiToken: string, endpoint: string, params: any = {}) {
-  const MAX_RETRIES = 5;
-  const BASE_DELAY_MS = 2000;
-  const MAX_BACKOFF_MS = 30000;
-  const MAX_WAIT_TIME_MS = 45000;
+async function getGuestyAccessTokenCached(
+  supabaseAdmin: any,
+  accountId: string,
+  clientId: string,
+  clientSecret: string
+): Promise<string> {
+  const { data: tokenRow, error: readError } = await supabaseAdmin
+    .from('guesty_oauth_tokens')
+    .select('*')
+    .eq('guesty_account_id', accountId)
+    .maybeSingle();
+
+  if (readError) {
+    console.error('Error reading token cache:', readError);
+  }
+
+  if (tokenRow) {
+    if (tokenRow.oauth_cooldown_until) {
+      const cooldownUntil = new Date(tokenRow.oauth_cooldown_until).getTime();
+      if (cooldownUntil > Date.now()) {
+        const waitMinutes = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 60000));
+        throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${waitMinutes} minutes before trying again.`);
+      }
+    }
+
+    const expiresAt = new Date(tokenRow.expires_at).getTime();
+    if (expiresAt > Date.now() + TOKEN_BUFFER_MS) {
+      console.log('token_cache_hit: Using cached access token');
+      return tokenRow.access_token;
+    }
+  }
+
+  console.log('token_cache_miss_refreshing: Token expired or not found, refreshing...');
+
+  const now = new Date().toISOString();
+  const staleThreshold = new Date(Date.now() - LOCK_STALE_MS).toISOString();
+
+  const { data: lockResult, error: lockError } = await supabaseAdmin
+    .from('guesty_oauth_tokens')
+    .update({
+      refresh_in_progress: true,
+      refresh_started_at: now,
+      updated_at: now,
+    })
+    .eq('guesty_account_id', accountId)
+    .or(`refresh_in_progress.eq.false,refresh_started_at.lt.${staleThreshold}`)
+    .select();
+
+  const lockAcquired = !lockError && lockResult && lockResult.length > 0;
+
+  if (!lockAcquired && tokenRow) {
+    console.log('token_refresh_lock_wait: Another process is refreshing, waiting...');
+    
+    for (let poll = 0; poll < LOCK_MAX_POLLS; poll++) {
+      await sleep(LOCK_POLL_INTERVAL_MS);
+      
+      const { data: polledToken } = await supabaseAdmin
+        .from('guesty_oauth_tokens')
+        .select('access_token, expires_at, refresh_in_progress, oauth_cooldown_until')
+        .eq('guesty_account_id', accountId)
+        .maybeSingle();
+
+      if (polledToken) {
+        if (polledToken.oauth_cooldown_until) {
+          const cooldownUntil = new Date(polledToken.oauth_cooldown_until).getTime();
+          if (cooldownUntil > Date.now()) {
+            const waitMinutes = Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 60000));
+            throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${waitMinutes} minutes before trying again.`);
+          }
+        }
+
+        if (!polledToken.refresh_in_progress) {
+          const expiresAt = new Date(polledToken.expires_at).getTime();
+          if (expiresAt > Date.now() + TOKEN_BUFFER_MS) {
+            console.log('token_cache_hit_after_wait: Got token after waiting for refresh');
+            return polledToken.access_token;
+          }
+        }
+      }
+    }
+
+    console.log('token_refresh_lock_retry: Retrying lock acquisition after wait');
+  }
+
+  console.log('token_refresh_lock_acquired: Acquired lock, fetching new token');
+
+  try {
+    const token = await fetchGuestyOAuthToken(clientId, clientSecret);
+    const expiresAt = new Date(Date.now() + 55 * 60 * 1000).toISOString();
+    
+    const { error: upsertError } = await supabaseAdmin
+      .from('guesty_oauth_tokens')
+      .upsert({
+        guesty_account_id: accountId,
+        access_token: token,
+        expires_at: expiresAt,
+        oauth_cooldown_until: null,
+        refresh_in_progress: false,
+        refresh_started_at: null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'guesty_account_id' });
+
+    if (upsertError) {
+      console.error('Error saving token to cache:', upsertError);
+    }
+
+    console.log('token_refresh_success: New token cached');
+    return token;
+  } catch (error: any) {
+    if (error.message?.includes('OAUTH_RATE_LIMIT')) {
+      const cooldownMinutes = 3;
+      const cooldownUntil = new Date(Date.now() + cooldownMinutes * 60 * 1000).toISOString();
+      
+      await supabaseAdmin
+        .from('guesty_oauth_tokens')
+        .upsert({
+          guesty_account_id: accountId,
+          access_token: tokenRow?.access_token || '',
+          expires_at: tokenRow?.expires_at || new Date().toISOString(),
+          oauth_cooldown_until: cooldownUntil,
+          refresh_in_progress: false,
+          refresh_started_at: null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'guesty_account_id' });
+    } else {
+      await supabaseAdmin
+        .from('guesty_oauth_tokens')
+        .update({
+          refresh_in_progress: false,
+          refresh_started_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('guesty_account_id', accountId);
+    }
+    
+    throw error;
+  }
+}
+
+async function fetchGuestyOAuthToken(clientId: string, clientSecret: string): Promise<string> {
   const start = Date.now();
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`Token fetch attempt ${attempt}/${MAX_RETRIES}`);
+      
+      const tokenResponse = await fetch('https://open-api.guesty.com/oauth2/token', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+        },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: 'open-api',
+        }),
+      });
+
+      if (tokenResponse.status === 429) {
+        const retryAfterMs = parseRetryAfter(tokenResponse.headers.get('retry-after'));
+        const backoff = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
+        const waitTime = Math.max(backoff, retryAfterMs || 0);
+        
+        if (Date.now() - start + waitTime > MAX_WAIT_TIME) {
+          const estimatedWaitMinutes = Math.max(3, Math.ceil(retryAfterMs / 60000));
+          throw new Error(`OAUTH_RATE_LIMIT:Guesty's authentication service is rate-limited. Please wait ${estimatedWaitMinutes} minutes before trying again.`);
+        }
+
+        console.log(`Rate limited on token request. Waiting ${waitTime}ms before retry...`);
+        await sleep(waitTime);
+        continue;
+      }
+
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        throw new Error(`Failed to get access token: ${tokenResponse.status} - ${errorText}`);
+      }
+
+      const { access_token } = await tokenResponse.json();
+      console.log('Successfully obtained access token');
+      return access_token;
+    } catch (error: any) {
+      if (error.message?.includes('OAUTH_RATE_LIMIT')) {
+        throw error;
+      }
+      if (attempt === MAX_RETRIES) {
+        throw error;
+      }
+      console.log(`Error on attempt ${attempt}, retrying...`, error.message);
+      await sleep(Math.min(2000 * Math.pow(2, attempt - 1), 30000));
+    }
+  }
+  
+  throw new Error('OAUTH_RATE_LIMIT:Unable to authenticate with Guesty after multiple attempts. Please wait 3 minutes.');
+}
+
+async function fetchGuestyData(apiToken: string, endpoint: string, params: any = {}) {
+  const MAX_DATA_RETRIES = 5;
+  const BASE_DELAY_MS = 2000;
+  const MAX_BACKOFF_MS = 30000;
+  const start = Date.now();
+
+  for (let attempt = 1; attempt <= MAX_DATA_RETRIES; attempt++) {
     try {
       const url = new URL(`https://open-api.guesty.com/v1/${endpoint}`);
       Object.keys(params).forEach(key => {
@@ -141,7 +269,6 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
         },
       });
 
-      // Log rate limit headers for monitoring
       const rls = {
         sec: parseInt(response.headers.get('x-ratelimit-remaining-second') || '999'),
         min: parseInt(response.headers.get('x-ratelimit-remaining-minute') || '999'),
@@ -157,31 +284,26 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
       const text = await response.text();
       console.warn(`Guesty API error (${status}) on attempt ${attempt}: ${text}`);
 
-      // Retry on 429, 502, 503, 504
       if (status === 429 || status === 502 || status === 503 || status === 504) {
-        const retryAfterHeader = response.headers.get('retry-after');
-        const retryAfterMs = parseRetryAfter(retryAfterHeader);
+        const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
         const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
         const waitMs = Math.max(backoff, retryAfterMs || 0);
 
-        if (Date.now() - start + waitMs > MAX_WAIT_TIME_MS) {
-          const waitMinutes = Math.ceil(retryAfterMs / 60000);
+        if (Date.now() - start + waitMs > MAX_WAIT_TIME) {
           if (status === 429) {
-            throw new Error(`Guesty API rate limit reached. Please wait ${waitMinutes || 1} minute(s) before trying again.`);
+            throw new Error(`Guesty API rate limit reached. Please wait a moment before trying again.`);
           }
-          throw new Error(`Guesty API temporarily unavailable (${status}). Please try again in a few moments.`);
+          throw new Error(`Guesty API temporarily unavailable (${status}). Please try again.`);
         }
 
-        console.log(`Retrying Guesty request in ${waitMs}ms (attempt ${attempt}/${MAX_RETRIES})`);
+        console.log(`Retrying Guesty request in ${waitMs}ms (attempt ${attempt}/${MAX_DATA_RETRIES})`);
         await sleep(waitMs);
         continue;
       }
 
-      // Non-retryable
       throw new Error(`Guesty API error: ${status} - ${text}`);
     } catch (err: any) {
-      if (attempt >= MAX_RETRIES || Date.now() - start > MAX_WAIT_TIME_MS) {
-        console.error('Guesty request failed after retries:', err?.message || err);
+      if (attempt >= MAX_DATA_RETRIES || Date.now() - start > MAX_WAIT_TIME) {
         throw new Error(err?.message || 'Guesty API request failed');
       }
       const backoff = Math.min(BASE_DELAY_MS * Math.pow(2, attempt - 1), MAX_BACKOFF_MS);
@@ -194,11 +316,10 @@ async function fetchGuestyData(apiToken: string, endpoint: string, params: any =
 }
 
 function getAdaptiveDelay(rateLimits: { sec: number; min: number; hr: number }): number {
-  // If we're low on any rate limit, add protective delay
   if (rateLimits.sec < 3) return 1500;
   if (rateLimits.sec < 5) return 1000;
   if (rateLimits.min < 10) return 750;
-  return 500; // Default delay
+  return 500;
 }
 
 Deno.serve(async (req) => {
@@ -206,7 +327,6 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Declare these outside try block so they're accessible in catch
   let supabase: any;
   let syncJobId: string | undefined;
 
@@ -223,7 +343,6 @@ Deno.serve(async (req) => {
 
     console.log(`Starting incremental reservation sync for account ${accountId}`);
 
-    // Create a sync job for progress tracking
     const { data: syncJobData, error: jobCreateError } = await supabase
       .from('sync_jobs')
       .insert({
@@ -242,7 +361,6 @@ Deno.serve(async (req) => {
 
     syncJobId = syncJobData?.id;
 
-    // Get Guesty account credentials
     const { data: account, error: accountError } = await supabase
       .from('guesty_accounts')
       .select('client_id, client_secret, organization_id')
@@ -253,7 +371,6 @@ Deno.serve(async (req) => {
       throw new Error('Guesty account not found');
     }
 
-    // Find the most recent imported_at timestamp
     const { data: mostRecentReservation, error: cutoffError } = await supabase
       .from('reservations')
       .select('imported_at')
@@ -267,11 +384,9 @@ Deno.serve(async (req) => {
       throw new Error('Failed to determine sync cutoff date');
     }
 
-    // If no reservations exist, direct user to do initial sync
     if (!mostRecentReservation) {
       console.log('No existing reservations found. Initial sync required.');
       
-      // Mark sync job as failed
       if (syncJobId) {
         await supabase
           .from('sync_jobs')
@@ -298,7 +413,6 @@ Deno.serve(async (req) => {
     const cutoffDate = new Date(mostRecentReservation.imported_at);
     console.log(`Cutoff date: ${cutoffDate.toISOString()}`);
 
-    // Update sync job with cutoff date
     if (syncJobId) {
       await supabase
         .from('sync_jobs')
@@ -308,10 +422,14 @@ Deno.serve(async (req) => {
         .eq('id', syncJobId);
     }
 
-    // Get Guesty access token
-    const apiToken = await getGuestyAccessToken(account.client_id, account.client_secret);
+    // Use cached token manager
+    const apiToken = await getGuestyAccessTokenCached(
+      supabase,
+      accountId,
+      account.client_id,
+      account.client_secret
+    );
 
-    // Fetch reservations updated since cutoff date
     const filters = JSON.stringify([
       {
         field: 'lastUpdatedAt',
@@ -330,7 +448,6 @@ Deno.serve(async (req) => {
     while (true) {
       console.log(`Fetching: skip=${skip}, limit=${limit}`);
       
-      // Retry logic for this specific page
       let pageData;
       const MAX_PAGE_RETRIES = 3;
       
@@ -345,7 +462,7 @@ Deno.serve(async (req) => {
           
           pageData = result.data;
           lastRateLimits = result.rateLimits;
-          break; // Success
+          break;
         } catch (err: any) {
           if (pageAttempt >= MAX_PAGE_RETRIES) {
             console.error(`Failed to fetch page at skip=${skip} after ${MAX_PAGE_RETRIES} attempts`);
@@ -361,7 +478,6 @@ Deno.serve(async (req) => {
       
       console.log(`Fetched ${reservations.length} reservations (total: ${allReservations.length})`);
 
-      // Update sync job progress
       if (syncJobId) {
         await supabase
           .from('sync_jobs')
@@ -378,7 +494,6 @@ Deno.serve(async (req) => {
 
       skip += limit;
       
-      // Adaptive delay based on rate limits
       const delay = getAdaptiveDelay(lastRateLimits);
       console.log(`Waiting ${delay}ms before next page (rate limits: s:${lastRateLimits.sec} m:${lastRateLimits.min})`);
       await sleep(delay);
@@ -386,7 +501,6 @@ Deno.serve(async (req) => {
 
     console.log(`Found ${allReservations.length} new/updated reservations`);
 
-    // Update sync job with total
     if (syncJobId) {
       await supabase
         .from('sync_jobs')
@@ -397,7 +511,6 @@ Deno.serve(async (req) => {
         .eq('id', syncJobId);
     }
 
-    // Transform and upsert reservations
     if (allReservations.length > 0) {
       const reservationsToUpsert = allReservations.map((reservation: GuestyReservation) => ({
         id: reservation._id,
@@ -419,7 +532,6 @@ Deno.serve(async (req) => {
         updated_at: new Date().toISOString(),
       }));
 
-      // Get all valid listing IDs from database
       console.log('Fetching valid listing IDs...');
       const { data: validListings, error: listingsError } = await supabase
         .from('listings')
@@ -434,7 +546,6 @@ Deno.serve(async (req) => {
       const validListingIds = new Set(validListings?.map((l: any) => l.id) || []);
       console.log(`Found ${validListingIds.size} valid listings in database`);
 
-      // Filter reservations to only include those with valid listings
       const validReservations = reservationsToUpsert.filter(r => {
         const isValid = validListingIds.has(r.listing_id);
         if (!isValid) {
@@ -445,7 +556,6 @@ Deno.serve(async (req) => {
 
       console.log(`Filtered to ${validReservations.length} reservations with valid listings (${reservationsToUpsert.length - validReservations.length} skipped)`);
 
-      // Deduplicate by ID
       const uniqueReservations = Array.from(
         new Map(validReservations.map(item => [item.id, item])).values()
       );
@@ -464,7 +574,6 @@ Deno.serve(async (req) => {
       console.log('Upsert successful');
       console.log('Nightly allocations will be handled automatically by database trigger');
       
-      // Update sync job progress
       if (syncJobId) {
         await supabase
           .from('sync_jobs')
@@ -476,7 +585,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Update last_reservations_sync timestamp
     const syncTimestamp = new Date().toISOString();
     const { error: updateError } = await supabase
       .from('guesty_accounts')
@@ -487,26 +595,24 @@ Deno.serve(async (req) => {
       console.error('Error updating last_reservations_sync:', updateError);
     }
 
-    console.log(`Incremental sync completed. ${allReservations.length} reservations processed.`);
-
-    // Mark sync job as completed
     if (syncJobId) {
       await supabase
         .from('sync_jobs')
         .update({
           status: 'completed',
           completed_at: new Date().toISOString(),
-          progress_message: `Successfully synced ${allReservations.length} new/updated reservations`,
+          progress_message: `Sync completed: ${allReservations.length} reservations processed`,
         })
         .eq('id', syncJobId);
     }
 
+    console.log(`Incremental sync completed successfully. Processed ${allReservations.length} reservations.`);
+
     return new Response(
       JSON.stringify({
         success: true,
-        newOrUpdatedCount: allReservations.length,
-        lastSyncDate: syncTimestamp,
-        cutoffDate: cutoffDate.toISOString(),
+        reservationsCount: allReservations.length,
+        syncJobId,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -516,22 +622,17 @@ Deno.serve(async (req) => {
   } catch (error: any) {
     console.error('Error in sync-new-reservations:', error);
     
-    // Mark sync job as failed if we have a syncJobId
-    if (syncJobId) {
-      try {
-        await supabase
-          .from('sync_jobs')
-          .update({
-            status: 'failed',
-            error_message: error.message,
-            completed_at: new Date().toISOString(),
-          })
-          .eq('id', syncJobId);
-      } catch (jobError) {
-        console.error('Error updating sync job:', jobError);
-      }
+    if (supabase && syncJobId) {
+      await supabase
+        .from('sync_jobs')
+        .update({
+          status: 'failed',
+          error_message: error.message,
+          completed_at: new Date().toISOString(),
+        })
+        .eq('id', syncJobId);
     }
-    
+
     return new Response(
       JSON.stringify({ error: error.message }),
       {

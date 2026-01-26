@@ -528,6 +528,44 @@ export type Database = {
           },
         ]
       }
+      guesty_oauth_tokens: {
+        Row: {
+          access_token: string
+          expires_at: string
+          guesty_account_id: string
+          oauth_cooldown_until: string | null
+          refresh_in_progress: boolean
+          refresh_started_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          access_token: string
+          expires_at: string
+          guesty_account_id: string
+          oauth_cooldown_until?: string | null
+          refresh_in_progress?: boolean
+          refresh_started_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          access_token?: string
+          expires_at?: string
+          guesty_account_id?: string
+          oauth_cooldown_until?: string | null
+          refresh_in_progress?: boolean
+          refresh_started_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guesty_oauth_tokens_guesty_account_id_fkey"
+            columns: ["guesty_account_id"]
+            isOneToOne: true
+            referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       listing_booking_stats: {
         Row: {
           avg_booking_window: number | null
