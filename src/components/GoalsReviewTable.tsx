@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { PropertySettings } from "@/components/PropertySettings";
 import { supabase } from "@/integrations/supabase/client";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -49,7 +49,6 @@ export function GoalsReviewTable({
   onSelectionChange,
   onGoalsSaved,
 }: GoalsReviewTableProps) {
-  const navigate = useNavigate();
   const [editedGoals, setEditedGoals] = useState<Record<string, number>>({});
   const [savingRows, setSavingRows] = useState<Set<string>>(new Set());
 
@@ -268,12 +267,10 @@ export function GoalsReviewTable({
                         className="w-8 h-8 rounded object-cover"
                       />
                     )}
-                    <button
-                      onClick={() => navigate(`/listings/${listing.id}`)}
-                      className="font-medium text-sm hover:underline hover:text-primary text-left whitespace-nowrap"
-                    >
+                    <span className="font-medium text-sm whitespace-nowrap">
                       {listing.nickname || listing.id}
-                    </button>
+                    </span>
+                    <PropertySettings listingId={listing.id} />
                   </div>
                 </TableCell>
                 {MONTHS.map((_, monthIndex) => {
