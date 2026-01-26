@@ -253,7 +253,7 @@ export function GoalsReviewTable({
                     )}
                     <button
                       onClick={() => navigate(`/listings/${listing.id}`)}
-                      className="font-medium text-sm truncate max-w-[180px] hover:underline hover:text-primary text-left"
+                      className="font-medium text-sm hover:underline hover:text-primary text-left whitespace-nowrap"
                     >
                       {listing.nickname || listing.id}
                     </button>
