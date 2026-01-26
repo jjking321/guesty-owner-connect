@@ -1,62 +1,106 @@
 
 
-## Fix: Goals Review Missing Active/Listed Filter
+## Fix: Use Existing RPC for Historical Data
 
-The Goals Review page is showing 428 properties instead of 272 because it's missing the `active` and `is_listed` filters in the listings query.
-
----
-
-### Root Cause
-
-**Current Query (GoalsReview.tsx line 27-36):**
-```typescript
-.from("listings")
-.select("id, nickname, thumbnail")
-.eq("archived", false)  // Only filters archived
-```
-
-**Bulk Goals Generator Query (line 57-61):**
-```typescript
-.from("listings")
-.eq("active", true)      // ← Missing in GoalsReview
-.eq("is_listed", true)   // ← Missing in GoalsReview  
-.eq("archived", false)
-```
+The data IS already pre-aggregated via `get_portfolio_night_metrics`. We don't need a new database function.
 
 ---
 
-### Impact
+### Current Problem
 
-| Count | Description |
-|-------|-------------|
-| 428 | Listings shown on Goals Review (current) |
-| 272 | Active + listed listings with goals |
-| 156 | Inactive/unlisted listings showing with $0 goals |
+The historical actuals query fetches **58,253 raw rows** from `reservation_nights`, hitting the 1000 row limit.
+
+### Existing Solution
+
+The `get_portfolio_night_metrics(p_year, p_month)` RPC already:
+- Aggregates revenue by listing server-side
+- Accepts any year (not just current)
+- Returns ~250 rows per month (well under limit)
 
 ---
 
-### Fix
+### Implementation
 
-**File: `src/pages/GoalsReview.tsx` (lines 30-33)**
+**File: `src/pages/GoalsReview.tsx`**
 
-Add the missing filters to match the bulk goals generator:
+Replace the raw `reservation_nights` query (lines 81-97) with 12 parallel RPC calls:
 
 ```typescript
-const { data, error } = await supabase
-  .from("listings")
-  .select("id, nickname, thumbnail")
-  .eq("active", true)      // Add this
-  .eq("is_listed", true)   // Add this
-  .eq("archived", false)
-  .order("nickname");
+// Fetch historical actuals using existing RPC (12 parallel calls for each month)
+const { data: historicalActuals = [] } = useQuery({
+  queryKey: ["historical-actuals-rpc", selectedYear - 1],
+  queryFn: async () => {
+    const priorYear = selectedYear - 1;
+    
+    // Call RPC for each month in parallel
+    const monthPromises = Array.from({ length: 12 }, (_, i) => 
+      supabase.rpc('get_portfolio_night_metrics', {
+        p_year: priorYear,
+        p_month: i + 1
+      })
+    );
+    
+    const results = await Promise.all(monthPromises);
+    
+    // Combine results with month info
+    const all: Array<{ listing_id: string; month: number; revenue: number }> = [];
+    results.forEach((res, idx) => {
+      if (res.error) throw res.error;
+      res.data?.forEach((row: any) => {
+        all.push({
+          listing_id: row.listing_id,
+          month: idx + 1,
+          revenue: Number(row.actual_revenue) || 0
+        });
+      });
+    });
+    
+    return all;
+  },
+});
 ```
+
+Update the processing memo (lines 111-124):
+
+```typescript
+const historicalByListingMonth = useMemo(() => {
+  const result: Record<string, Record<number, number>> = {};
+  
+  historicalActuals.forEach((row) => {
+    if (!result[row.listing_id]) {
+      result[row.listing_id] = {};
+    }
+    result[row.listing_id][row.month] = row.revenue;
+  });
+  
+  return result;
+}, [historicalActuals]);
+```
+
+---
+
+### Why This Works
+
+| Approach | Rows Returned | Within Limit? |
+|----------|---------------|---------------|
+| Raw query | 58,253 | No (1000 limit) |
+| RPC per month | ~250 each × 12 calls | Yes |
+
+---
+
+### Changes Summary
+
+| Location | Change |
+|----------|--------|
+| Lines 81-97 | Replace raw query with 12 parallel RPC calls |
+| Lines 111-124 | Simplify processing for pre-aggregated data |
 
 ---
 
 ### Result
 
-After this fix:
-- Goals Review will show exactly 272 properties (matching Portfolio view)
-- All displayed properties will have goals
-- No more properties showing $0 when they shouldn't
+- All 291 listings with historical revenue will populate correctly
+- LY column will show accurate monthly revenue
+- Uses existing infrastructure (no new database functions)
+- Faster queries (pre-aggregated server-side)
 
