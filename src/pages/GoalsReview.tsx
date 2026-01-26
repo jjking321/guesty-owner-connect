@@ -30,6 +30,8 @@ export default function GoalsReview() {
       const { data, error } = await supabase
         .from("listings")
         .select("id, nickname, thumbnail")
+        .eq("active", true)
+        .eq("is_listed", true)
         .eq("archived", false)
         .order("nickname");
       if (error) throw error;
