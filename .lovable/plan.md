@@ -1,67 +1,104 @@
 
 
-## Goals Review Page Enhancements
+## Goals Review: Fix Missing Goals (1000 Row Limit)
 
-Two improvements to the Goals Review table for better usability and navigation.
-
----
-
-### Changes Overview
-
-| Change | Description |
-|--------|-------------|
-| Clickable Property Names | Property names become links that navigate to `/listings/{id}` for detailed property view |
-| Wider Month Columns | Increase column widths so Goal/LY/Comp values aren't cramped |
+The Goals Review page is missing goals because the Supabase query is hitting the **1000 row limit**. For 2026, there are 3,264 goal records (272 properties × 12 months), but only the first 1,000 are being returned.
 
 ---
 
-### Technical Details
+### Root Cause
 
-**File: `src/components/GoalsReviewTable.tsx`**
+**GoalsReview.tsx (line 41-51)** fetches goals with a simple query:
+```typescript
+supabase.from("property_goals").select("*").eq("year", selectedYear)
+```
 
-1. **Add Navigation Hook**
-   - Import `useNavigate` from `react-router-dom`
-   - Add click handler to navigate to property detail
+This returns a maximum of 1,000 rows, cutting off 2,264 goals.
 
-2. **Make Property Name Clickable**
-   - Change the property name from a plain `<span>` to a clickable element
-   - Add hover styling (underline, cursor pointer)
-   - Navigate to `/listings/${listing.id}` on click
+**PropertiesBulkEdit.tsx (lines 160-197)** correctly uses batched fetching:
+```typescript
+const BATCH_SIZE = 60; // 60 listings * 12 months = 720 rows < 1000
+const chunks = []; // Split listingIds into batches
+// Fetch each batch and combine results
+```
 
-3. **Increase Column Widths**
-   - Month columns: `min-w-[140px]` → `min-w-[180px]`
-   - Property column: `min-w-[200px]` → `min-w-[220px]`
-   - Totals column: `min-w-[120px]` → `min-w-[140px]`
+---
+
+### Fix
+
+Update `src/pages/GoalsReview.tsx` to use the same batched fetching pattern:
+
+1. **Get listing IDs first** - Create a derived list from the listings query
+2. **Batch fetch goals** - Split listings into chunks of ~60, fetch goals for each batch
+3. **Combine results** - Merge all batches into a single goals array
 
 ---
 
 ### Code Changes
 
-**Property Name (lines 243-256):**
-```tsx
-// Before: plain text
-<span className="font-medium text-sm truncate max-w-[150px]">
-  {listing.nickname || listing.id}
-</span>
+**File: `src/pages/GoalsReview.tsx`**
 
-// After: clickable link
-<button
-  onClick={() => navigate(`/listings/${listing.id}`)}
-  className="font-medium text-sm truncate max-w-[180px] hover:underline hover:text-primary text-left"
->
-  {listing.nickname || listing.id}
-</button>
+| Line Range | Change |
+|------------|--------|
+| 26-38 | Keep listings query, add `listingIds` memo |
+| 40-51 | Replace simple query with batched fetch using `listingIds` |
+
+**Updated Goals Query:**
+```typescript
+// Derive listing IDs for batching
+const listingIds = useMemo(() => listings.map(l => l.id), [listings]);
+
+// Fetch goals in batches to avoid 1000 row limit
+const { data: goals = [], refetch: refetchGoals } = useQuery({
+  queryKey: ["property-goals", selectedYear, listingIds],
+  enabled: listingIds.length > 0,
+  queryFn: async () => {
+    const BATCH_SIZE = 60; // 60 listings × 12 months = 720 rows < 1000
+    const chunks: string[][] = [];
+    for (let i = 0; i < listingIds.length; i += BATCH_SIZE) {
+      chunks.push(listingIds.slice(i, i + BATCH_SIZE));
+    }
+
+    const promises = chunks.map((batchIds) =>
+      supabase
+        .from("property_goals")
+        .select("*")
+        .eq("year", selectedYear)
+        .in("listing_id", batchIds)
+    );
+
+    const results = await Promise.all(promises);
+    const all: any[] = [];
+    for (const res of results) {
+      if (res.error) throw res.error;
+      if (res.data) all.push(...res.data);
+    }
+
+    console.log("Goals batched fetch:", {
+      batches: chunks.length,
+      listingCount: listingIds.length,
+      goalsCount: all.length,
+    });
+
+    return all;
+  },
+});
 ```
 
-**Column Widths:**
-```tsx
-// Month headers (line 209)
-min-w-[140px] → min-w-[180px]
+---
 
-// Property header (line 207)
-min-w-[200px] → min-w-[220px]
+### Additional Fix: Historical Actuals
 
-// Totals header (line 218)
-min-w-[120px] → min-w-[140px]
-```
+The same 1000 row limit applies to the historical actuals query (line 53-69). For a year of reservation nights across 400+ properties, this could also hit the limit.
+
+**Solution:** Use the existing `get_portfolio_night_metrics` RPC function for historical data, or implement batched fetching for reservation_nights as well.
+
+---
+
+### Result
+
+After this fix:
+- All 3,264 goals for 2026 will be fetched (currently only 1,000)
+- Goals will match what appears on the Portfolio view
+- Logging will confirm the batched fetch is working
 
