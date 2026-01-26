@@ -1,106 +1,129 @@
 
 
-## Fix: Use Existing RPC for Historical Data
+## Fix: Compset Monthly Averages Not Populating
 
-The data IS already pre-aggregated via `get_portfolio_night_metrics`. We don't need a new database function.
-
----
-
-### Current Problem
-
-The historical actuals query fetches **58,253 raw rows** from `reservation_nights`, hitting the 1000 row limit.
-
-### Existing Solution
-
-The `get_portfolio_night_metrics(p_year, p_month)` RPC already:
-- Aggregates revenue by listing server-side
-- Accepts any year (not just current)
-- Returns ~250 rows per month (well under limit)
+The issue is a **data structure mismatch** in the `backfill-comparable-data` edge function that causes it to overwrite good compset summaries with empty `monthly_averages`.
 
 ---
 
-### Implementation
+### Root Cause Analysis
 
-**File: `src/pages/GoalsReview.tsx`**
+| Metric | Value |
+|--------|-------|
+| Total compset summaries | 210 |
+| Summaries with empty monthly_averages | 204 |
+| Summaries with valid monthly_averages | 6 |
+| All 204 have valid TTM data | Yes |
+| All 204 have valid underlying historical_metrics | Yes |
 
-Replace the raw `reservation_nights` query (lines 81-97) with 12 parallel RPC calls:
+**The Bug:** Two edge functions have different implementations for processing `historical_metrics`:
 
-```typescript
-// Fetch historical actuals using existing RPC (12 parallel calls for each month)
-const { data: historicalActuals = [] } = useQuery({
-  queryKey: ["historical-actuals-rpc", selectedYear - 1],
-  queryFn: async () => {
-    const priorYear = selectedYear - 1;
-    
-    // Call RPC for each month in parallel
-    const monthPromises = Array.from({ length: 12 }, (_, i) => 
-      supabase.rpc('get_portfolio_night_metrics', {
-        p_year: priorYear,
-        p_month: i + 1
-      })
-    );
-    
-    const results = await Promise.all(monthPromises);
-    
-    // Combine results with month info
-    const all: Array<{ listing_id: string; month: number; revenue: number }> = [];
-    results.forEach((res, idx) => {
-      if (res.error) throw res.error;
-      res.data?.forEach((row: any) => {
-        all.push({
-          listing_id: row.listing_id,
-          month: idx + 1,
-          revenue: Number(row.actual_revenue) || 0
-        });
-      });
-    });
-    
-    return all;
-  },
-});
+```text
+CORRECT (fetch-comparable-metrics):
+┌─────────────────────────────────────────┐
+│ const results = comp.historical_metrics?.results || [];
+│ for (const record of results) {
+│   const monthKey = record.date;        ← Uses 'date'
+└─────────────────────────────────────────┘
+
+WRONG (backfill-comparable-data):
+┌─────────────────────────────────────────┐
+│ if (Array.isArray(comp.historical_metrics)) {  ← Always FALSE!
+│   for (const metric of comp.historical_metrics) {
+│     const key = metric.year_month;     ← Wrong field name
+└─────────────────────────────────────────┘
 ```
 
-Update the processing memo (lines 111-124):
-
-```typescript
-const historicalByListingMonth = useMemo(() => {
-  const result: Record<string, Record<number, number>> = {};
-  
-  historicalActuals.forEach((row) => {
-    if (!result[row.listing_id]) {
-      result[row.listing_id] = {};
-    }
-    result[row.listing_id][row.month] = row.revenue;
-  });
-  
-  return result;
-}, [historicalActuals]);
+The actual data structure is:
+```json
+{
+  "results": [
+    { "date": "2024-12", "revenue": 2592, "average_daily_rate": 172.8, ... }
+  ]
+}
 ```
 
 ---
 
-### Why This Works
+### Changes Required
 
-| Approach | Rows Returned | Within Limit? |
-|----------|---------------|---------------|
-| Raw query | 58,253 | No (1000 limit) |
-| RPC per month | ~250 each × 12 calls | Yes |
+**File: `supabase/functions/backfill-comparable-data/index.ts`**
+
+1. **Fix the historical_metrics processing** (lines 108-121):
+
+   Change from:
+   ```typescript
+   if (comp.historical_metrics && Array.isArray(comp.historical_metrics)) {
+     for (const metric of comp.historical_metrics as HistoricalMetric[]) {
+       const key = metric.year_month;
+   ```
+
+   To:
+   ```typescript
+   const metricsData = comp.historical_metrics as { results?: HistoricalMetric[] } | null;
+   if (metricsData?.results && Array.isArray(metricsData.results)) {
+     for (const metric of metricsData.results) {
+       const key = metric.date;
+   ```
+
+2. **Update HistoricalMetric interface** (lines 39-45):
+
+   Change from:
+   ```typescript
+   interface HistoricalMetric {
+     year_month: string;
+     revenue: number;
+     adr: number;
+   ```
+
+   To:
+   ```typescript
+   interface HistoricalMetric {
+     date: string;
+     revenue: number;
+     average_daily_rate: number;  // Match actual API field name
+   ```
+
+3. **Update monthly averages output format** (lines 123-131):
+
+   Change from:
+   ```typescript
+   .map(([yearMonth, data]) => ({
+     year_month: yearMonth,
+     avg_revenue: data.revenue.length > 0 ? ...
+   ```
+
+   To (match the format used by fetch-comparable-metrics):
+   ```typescript
+   .map(([month, data]) => ({
+     month: month,
+     revenue: data.revenue.length > 0 ? ...
+   ```
 
 ---
 
-### Changes Summary
+### After Fix: Re-run Backfill
 
-| Location | Change |
-|----------|--------|
-| Lines 81-97 | Replace raw query with 12 parallel RPC calls |
-| Lines 111-124 | Simplify processing for pre-aggregated data |
+After deploying the fixed edge function, you'll need to trigger a recalculation of the compset summaries. This can be done by:
+
+1. Calling the `backfill-compset-averages` function (which already has correct logic), OR
+2. Re-fetching metrics for any property (which triggers `updateCompsetSummary`)
 
 ---
 
-### Result
+### Summary of Changes
 
-- All 291 listings with historical revenue will populate correctly
-- LY column will show accurate monthly revenue
-- Uses existing infrastructure (no new database functions)
-- Faster queries (pre-aggregated server-side)
+| File | Change |
+|------|--------|
+| `supabase/functions/backfill-comparable-data/index.ts` | Fix data structure access pattern for `historical_metrics` |
+| Same file | Update field names to match actual API response (`date` not `year_month`, `average_daily_rate` not `adr`) |
+| Same file | Update output format to match `fetch-comparable-metrics` (`month` not `year_month`, `revenue` not `avg_revenue`) |
+
+---
+
+### Expected Result
+
+- All 210 compset summaries will have properly populated `monthly_averages`
+- Goals Review "Comp" column will show compset data for all properties with selected comparables
+- No data loss when backfill operations run
 
