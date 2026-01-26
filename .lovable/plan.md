@@ -1,129 +1,108 @@
 
 
-## Fix: Compset Monthly Averages Not Populating
-
-The issue is a **data structure mismatch** in the `backfill-comparable-data` edge function that causes it to overwrite good compset summaries with empty `monthly_averages`.
-
----
-
-### Root Cause Analysis
-
-| Metric | Value |
-|--------|-------|
-| Total compset summaries | 210 |
-| Summaries with empty monthly_averages | 204 |
-| Summaries with valid monthly_averages | 6 |
-| All 204 have valid TTM data | Yes |
-| All 204 have valid underlying historical_metrics | Yes |
-
-**The Bug:** Two edge functions have different implementations for processing `historical_metrics`:
-
-```text
-CORRECT (fetch-comparable-metrics):
-┌─────────────────────────────────────────┐
-│ const results = comp.historical_metrics?.results || [];
-│ for (const record of results) {
-│   const monthKey = record.date;        ← Uses 'date'
-└─────────────────────────────────────────┘
-
-WRONG (backfill-comparable-data):
-┌─────────────────────────────────────────┐
-│ if (Array.isArray(comp.historical_metrics)) {  ← Always FALSE!
-│   for (const metric of comp.historical_metrics) {
-│     const key = metric.year_month;     ← Wrong field name
-└─────────────────────────────────────────┘
-```
-
-The actual data structure is:
-```json
-{
-  "results": [
-    { "date": "2024-12", "revenue": 2592, "average_daily_rate": 172.8, ... }
-  ]
-}
-```
-
----
+## Add Year Comp Total and Goal Variance Highlighting
 
 ### Changes Required
 
-**File: `supabase/functions/backfill-comparable-data/index.ts`**
-
-1. **Fix the historical_metrics processing** (lines 108-121):
-
-   Change from:
-   ```typescript
-   if (comp.historical_metrics && Array.isArray(comp.historical_metrics)) {
-     for (const metric of comp.historical_metrics as HistoricalMetric[]) {
-       const key = metric.year_month;
-   ```
-
-   To:
-   ```typescript
-   const metricsData = comp.historical_metrics as { results?: HistoricalMetric[] } | null;
-   if (metricsData?.results && Array.isArray(metricsData.results)) {
-     for (const metric of metricsData.results) {
-       const key = metric.date;
-   ```
-
-2. **Update HistoricalMetric interface** (lines 39-45):
-
-   Change from:
-   ```typescript
-   interface HistoricalMetric {
-     year_month: string;
-     revenue: number;
-     adr: number;
-   ```
-
-   To:
-   ```typescript
-   interface HistoricalMetric {
-     date: string;
-     revenue: number;
-     average_daily_rate: number;  // Match actual API field name
-   ```
-
-3. **Update monthly averages output format** (lines 123-131):
-
-   Change from:
-   ```typescript
-   .map(([yearMonth, data]) => ({
-     year_month: yearMonth,
-     avg_revenue: data.revenue.length > 0 ? ...
-   ```
-
-   To (match the format used by fetch-comparable-metrics):
-   ```typescript
-   .map(([month, data]) => ({
-     month: month,
-     revenue: data.revenue.length > 0 ? ...
-   ```
+**File: `src/components/GoalsReviewTable.tsx`**
 
 ---
 
-### After Fix: Re-run Backfill
+### 1. Add Comp Total to Totals Column Header (lines 220-226)
 
-After deploying the fixed edge function, you'll need to trigger a recalculation of the compset summaries. This can be done by:
+Update the Totals header to include a third sub-column for Comp:
 
-1. Calling the `backfill-compset-averages` function (which already has correct logic), OR
-2. Re-fetching metrics for any property (which triggers `updateCompsetSummary`)
-
----
-
-### Summary of Changes
-
-| File | Change |
-|------|--------|
-| `supabase/functions/backfill-comparable-data/index.ts` | Fix data structure access pattern for `historical_metrics` |
-| Same file | Update field names to match actual API response (`date` not `year_month`, `average_daily_rate` not `adr`) |
-| Same file | Update output format to match `fetch-comparable-metrics` (`month` not `year_month`, `revenue` not `avg_revenue`) |
+```typescript
+<TableHead className="text-center min-w-[180px]">
+  <div className="text-xs font-medium">Totals</div>
+  <div className="flex text-[10px] text-muted-foreground mt-1">
+    <span className="flex-1">Goal</span>
+    <span className="flex-1">LY</span>
+    <span className="flex-1">Comp</span>
+  </div>
+</TableHead>
+```
 
 ---
 
-### Expected Result
+### 2. Display Comp Total in Row (lines 305-317)
 
-- All 210 compset summaries will have properly populated `monthly_averages`
-- Goals Review "Comp" column will show compset data for all properties with selected comparables
-- No data loss when backfill operations run
+Update the totals cell to display the `compTotal` (already calculated but not shown):
+
+```typescript
+<TableCell className="p-1">
+  <div className="flex gap-1 text-xs">
+    <div className={cn(
+      "flex-1 flex items-center justify-center h-7 font-semibold",
+      /* existing and new color logic */
+    )}>
+      {formatCurrency(goalTotal)}
+    </div>
+    <div className="flex-1 flex items-center justify-center h-7 text-muted-foreground font-medium">
+      {formatCurrency(lyTotal)}
+    </div>
+    <div className="flex-1 flex items-center justify-center h-7 text-blue-600 font-medium">
+      {formatCurrency(compTotal)}
+    </div>
+  </div>
+</TableCell>
+```
+
+---
+
+### 3. Add Goal Variance Color Logic
+
+Create a helper function to determine if a goal is more than 5% off from either benchmark:
+
+```typescript
+const getGoalVarianceColor = (goal: number, ly: number, comp: number) => {
+  // Check variance against LY (if LY exists)
+  const lyVariance = ly > 0 ? Math.abs((goal - ly) / ly) : 0;
+  // Check variance against Comp (if Comp exists)  
+  const compVariance = comp > 0 ? Math.abs((goal - comp) / comp) : 0;
+  
+  // If more than 5% off from either benchmark
+  if (lyVariance > 0.05 || compVariance > 0.05) {
+    // Determine direction: below benchmarks = amber, above = green
+    const avgBenchmark = (ly + comp) / (ly > 0 && comp > 0 ? 2 : 1);
+    if (goal < avgBenchmark * 0.95) {
+      return "text-amber-600"; // Goal is notably below benchmarks
+    }
+    return "text-green-600"; // Goal is notably above benchmarks
+  }
+  return ""; // Within 5% of benchmarks
+};
+```
+
+Apply this color logic to:
+- **Year Total Goal** cell (the total column)
+- **Monthly Goal inputs** (optional enhancement for individual month visibility)
+
+---
+
+### Summary
+
+| Change | Location |
+|--------|----------|
+| Add "Comp" sub-header to Totals column | Line 220-226 |
+| Display `compTotal` value in row | Line 305-317 |
+| Add `getGoalVarianceColor` helper function | New function after line 189 |
+| Apply variance color to Goal total | Line 307-312 |
+
+---
+
+### Visual Result
+
+The Totals column will now show:
+
+```text
+┌───────────────────────────────────┐
+│            Totals                 │
+│   Goal    │    LY    │   Comp    │
+├───────────┼──────────┼───────────┤
+│  $125.2k  │  $118.5k │  $122.0k  │  (Goal in green - above benchmarks)
+│  $98.5k   │  $115.2k │  $110.8k  │  (Goal in amber - below benchmarks)
+│  $112.0k  │  $110.5k │  $113.2k  │  (Goal in default - within 5%)
+└───────────┴──────────┴───────────┘
+```
 
