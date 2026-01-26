@@ -1,0 +1,290 @@
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { DashboardLayout } from "@/components/DashboardLayout";
+import { GoalsReviewTable } from "@/components/GoalsReviewTable";
+import { Card, CardContent } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Download, Lock, Unlock, Search } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+
+interface MonthlyAverage {
+  month: string;
+  revenue: number;
+  adr: number;
+  occupancy: number;
+}
+
+export default function GoalsReview() {
+  const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedListings, setSelectedListings] = useState<Set<string>>(new Set());
+
+  // Fetch listings
+  const { data: listings = [] } = useQuery({
+    queryKey: ["listings-for-goals"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("listings")
+        .select("id, nickname, thumbnail")
+        .eq("archived", false)
+        .order("nickname");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch goals for selected year
+  const { data: goals = [], refetch: refetchGoals } = useQuery({
+    queryKey: ["property-goals", selectedYear],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("property_goals")
+        .select("*")
+        .eq("year", selectedYear);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch historical actuals (last year)
+  const { data: historicalActuals = [] } = useQuery({
+    queryKey: ["historical-actuals", selectedYear - 1],
+    queryFn: async () => {
+      const startDate = `${selectedYear - 1}-01-01`;
+      const endDate = `${selectedYear - 1}-12-31`;
+      
+      const { data, error } = await supabase
+        .from("reservation_nights")
+        .select("listing_id, night_date, revenue_allocation")
+        .gte("night_date", startDate)
+        .lte("night_date", endDate);
+      
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch compset averages
+  const { data: compsetSummaries = [] } = useQuery({
+    queryKey: ["compset-summaries"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("property_compset_summary")
+        .select("listing_id, monthly_averages");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Process historical actuals by listing and month
+  const historicalByListingMonth = useMemo(() => {
+    const result: Record<string, Record<number, number>> = {};
+    
+    historicalActuals.forEach((night) => {
+      const month = new Date(night.night_date).getMonth() + 1;
+      if (!result[night.listing_id]) {
+        result[night.listing_id] = {};
+      }
+      result[night.listing_id][month] = (result[night.listing_id][month] || 0) + (night.revenue_allocation || 0);
+    });
+    
+    return result;
+  }, [historicalActuals]);
+
+  // Process compset averages by listing and month
+  const compsetByListingMonth = useMemo(() => {
+    const result: Record<string, Record<number, number>> = {};
+    
+    compsetSummaries.forEach((summary) => {
+      if (summary.monthly_averages && Array.isArray(summary.monthly_averages)) {
+        result[summary.listing_id] = {};
+        (summary.monthly_averages as unknown as MonthlyAverage[]).forEach((avg) => {
+          const monthNum = new Date(`${avg.month}-01`).getMonth() + 1;
+          result[summary.listing_id][monthNum] = avg.revenue || 0;
+        });
+      }
+    });
+    
+    return result;
+  }, [compsetSummaries]);
+
+  // Filter listings by search
+  const filteredListings = useMemo(() => {
+    if (!searchQuery) return listings;
+    const query = searchQuery.toLowerCase();
+    return listings.filter((l) => l.nickname?.toLowerCase().includes(query));
+  }, [listings, searchQuery]);
+
+  // Calculate totals
+  const totals = useMemo(() => {
+    let totalGoals = 0;
+    let totalLastYear = 0;
+
+    filteredListings.forEach((listing) => {
+      // Sum goals for this listing
+      const listingGoals = goals.filter((g) => g.listing_id === listing.id);
+      listingGoals.forEach((g) => {
+        totalGoals += g.projection_revenue || 0;
+      });
+
+      // Sum last year actuals
+      const lyData = historicalByListingMonth[listing.id] || {};
+      Object.values(lyData).forEach((val) => {
+        totalLastYear += val;
+      });
+    });
+
+    const percentChange = totalLastYear > 0 ? ((totalGoals - totalLastYear) / totalLastYear) * 100 : 0;
+
+    return { totalGoals, totalLastYear, percentChange };
+  }, [filteredListings, goals, historicalByListingMonth]);
+
+  // Bulk lock/unlock
+  const handleBulkLock = async (lock: boolean) => {
+    if (selectedListings.size === 0) {
+      toast({ title: "No properties selected", description: "Please select properties to lock/unlock", variant: "destructive" });
+      return;
+    }
+
+    const { data: session } = await supabase.auth.getSession();
+    const userId = session?.session?.user?.id;
+
+    const { error } = await supabase
+      .from("property_goals")
+      .update({
+        locked: lock,
+        locked_at: lock ? new Date().toISOString() : null,
+        locked_by: lock ? userId : null,
+      })
+      .eq("year", selectedYear)
+      .in("listing_id", Array.from(selectedListings));
+
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: lock ? "Goals Locked" : "Goals Unlocked", description: `${selectedListings.size} properties updated` });
+      refetchGoals();
+    }
+  };
+
+  // Export CSV
+  const handleExportCSV = () => {
+    const headers = ["Property", "Jan Goal", "Jan LY", "Jan Comp", "Feb Goal", "Feb LY", "Feb Comp", "Mar Goal", "Mar LY", "Mar Comp", "Apr Goal", "Apr LY", "Apr Comp", "May Goal", "May LY", "May Comp", "Jun Goal", "Jun LY", "Jun Comp", "Jul Goal", "Jul LY", "Jul Comp", "Aug Goal", "Aug LY", "Aug Comp", "Sep Goal", "Sep LY", "Sep Comp", "Oct Goal", "Oct LY", "Oct Comp", "Nov Goal", "Nov LY", "Nov Comp", "Dec Goal", "Dec LY", "Dec Comp", "Total Goal", "Total LY"];
+    
+    const rows = filteredListings.map((listing) => {
+      const listingGoals = goals.filter((g) => g.listing_id === listing.id);
+      const lyData = historicalByListingMonth[listing.id] || {};
+      const compData = compsetByListingMonth[listing.id] || {};
+      
+      const row: (string | number)[] = [listing.nickname || listing.id];
+      let totalGoal = 0;
+      let totalLY = 0;
+
+      for (let m = 1; m <= 12; m++) {
+        const goal = listingGoals.find((g) => g.month === m)?.projection_revenue || 0;
+        const ly = lyData[m] || 0;
+        const comp = compData[m] || 0;
+        row.push(goal, ly, comp);
+        totalGoal += goal;
+        totalLY += ly;
+      }
+
+      row.push(totalGoal, totalLY);
+      return row;
+    });
+
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `goals-review-${selectedYear}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Goals Review</h1>
+          <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {years.map((y) => (
+                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Summary */}
+        <Card>
+          <CardContent className="py-4">
+            <div className="flex items-center gap-8 text-sm">
+              <div>
+                <span className="text-muted-foreground">Total Goals:</span>{" "}
+                <span className="font-semibold">${totals.totalGoals.toLocaleString()}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Last Year:</span>{" "}
+                <span className="font-semibold">${totals.totalLastYear.toLocaleString()}</span>
+              </div>
+              <div>
+                <span className={totals.percentChange >= 0 ? "text-green-600" : "text-red-600"}>
+                  {totals.percentChange >= 0 ? "+" : ""}{totals.percentChange.toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Actions */}
+        <div className="flex items-center gap-4">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search properties..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Button variant="outline" size="sm" onClick={handleExportCSV}>
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => handleBulkLock(true)} disabled={selectedListings.size === 0}>
+            <Lock className="h-4 w-4 mr-2" />
+            Lock Selected
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => handleBulkLock(false)} disabled={selectedListings.size === 0}>
+            <Unlock className="h-4 w-4 mr-2" />
+            Unlock Selected
+          </Button>
+        </div>
+
+        {/* Table */}
+        <GoalsReviewTable
+          listings={filteredListings}
+          goals={goals}
+          historicalByListingMonth={historicalByListingMonth}
+          compsetByListingMonth={compsetByListingMonth}
+          selectedYear={selectedYear}
+          selectedListings={selectedListings}
+          onSelectionChange={setSelectedListings}
+          onGoalsSaved={refetchGoals}
+        />
+      </div>
+    </DashboardLayout>
+  );
+}
