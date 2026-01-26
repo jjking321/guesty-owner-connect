@@ -208,7 +208,7 @@ export function GoalsReviewTable({
             </TableHead>
             <TableHead className="sticky left-10 bg-background z-20 min-w-[220px]">Property</TableHead>
             {MONTHS.map((month) => (
-              <TableHead key={month} className="text-center min-w-[200px]">
+              <TableHead key={month} className="text-center min-w-[240px]">
                 <div className="text-xs font-medium">{month}</div>
                 <div className="flex text-[10px] text-muted-foreground mt-1">
                   <span className="flex-1">Goal</span>
