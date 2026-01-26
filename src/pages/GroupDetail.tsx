@@ -295,6 +295,44 @@ export default function GroupDetail() {
     enabled: listingIds.length > 0,
   });
 
+  // Fetch future reservation nights for "On the Books" revenue
+  const { data: futureReservationNights } = useQuery({
+    queryKey: ["group-future-reservation-nights", listingIds, effectiveDateRange.from],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const today = new Date();
+      const endOfYear = new Date(effectiveDateRange.from.getFullYear(), 11, 31);
+      
+      // Only fetch if we're looking at the current year or a future year
+      if (endOfYear < today) return [];
+
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(today, "yyyy-MM-dd"))
+          .lte("night_date", format(endOfYear, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
+    },
+    enabled: listingIds.length > 0,
+  });
+
   // Fetch capacity calendar data for occupancy calculation
   const { data: capacityData } = useQuery({
     queryKey: ["group-capacity", listingIds, effectiveDateRange.from, effectiveDateRange.to],
@@ -1441,6 +1479,11 @@ export default function GroupDetail() {
                   const adr = listingNightsCount > 0 ? ytdRevenue / listingNightsCount : 0;
                   const revpar = daysInRange > 0 ? ytdRevenue / daysInRange : 0;
 
+                  // Calculate On the Books revenue from future reservation nights
+                  const onTheBooksRevenue = futureReservationNights?.filter(
+                    n => n.listing_id === listing.id
+                  ).reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
+
                   return {
                     id: listing.id,
                     nickname: listing.nickname,
@@ -1448,7 +1491,7 @@ export default function GroupDetail() {
                     thumbnail: listing.thumbnail,
                     propertyType: listing.property_type,
                     actualRevenue: ytdRevenue,
-                    onTheBooksRevenue: 0,
+                    onTheBooksRevenue,
                     directRevenue: revenueData.direct,
                     attributedRevenue: revenueData.attributed,
                     budgetTotal: budget,
