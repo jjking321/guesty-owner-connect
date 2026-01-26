@@ -188,6 +188,22 @@ export function GoalsReviewTable({
     return { goalTotal, lyTotal, compTotal };
   };
 
+  const getGoalVarianceColor = (goal: number, ly: number, comp: number) => {
+    if (goal === 0) return "";
+    const lyVariance = ly > 0 ? Math.abs((goal - ly) / ly) : 0;
+    const compVariance = comp > 0 ? Math.abs((goal - comp) / comp) : 0;
+    
+    if (lyVariance > 0.05 || compVariance > 0.05) {
+      const benchmarks = [ly, comp].filter(v => v > 0);
+      const avgBenchmark = benchmarks.length > 0 ? benchmarks.reduce((a, b) => a + b, 0) / benchmarks.length : 0;
+      if (avgBenchmark > 0 && goal < avgBenchmark * 0.95) {
+        return "text-amber-600";
+      }
+      return "text-green-600";
+    }
+    return "";
+  };
+
   const formatCurrency = (value: number) => {
     if (value >= 1000) {
       return `$${(value / 1000).toFixed(1)}k`;
@@ -217,11 +233,12 @@ export function GoalsReviewTable({
                 </div>
               </TableHead>
             ))}
-            <TableHead className="text-center min-w-[140px]">
+            <TableHead className="text-center min-w-[180px]">
               <div className="text-xs font-medium">Totals</div>
               <div className="flex text-[10px] text-muted-foreground mt-1">
                 <span className="flex-1">Goal</span>
                 <span className="flex-1">LY</span>
+                <span className="flex-1">Comp</span>
               </div>
             </TableHead>
             <TableHead className="w-24 text-center">Actions</TableHead>
@@ -229,7 +246,7 @@ export function GoalsReviewTable({
         </TableHeader>
         <TableBody>
           {listings.map((listing) => {
-            const { goalTotal, lyTotal } = getRowTotals(listing.id);
+            const { goalTotal, lyTotal, compTotal } = getRowTotals(listing.id);
             const allLocked = Array.from({ length: 12 }, (_, i) => i + 1).every((m) =>
               isLocked(listing.id, m)
             );
@@ -306,12 +323,15 @@ export function GoalsReviewTable({
                   <div className="flex gap-1 text-xs">
                     <div className={cn(
                       "flex-1 flex items-center justify-center h-7 font-semibold",
-                      goalTotal > lyTotal ? "text-green-600" : goalTotal < lyTotal ? "text-red-600" : ""
+                      getGoalVarianceColor(goalTotal, lyTotal, compTotal)
                     )}>
                       {formatCurrency(goalTotal)}
                     </div>
                     <div className="flex-1 flex items-center justify-center h-7 text-muted-foreground font-medium">
                       {formatCurrency(lyTotal)}
+                    </div>
+                    <div className="flex-1 flex items-center justify-center h-7 text-blue-600 font-medium">
+                      {formatCurrency(compTotal)}
                     </div>
                   </div>
                 </TableCell>
