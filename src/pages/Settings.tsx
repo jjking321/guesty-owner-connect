@@ -41,9 +41,10 @@ export default function Settings() {
   const loadAccounts = async () => {
     try {
       setLoading(true);
+      // Only select safe fields - exclude client_id and client_secret for security
       const { data, error } = await supabase
         .from("guesty_accounts")
-        .select("*")
+        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
