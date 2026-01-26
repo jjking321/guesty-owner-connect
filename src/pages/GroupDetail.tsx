@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus, Info as InfoIcon, Copy } from "lucide-react";
+import { ArrowLeft, DollarSign, Calendar, TrendingUp, Building2, Plus, FolderOpen, Search, X, UserPlus, Info as InfoIcon, Copy, Trash2 } from "lucide-react";
 import { CopyGoalsDialog } from "@/components/CopyGoalsDialog";
 import { MetricCard } from "@/components/MetricCard";
 
@@ -60,6 +60,8 @@ export default function GroupDetail() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [showDistributedRevenue, setShowDistributedRevenue] = useState(false);
   const [isCopyGoalsOpen, setIsCopyGoalsOpen] = useState(false);
+  const [deleteSubGroupId, setDeleteSubGroupId] = useState<string | null>(null);
+  const [isDeletingSubGroup, setIsDeletingSubGroup] = useState(false);
 
   // Effective date range with fallbacks for "All time" (undefined dates)
   const effectiveDateRange = useMemo(() => ({
@@ -761,6 +763,53 @@ export default function GroupDetail() {
     }
   };
 
+  const handleDeleteSubGroup = async () => {
+    if (!deleteSubGroupId) return;
+
+    setIsDeletingSubGroup(true);
+    try {
+      // Delete group members first
+      const { error: membersError } = await supabase
+        .from("property_group_members")
+        .delete()
+        .eq("group_id", deleteSubGroupId);
+
+      if (membersError) throw membersError;
+
+      // Delete owner_groups associations
+      await supabase
+        .from("owner_groups")
+        .delete()
+        .eq("group_id", deleteSubGroupId);
+
+      // Delete the sub-group itself
+      const { error: groupError } = await supabase
+        .from("property_groups")
+        .delete()
+        .eq("id", deleteSubGroupId);
+
+      if (groupError) throw groupError;
+
+      toast({
+        title: "Sub-group deleted",
+        description: "The sub-group has been deleted",
+      });
+
+      setDeleteSubGroupId(null);
+      refetchSubGroups();
+    } catch (error: any) {
+      toast({
+        title: "Error deleting sub-group",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingSubGroup(false);
+    }
+  };
+
+  const subGroupToDelete = subGroups?.find(sg => sg.id === deleteSubGroupId);
+
   const handleSort = (field: "name" | "actual" | "forecast" | "goalProgress" | "status") => {
     if (sortBy === field) {
       setSortDirection(sortDirection === "asc" ? "desc" : "asc");
@@ -1211,9 +1260,22 @@ export default function GroupDetail() {
                     onClick={() => navigate(`/groups/${subGroup.id}`)}
                   >
                     <CardHeader>
-                      <div className="flex items-center gap-2">
-                        <FolderOpen className="h-5 w-5 text-primary" />
-                        <CardTitle className="text-lg">{subGroup.name}</CardTitle>
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <FolderOpen className="h-5 w-5 text-primary" />
+                          <CardTitle className="text-lg">{subGroup.name}</CardTitle>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteSubGroupId(subGroup.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -1462,6 +1524,28 @@ export default function GroupDetail() {
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
                 Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Delete Sub-Group Confirmation */}
+        <AlertDialog open={!!deleteSubGroupId} onOpenChange={(open) => !open && setDeleteSubGroupId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Sub-Group</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete "{subGroupToDelete?.name}"? This will remove the sub-group but the properties will remain in the parent group. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeletingSubGroup}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteSubGroup}
+                disabled={isDeletingSubGroup}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {isDeletingSubGroup ? "Deleting..." : "Delete"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
