@@ -248,6 +248,44 @@ export default function OwnerDetail() {
     enabled: listingIds.length > 0,
   });
 
+  // Fetch future reservation nights for "On the Books" revenue
+  const { data: futureReservationNights } = useQuery({
+    queryKey: ["owner-future-reservation-nights", listingIds, dateRange.from],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+
+      const today = new Date();
+      const endOfYear = new Date(dateRange.from.getFullYear(), 11, 31);
+      
+      // Only fetch if we're looking at the current year or a future year
+      if (endOfYear < today) return [];
+
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(today, "yyyy-MM-dd"))
+          .lte("night_date", format(endOfYear, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
+    },
+    enabled: listingIds.length > 0,
+  });
+
   const getOwnerName = (owner: Owner) => {
     if (owner.full_name) return owner.full_name;
     if (owner.first_name && owner.last_name) return `${owner.first_name} ${owner.last_name}`;
@@ -892,6 +930,11 @@ export default function OwnerDetail() {
                     const forecastProjectionAchievement = projection > 0 ? (forecast / projection) * 100 : 0;
                     const forecastGoalAchievement = goal > 0 ? (forecast / goal) * 100 : 0;
 
+                    // Calculate On the Books revenue from future reservation nights
+                    const onTheBooksRevenue = futureReservationNights?.filter(
+                      n => n.listing_id === listing.id
+                    ).reduce((sum, n) => sum + (Number(n.revenue_allocation) || 0), 0) || 0;
+
                     return {
                       id: listing.id,
                       nickname: listing.nickname,
@@ -899,7 +942,7 @@ export default function OwnerDetail() {
                       thumbnail: listing.thumbnail,
                       propertyType: listing.property_type,
                       actualRevenue: ytdRevenue,
-                      onTheBooksRevenue: 0,
+                      onTheBooksRevenue,
                       budgetTotal: budget,
                       projectionTotal: projection,
                       goalTotal: goal,
