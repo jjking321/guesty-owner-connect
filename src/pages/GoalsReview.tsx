@@ -37,16 +37,42 @@ export default function GoalsReview() {
     },
   });
 
-  // Fetch goals for selected year
+  // Derive listing IDs for batching
+  const listingIds = useMemo(() => listings.map(l => l.id), [listings]);
+
+  // Fetch goals in batches to avoid 1000 row limit
   const { data: goals = [], refetch: refetchGoals } = useQuery({
-    queryKey: ["property-goals", selectedYear],
+    queryKey: ["property-goals", selectedYear, listingIds],
+    enabled: listingIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("property_goals")
-        .select("*")
-        .eq("year", selectedYear);
-      if (error) throw error;
-      return data;
+      const BATCH_SIZE = 60; // 60 listings × 12 months = 720 rows < 1000
+      const chunks: string[][] = [];
+      for (let i = 0; i < listingIds.length; i += BATCH_SIZE) {
+        chunks.push(listingIds.slice(i, i + BATCH_SIZE));
+      }
+
+      const promises = chunks.map((batchIds) =>
+        supabase
+          .from("property_goals")
+          .select("*")
+          .eq("year", selectedYear)
+          .in("listing_id", batchIds)
+      );
+
+      const results = await Promise.all(promises);
+      const all: typeof results[0]["data"] extends (infer T)[] | null ? T[] : never[] = [];
+      for (const res of results) {
+        if (res.error) throw res.error;
+        if (res.data) all.push(...res.data);
+      }
+
+      console.log("Goals batched fetch:", {
+        batches: chunks.length,
+        listingCount: listingIds.length,
+        goalsCount: all.length,
+      });
+
+      return all;
     },
   });
 
