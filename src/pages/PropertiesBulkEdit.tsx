@@ -520,9 +520,9 @@ export default function PropertiesBulkEdit() {
     });
   }, [propertyMetrics, listings, searchQuery, propertyFilters, statusFilters, goalsFilters, sortBy, sortDirection]);
 
-  // Calculate portfolio totals
+  // Calculate portfolio totals based on filtered properties
   const portfolioTotals = useMemo(() => {
-    return propertyMetrics.reduce(
+    return filteredProperties.reduce(
       (acc, property) => ({
         actualRevenue: acc.actualRevenue + property.actualRevenue,
         onTheBooksRevenue: acc.onTheBooksRevenue + property.onTheBooksRevenue,
@@ -536,7 +536,7 @@ export default function PropertiesBulkEdit() {
         forecastedRevenue: 0,
       }
     );
-  }, [propertyMetrics]);
+  }, [filteredProperties]);
 
   const handleRefreshForecasts = async () => {
     toast.info("Starting forecast generation for all properties...");
@@ -830,10 +830,10 @@ export default function PropertiesBulkEdit() {
           totalOnTheBooks={portfolioTotals.onTheBooksRevenue}
           totalProjection={portfolioTotals.projectionTotal}
           totalForecast={portfolioTotals.forecastedRevenue}
-          propertiesCount={propertyMetrics.length}
-          onTrackCount={propertyMetrics.filter((p) => p.status === "on-track").length}
-          atRiskCount={propertyMetrics.filter((p) => p.status === "at-risk").length}
-          behindCount={propertyMetrics.filter((p) => p.status === "behind").length}
+          propertiesCount={filteredProperties.length}
+          onTrackCount={filteredProperties.filter((p) => p.status === "on-track").length}
+          atRiskCount={filteredProperties.filter((p) => p.status === "at-risk").length}
+          behindCount={filteredProperties.filter((p) => p.status === "behind").length}
           periodLabel={periodInfo.periodLabel}
           isPastPeriod={periodInfo.isPastPeriod}
           isFuturePeriod={periodInfo.isFuturePeriod}
