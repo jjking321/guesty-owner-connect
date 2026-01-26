@@ -5,11 +5,21 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, FolderOpen, Building2, Search } from "lucide-react";
+import { Plus, FolderOpen, Building2, Search, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 
@@ -22,6 +32,8 @@ export default function Groups() {
   const [selectedListings, setSelectedListings] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [deleteGroupId, setDeleteGroupId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const { data: session } = useQuery({
     queryKey: ["session"],
@@ -159,6 +171,75 @@ export default function Groups() {
       setIsSubmitting(false);
     }
   };
+
+  const handleDeleteGroup = async () => {
+    if (!deleteGroupId) return;
+
+    setIsDeleting(true);
+    try {
+      // First delete all sub-groups and their members
+      const { data: subGroups } = await supabase
+        .from("property_groups")
+        .select("id")
+        .eq("parent_group_id", deleteGroupId);
+
+      if (subGroups && subGroups.length > 0) {
+        const subGroupIds = subGroups.map(sg => sg.id);
+        
+        // Delete sub-group members
+        await supabase
+          .from("property_group_members")
+          .delete()
+          .in("group_id", subGroupIds);
+        
+        // Delete sub-groups
+        await supabase
+          .from("property_groups")
+          .delete()
+          .in("id", subGroupIds);
+      }
+
+      // Delete group members
+      const { error: membersError } = await supabase
+        .from("property_group_members")
+        .delete()
+        .eq("group_id", deleteGroupId);
+
+      if (membersError) throw membersError;
+
+      // Delete owner_groups associations
+      await supabase
+        .from("owner_groups")
+        .delete()
+        .eq("group_id", deleteGroupId);
+
+      // Delete the group itself
+      const { error: groupError } = await supabase
+        .from("property_groups")
+        .delete()
+        .eq("id", deleteGroupId);
+
+      if (groupError) throw groupError;
+
+      toast({
+        title: "Group deleted",
+        description: "The group and all its sub-groups have been deleted",
+      });
+
+      setDeleteGroupId(null);
+      refetchGroups();
+    } catch (error: any) {
+      toast({
+        title: "Error deleting group",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const groupToDelete = groups?.find(g => g.id === deleteGroupId);
 
   return (
     <DashboardLayout>
@@ -322,6 +403,17 @@ export default function Groups() {
                       <Building2 className="h-5 w-5 text-primary" />
                       <CardTitle className="text-lg">{group.name}</CardTitle>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteGroupId(group.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                   {group.description && (
                     <CardDescription className="mt-2">{group.description}</CardDescription>
@@ -354,6 +446,28 @@ export default function Groups() {
             ))}
           </div>
         )}
+
+        {/* Delete Group Confirmation */}
+        <AlertDialog open={!!deleteGroupId} onOpenChange={(open) => !open && setDeleteGroupId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Group</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete "{groupToDelete?.name}"? This will also delete all sub-groups within this group. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteGroup}
+                disabled={isDeleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {isDeleting ? "Deleting..." : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </DashboardLayout>
   );
