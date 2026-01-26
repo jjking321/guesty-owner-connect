@@ -214,15 +214,15 @@ export function GoalsReviewTable({
   return (
     <div className="border rounded-lg overflow-auto max-h-[calc(100vh-300px)]">
       <Table>
-        <TableHeader className="sticky top-0 bg-background z-10">
+        <TableHeader className="sticky top-0 bg-background z-[1]">
           <TableRow>
-            <TableHead className="w-10 sticky left-0 bg-background z-20">
+            <TableHead className="w-10 sticky left-0 bg-background z-[2]">
               <Checkbox
                 checked={selectedListings.size === listings.length && listings.length > 0}
                 onCheckedChange={handleSelectAll}
               />
             </TableHead>
-            <TableHead className="sticky left-10 bg-background z-20 min-w-[220px]">Property</TableHead>
+            <TableHead className="sticky left-10 bg-background z-[2] min-w-[220px]">Property</TableHead>
             {MONTHS.map((month) => (
               <TableHead key={month} className="text-center min-w-[240px]">
                 <div className="text-xs font-medium">{month}</div>
@@ -253,13 +253,13 @@ export function GoalsReviewTable({
 
             return (
               <TableRow key={listing.id}>
-                <TableCell className="sticky left-0 bg-background">
+                <TableCell className="sticky left-0 bg-background z-[1]">
                   <Checkbox
                     checked={selectedListings.has(listing.id)}
                     onCheckedChange={() => handleToggleSelection(listing.id)}
                   />
                 </TableCell>
-                <TableCell className="sticky left-10 bg-background">
+                <TableCell className="sticky left-10 bg-background z-[1]">
                   <div className="flex items-center gap-2">
                     {listing.thumbnail && (
                       <img
