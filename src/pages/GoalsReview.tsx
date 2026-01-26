@@ -78,21 +78,36 @@ export default function GoalsReview() {
     },
   });
 
-  // Fetch historical actuals (last year)
+  // Fetch historical actuals using existing RPC (12 parallel calls for each month)
   const { data: historicalActuals = [] } = useQuery({
-    queryKey: ["historical-actuals", selectedYear - 1],
+    queryKey: ["historical-actuals-rpc", selectedYear - 1],
     queryFn: async () => {
-      const startDate = `${selectedYear - 1}-01-01`;
-      const endDate = `${selectedYear - 1}-12-31`;
+      const priorYear = selectedYear - 1;
       
-      const { data, error } = await supabase
-        .from("reservation_nights")
-        .select("listing_id, night_date, revenue_allocation")
-        .gte("night_date", startDate)
-        .lte("night_date", endDate);
+      // Call RPC for each month in parallel
+      const monthPromises = Array.from({ length: 12 }, (_, i) => 
+        supabase.rpc('get_portfolio_night_metrics', {
+          p_year: priorYear,
+          p_month: i + 1
+        })
+      );
       
-      if (error) throw error;
-      return data;
+      const results = await Promise.all(monthPromises);
+      
+      // Combine results with month info
+      const all: Array<{ listing_id: string; month: number; revenue: number }> = [];
+      results.forEach((res, idx) => {
+        if (res.error) throw res.error;
+        res.data?.forEach((row: { listing_id: string; actual_revenue: number }) => {
+          all.push({
+            listing_id: row.listing_id,
+            month: idx + 1,
+            revenue: Number(row.actual_revenue) || 0
+          });
+        });
+      });
+      
+      return all;
     },
   });
 
@@ -108,16 +123,15 @@ export default function GoalsReview() {
     },
   });
 
-  // Process historical actuals by listing and month
+  // Process historical actuals by listing and month (already aggregated from RPC)
   const historicalByListingMonth = useMemo(() => {
     const result: Record<string, Record<number, number>> = {};
     
-    historicalActuals.forEach((night) => {
-      const month = new Date(night.night_date).getMonth() + 1;
-      if (!result[night.listing_id]) {
-        result[night.listing_id] = {};
+    historicalActuals.forEach((row) => {
+      if (!result[row.listing_id]) {
+        result[row.listing_id] = {};
       }
-      result[night.listing_id][month] = (result[night.listing_id][month] || 0) + (night.revenue_allocation || 0);
+      result[row.listing_id][row.month] = row.revenue;
     });
     
     return result;
