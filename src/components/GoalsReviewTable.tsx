@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Lock, Unlock, Save } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 
 interface Listing {
   id: string;
@@ -211,8 +212,9 @@ export function GoalsReviewTable({
   };
 
   return (
-    <div className="border rounded-lg overflow-auto max-h-[calc(100vh-300px)]">
-      <Table>
+    <ScrollArea className="border rounded-lg max-h-[calc(100vh-300px)]">
+      <div className="w-max min-w-full">
+        <Table>
         <TableHeader className="sticky top-0 bg-background z-[1]">
           <TableRow>
             <TableHead className="w-10 sticky left-0 bg-background z-[2]">
@@ -363,7 +365,9 @@ export function GoalsReviewTable({
             );
           })}
         </TableBody>
-      </Table>
-    </div>
+        </Table>
+      </div>
+      <ScrollBar orientation="horizontal" />
+    </ScrollArea>
   );
 }
