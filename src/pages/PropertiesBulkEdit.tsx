@@ -6,12 +6,15 @@ import { PropertiesTable, type ColumnKey } from "@/components/PropertiesTable";
 import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { BulkGoalsUpload } from "@/components/BulkGoalsUpload";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
+import { PacingReport } from "@/components/PacingReport";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent } from "@/components/ui/card";
 import { RefreshCw, Download, Search, Sparkles, Filter, ArrowUpDown, ArrowUp, ArrowDown, Upload, ChevronDown, MoreHorizontal } from "lucide-react";
 import {
   DropdownMenu,
@@ -229,6 +232,33 @@ export default function PropertiesBulkEdit() {
       });
       if (error) throw error;
       return data || [];
+    },
+  });
+
+  // Fetch all reservations for PacingReport (paginated to avoid 1000 row limit)
+  const { data: allReservations = [] } = useQuery({
+    queryKey: ["portfolio-reservations"],
+    queryFn: async () => {
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservations")
+          .select("*")
+          .in("status", ["confirmed", "checked_in", "checked_out"])
+          .neq("source", "owner")
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+
+      return results;
     },
   });
 
@@ -825,396 +855,421 @@ export default function PropertiesBulkEdit() {
           </div>
         </div>
 
-        <PropertyMetricsSummary
-          totalActualRevenue={portfolioTotals.actualRevenue}
-          totalOnTheBooks={portfolioTotals.onTheBooksRevenue}
-          totalProjection={portfolioTotals.projectionTotal}
-          totalForecast={portfolioTotals.forecastedRevenue}
-          propertiesCount={filteredProperties.length}
-          onTrackCount={filteredProperties.filter((p) => p.status === "on-track").length}
-          atRiskCount={filteredProperties.filter((p) => p.status === "at-risk").length}
-          behindCount={filteredProperties.filter((p) => p.status === "behind").length}
-          periodLabel={periodInfo.periodLabel}
-          isPastPeriod={periodInfo.isPastPeriod}
-          isFuturePeriod={periodInfo.isFuturePeriod}
-        />
+        <Tabs defaultValue="portfolio" className="space-y-6">
+          <TabsList className="grid w-full max-w-[300px] grid-cols-2">
+            <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
+            <TabsTrigger value="pacing">Pacing</TabsTrigger>
+          </TabsList>
 
+          <TabsContent value="portfolio" className="space-y-6">
+            <PropertyMetricsSummary
+              totalActualRevenue={portfolioTotals.actualRevenue}
+              totalOnTheBooks={portfolioTotals.onTheBooksRevenue}
+              totalProjection={portfolioTotals.projectionTotal}
+              totalForecast={portfolioTotals.forecastedRevenue}
+              propertiesCount={filteredProperties.length}
+              onTrackCount={filteredProperties.filter((p) => p.status === "on-track").length}
+              atRiskCount={filteredProperties.filter((p) => p.status === "at-risk").length}
+              behindCount={filteredProperties.filter((p) => p.status === "behind").length}
+              periodLabel={periodInfo.periodLabel}
+              isPastPeriod={periodInfo.isPastPeriod}
+              isFuturePeriod={periodInfo.isFuturePeriod}
+            />
 
-        <div className="space-y-3">
-          <div className="flex gap-3 items-center">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search properties..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
+            <div className="space-y-3">
+              <div className="flex gap-3 items-center">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search properties..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="relative">
+                      <Filter className="mr-2 h-4 w-4" />
+                      Property Filters
+                      {(() => {
+                        const count = Object.values(propertyFilters).filter(Boolean).length;
+                        return count > 0 ? (
+                          <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
+                            {count}
+                          </Badge>
+                        ) : null;
+                      })()}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium mb-3">Status</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="prop-active"
+                              checked={propertyFilters.active}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters({ ...propertyFilters, active: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="prop-active" className="text-sm cursor-pointer">
+                              Active
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="prop-inactive"
+                              checked={propertyFilters.inactive}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters({ ...propertyFilters, inactive: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="prop-inactive" className="text-sm cursor-pointer">
+                              Inactive
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <h4 className="font-medium mb-3">Listing</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="prop-listed"
+                              checked={propertyFilters.listed}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters({ ...propertyFilters, listed: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="prop-listed" className="text-sm cursor-pointer">
+                              Listed
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="prop-unlisted"
+                              checked={propertyFilters.unlisted}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters({ ...propertyFilters, unlisted: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="prop-unlisted" className="text-sm cursor-pointer">
+                              Unlisted
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <h4 className="font-medium mb-3">Archive</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="prop-archived"
+                              checked={propertyFilters.archived}
+                              onCheckedChange={(checked) =>
+                                setPropertyFilters({ ...propertyFilters, archived: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="prop-archived" className="text-sm cursor-pointer">
+                              Show Archived
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() =>
+                          setPropertyFilters({
+                            active: true,
+                            inactive: false,
+                            listed: true,
+                            unlisted: false,
+                            archived: false,
+                          })
+                        }
+                      >
+                        Reset
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="relative">
+                      <Filter className="mr-2 h-4 w-4" />
+                      Performance
+                      {(() => {
+                        const count = Object.values(statusFilters).filter(Boolean).length;
+                        return count > 0 && count < 3 ? (
+                          <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
+                            {count}
+                          </Badge>
+                        ) : null;
+                      })()}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium mb-3">Status</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="status-ontrack"
+                              checked={statusFilters.onTrack}
+                              onCheckedChange={(checked) =>
+                                setStatusFilters({ ...statusFilters, onTrack: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="status-ontrack" className="text-sm cursor-pointer">
+                              On Track
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="status-atrisk"
+                              checked={statusFilters.atRisk}
+                              onCheckedChange={(checked) =>
+                                setStatusFilters({ ...statusFilters, atRisk: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="status-atrisk" className="text-sm cursor-pointer">
+                              At Risk
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="status-behind"
+                              checked={statusFilters.behind}
+                              onCheckedChange={(checked) =>
+                                setStatusFilters({ ...statusFilters, behind: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="status-behind" className="text-sm cursor-pointer">
+                              Behind
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() =>
+                          setStatusFilters({
+                            onTrack: true,
+                            atRisk: true,
+                            behind: true,
+                          })
+                        }
+                      >
+                        Reset
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="relative">
+                      <Filter className="mr-2 h-4 w-4" />
+                      Goals
+                      {(() => {
+                        const count = Object.values(goalsFilters).filter(Boolean).length;
+                        return count > 0 && count < 4 ? (
+                          <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
+                            {count}
+                          </Badge>
+                        ) : null;
+                      })()}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 z-50 bg-popover" align="end">
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium mb-3">Goal Status</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="goals-has"
+                              checked={goalsFilters.hasGoals}
+                              onCheckedChange={(checked) =>
+                                setGoalsFilters({ ...goalsFilters, hasGoals: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="goals-has" className="text-sm cursor-pointer">
+                              Has Goals
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="goals-none"
+                              checked={goalsFilters.noGoals}
+                              onCheckedChange={(checked) =>
+                                setGoalsFilters({ ...goalsFilters, noGoals: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="goals-none" className="text-sm cursor-pointer">
+                              No Goals
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="goals-locked"
+                              checked={goalsFilters.locked}
+                              onCheckedChange={(checked) =>
+                                setGoalsFilters({ ...goalsFilters, locked: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="goals-locked" className="text-sm cursor-pointer">
+                              Locked
+                            </label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="goals-unlocked"
+                              checked={goalsFilters.unlocked}
+                              onCheckedChange={(checked) =>
+                                setGoalsFilters({ ...goalsFilters, unlocked: checked as boolean })
+                              }
+                            />
+                            <label htmlFor="goals-unlocked" className="text-sm cursor-pointer">
+                              Unlocked
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() =>
+                          setGoalsFilters({
+                            hasGoals: true,
+                            noGoals: true,
+                            locked: true,
+                            unlocked: true,
+                          })
+                        }
+                      >
+                        Reset
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              
+              <p className="text-sm text-muted-foreground">
+                Showing {filteredProperties.length} of {propertyMetrics.length} {propertyMetrics.length === 1 ? 'property' : 'properties'}
+              </p>
+            </div>
+
+            {/* Bulk Actions Toolbar */}
+            {selectedIds.size > 0 && (
+              <div className="sticky top-0 z-10 bg-card border rounded-lg p-4 shadow-md">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-base px-3 py-1">
+                      {selectedIds.size} {selectedIds.size === 1 ? 'property' : 'properties'} selected
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedIds(new Set())}
+                    >
+                      Clear Selection
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleBulkArchive(false)}
+                      disabled={Array.from(selectedIds).every(id => {
+                        const prop = propertyMetrics.find(p => p.id === id);
+                        return !prop?.archived;
+                      })}
+                    >
+                      Restore Selected
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleBulkArchive(true)}
+                      disabled={Array.from(selectedIds).every(id => {
+                        const prop = propertyMetrics.find(p => p.id === id);
+                        return prop?.archived;
+                      })}
+                    >
+                      Archive Selected
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <PropertiesTable 
+              properties={filteredProperties} 
+              isLoading={isLoading}
+              sortBy={sortBy}
+              sortDirection={sortDirection}
+              onSort={handleSort}
+              selectable={true}
+              selectedIds={selectedIds}
+              onSelectProperty={handleSelectProperty}
+              onSelectAll={handleSelectAll}
+              visibleColumns={visibleColumns}
+              columnOrder={columnOrder}
+              onColumnConfigChange={handleColumnConfigChange}
+              showColumnConfig={true}
+              periodLabel={periodInfo.periodLabel}
+              isPastPeriod={periodInfo.isPastPeriod}
+              isFuturePeriod={periodInfo.isFuturePeriod}
+              showActualColumn={!periodInfo.isFuturePeriod}
+              showOnTheBooksColumn={true}
+              referrer={{
+                path: '/properties/bulk-edit',
+                label: 'Portfolio View',
+                state: {
+                  searchQuery,
+                  filters: { propertyFilters, statusFilters, goalsFilters },
+                  sortBy,
+                  sortDirection,
+                  scrollPosition: window.scrollY
+                }
+              }}
+            />
+          </TabsContent>
+
+          <TabsContent value="pacing">
+            {allReservations.length > 0 ? (
+              <PacingReport 
+                reservations={allReservations} 
+                listingIds={listingIds} 
               />
-            </div>
-            
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="relative">
-                  <Filter className="mr-2 h-4 w-4" />
-                  Property Filters
-                  {(() => {
-                    const count = Object.values(propertyFilters).filter(Boolean).length;
-                    return count > 0 ? (
-                      <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
-                        {count}
-                      </Badge>
-                    ) : null;
-                  })()}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-56 z-50 bg-popover" align="end">
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-medium mb-3">Status</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="prop-active"
-                          checked={propertyFilters.active}
-                          onCheckedChange={(checked) =>
-                            setPropertyFilters({ ...propertyFilters, active: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="prop-active" className="text-sm cursor-pointer">
-                          Active
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="prop-inactive"
-                          checked={propertyFilters.inactive}
-                          onCheckedChange={(checked) =>
-                            setPropertyFilters({ ...propertyFilters, inactive: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="prop-inactive" className="text-sm cursor-pointer">
-                          Inactive
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-medium mb-3">Listing</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="prop-listed"
-                          checked={propertyFilters.listed}
-                          onCheckedChange={(checked) =>
-                            setPropertyFilters({ ...propertyFilters, listed: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="prop-listed" className="text-sm cursor-pointer">
-                          Listed
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="prop-unlisted"
-                          checked={propertyFilters.unlisted}
-                          onCheckedChange={(checked) =>
-                            setPropertyFilters({ ...propertyFilters, unlisted: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="prop-unlisted" className="text-sm cursor-pointer">
-                          Unlisted
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-medium mb-3">Archive</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="prop-archived"
-                          checked={propertyFilters.archived}
-                          onCheckedChange={(checked) =>
-                            setPropertyFilters({ ...propertyFilters, archived: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="prop-archived" className="text-sm cursor-pointer">
-                          Show Archived
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() =>
-                      setPropertyFilters({
-                        active: true,
-                        inactive: false,
-                        listed: true,
-                        unlisted: false,
-                        archived: false,
-                      })
-                    }
-                  >
-                    Reset
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="relative">
-                  <Filter className="mr-2 h-4 w-4" />
-                  Performance
-                  {(() => {
-                    const count = Object.values(statusFilters).filter(Boolean).length;
-                    return count > 0 && count < 3 ? (
-                      <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
-                        {count}
-                      </Badge>
-                    ) : null;
-                  })()}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-56 z-50 bg-popover" align="end">
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-medium mb-3">Status</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="status-ontrack"
-                          checked={statusFilters.onTrack}
-                          onCheckedChange={(checked) =>
-                            setStatusFilters({ ...statusFilters, onTrack: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="status-ontrack" className="text-sm cursor-pointer">
-                          On Track
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="status-atrisk"
-                          checked={statusFilters.atRisk}
-                          onCheckedChange={(checked) =>
-                            setStatusFilters({ ...statusFilters, atRisk: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="status-atrisk" className="text-sm cursor-pointer">
-                          At Risk
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="status-behind"
-                          checked={statusFilters.behind}
-                          onCheckedChange={(checked) =>
-                            setStatusFilters({ ...statusFilters, behind: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="status-behind" className="text-sm cursor-pointer">
-                          Behind
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() =>
-                      setStatusFilters({
-                        onTrack: true,
-                        atRisk: true,
-                        behind: true,
-                      })
-                    }
-                  >
-                    Reset
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" className="relative">
-                  <Filter className="mr-2 h-4 w-4" />
-                  Goals
-                  {(() => {
-                    const count = Object.values(goalsFilters).filter(Boolean).length;
-                    return count > 0 && count < 4 ? (
-                      <Badge className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center" variant="secondary">
-                        {count}
-                      </Badge>
-                    ) : null;
-                  })()}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-56 z-50 bg-popover" align="end">
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-medium mb-3">Goal Status</h4>
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="goals-has"
-                          checked={goalsFilters.hasGoals}
-                          onCheckedChange={(checked) =>
-                            setGoalsFilters({ ...goalsFilters, hasGoals: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="goals-has" className="text-sm cursor-pointer">
-                          Has Goals
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="goals-none"
-                          checked={goalsFilters.noGoals}
-                          onCheckedChange={(checked) =>
-                            setGoalsFilters({ ...goalsFilters, noGoals: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="goals-none" className="text-sm cursor-pointer">
-                          No Goals
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="goals-locked"
-                          checked={goalsFilters.locked}
-                          onCheckedChange={(checked) =>
-                            setGoalsFilters({ ...goalsFilters, locked: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="goals-locked" className="text-sm cursor-pointer">
-                          Locked
-                        </label>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="goals-unlocked"
-                          checked={goalsFilters.unlocked}
-                          onCheckedChange={(checked) =>
-                            setGoalsFilters({ ...goalsFilters, unlocked: checked as boolean })
-                          }
-                        />
-                        <label htmlFor="goals-unlocked" className="text-sm cursor-pointer">
-                          Unlocked
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={() =>
-                      setGoalsFilters({
-                        hasGoals: true,
-                        noGoals: true,
-                        locked: true,
-                        unlocked: true,
-                      })
-                    }
-                  >
-                    Reset
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-          
-          <p className="text-sm text-muted-foreground">
-            Showing {filteredProperties.length} of {propertyMetrics.length} {propertyMetrics.length === 1 ? 'property' : 'properties'}
-          </p>
-        </div>
-
-        {/* Bulk Actions Toolbar */}
-        {selectedIds.size > 0 && (
-          <div className="sticky top-0 z-10 bg-card border rounded-lg p-4 shadow-md">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-base px-3 py-1">
-                  {selectedIds.size} {selectedIds.size === 1 ? 'property' : 'properties'} selected
-                </Badge>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSelectedIds(new Set())}
-                >
-                  Clear Selection
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleBulkArchive(false)}
-                  disabled={Array.from(selectedIds).every(id => {
-                    const prop = propertyMetrics.find(p => p.id === id);
-                    return !prop?.archived;
-                  })}
-                >
-                  Restore Selected
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => handleBulkArchive(true)}
-                  disabled={Array.from(selectedIds).every(id => {
-                    const prop = propertyMetrics.find(p => p.id === id);
-                    return prop?.archived;
-                  })}
-                >
-                  Archive Selected
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <PropertiesTable 
-          properties={filteredProperties} 
-          isLoading={isLoading}
-          sortBy={sortBy}
-          sortDirection={sortDirection}
-          onSort={handleSort}
-          selectable={true}
-          selectedIds={selectedIds}
-          onSelectProperty={handleSelectProperty}
-          onSelectAll={handleSelectAll}
-          visibleColumns={visibleColumns}
-          columnOrder={columnOrder}
-          onColumnConfigChange={handleColumnConfigChange}
-          showColumnConfig={true}
-          periodLabel={periodInfo.periodLabel}
-          isPastPeriod={periodInfo.isPastPeriod}
-          isFuturePeriod={periodInfo.isFuturePeriod}
-          showActualColumn={!periodInfo.isFuturePeriod}
-          showOnTheBooksColumn={true}
-          referrer={{
-            path: '/properties/bulk-edit',
-            label: 'Portfolio View',
-            state: {
-              searchQuery,
-              filters: { propertyFilters, statusFilters, goalsFilters },
-              sortBy,
-              sortDirection,
-              scrollPosition: window.scrollY
-            }
-          }}
-        />
+            ) : (
+              <Card>
+                <CardContent className="text-center py-12">
+                  <p className="text-muted-foreground">
+                    No reservation data available for pacing report
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
 
         <BulkGoalsUpload 
           open={isBulkUploadOpen} 
