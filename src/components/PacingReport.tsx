@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target, ChevronDown, ChevronRight, TableIcon, LineChart as LineChartIcon } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target, ChevronDown, ChevronRight, TableIcon, LineChart as LineChartIcon, Download } from "lucide-react";
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -441,6 +441,50 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
     return data;
   }, [reservations, currentYear, currentMonth, currentDate, effectiveListingIds.length]);
 
+  // Export monthly pacing data to CSV
+  const handleExportPacingCSV = () => {
+    const headers = [
+      "Month",
+      "Revenue",
+      "Revenue LY",
+      "Revenue vs LY %",
+      "Nights",
+      "Nights LY",
+      "Nights vs LY %",
+      "Occupancy %",
+      "Occupancy LY %",
+      "Occupancy vs LY %",
+      "RevPAR",
+      "RevPAR LY",
+      "RevPAR vs LY %"
+    ];
+
+    const rows = monthlyData.map((row) => [
+      row.month,
+      row.currentRevenue.toFixed(2),
+      row.lastRevenue.toFixed(2),
+      row.revenueChange.toFixed(1),
+      row.currentNights,
+      row.lastNights,
+      row.nightsChange.toFixed(1),
+      row.currentOccupancy.toFixed(1),
+      row.lastOccupancy.toFixed(1),
+      row.occupancyChange.toFixed(1),
+      row.currentRevPAR.toFixed(2),
+      row.lastRevPAR.toFixed(2),
+      row.revPARChange.toFixed(1),
+    ]);
+
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pacing-breakdown-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Get period description for display
   const getPeriodDescription = (): string => {
     switch (periodType) {
@@ -662,22 +706,28 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
               </Button>
             </CollapsibleTrigger>
             {isTableOpen && (
-              <ToggleGroup
-                type="single"
-                value={viewMode}
-                onValueChange={(value) => value && setViewMode(value as 'table' | 'chart')}
-                size="sm"
-                className="bg-muted/50 p-1 rounded-lg"
-              >
-                <ToggleGroupItem value="table" className="text-xs px-2 gap-1">
-                  <TableIcon className="h-3 w-3" />
-                  Table
-                </ToggleGroupItem>
-                <ToggleGroupItem value="chart" className="text-xs px-2 gap-1">
-                  <LineChartIcon className="h-3 w-3" />
-                  Chart
-                </ToggleGroupItem>
-              </ToggleGroup>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleExportPacingCSV}>
+                  <Download className="h-3 w-3 mr-1" />
+                  Export
+                </Button>
+                <ToggleGroup
+                  type="single"
+                  value={viewMode}
+                  onValueChange={(value) => value && setViewMode(value as 'table' | 'chart')}
+                  size="sm"
+                  className="bg-muted/50 p-1 rounded-lg"
+                >
+                  <ToggleGroupItem value="table" className="text-xs px-2 gap-1">
+                    <TableIcon className="h-3 w-3" />
+                    Table
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="chart" className="text-xs px-2 gap-1">
+                    <LineChartIcon className="h-3 w-3" />
+                    Chart
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
             )}
           </div>
           <CollapsibleContent className="mt-4">
