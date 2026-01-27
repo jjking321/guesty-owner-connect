@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -85,6 +86,7 @@ export default function PropertiesBulkEdit() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
+  const [sameStoreOnly, setSameStoreOnly] = useState(false);
 
   // Column configuration state with localStorage persistence
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(() => {
@@ -261,6 +263,41 @@ export default function PropertiesBulkEdit() {
       return results;
     },
   });
+
+  // Calculate "same store" listing IDs - properties with data in both current and prior year
+  const sameStoreListingIds = useMemo(() => {
+    const thisYear = new Date().getFullYear();
+    const lastYear = thisYear - 1;
+    
+    // Group reservations by listing and track which years they have data for
+    const listingYears = new Map<string, Set<number>>();
+    
+    for (const r of allReservations) {
+      if (!r.check_in || !r.listing_id) continue;
+      const checkInYear = new Date(r.check_in).getFullYear();
+      
+      // Consider reservations in current year or last year
+      if (checkInYear === thisYear || checkInYear === lastYear) {
+        if (!listingYears.has(r.listing_id)) {
+          listingYears.set(r.listing_id, new Set());
+        }
+        listingYears.get(r.listing_id)!.add(checkInYear);
+      }
+    }
+    
+    // Return listings that have data for BOTH years
+    const result: string[] = [];
+    for (const [listingId, years] of listingYears) {
+      if (years.has(thisYear) && years.has(lastYear)) {
+        result.push(listingId);
+      }
+    }
+    
+    return result;
+  }, [allReservations]);
+
+  // Effective listing IDs for pacing report based on same-store filter
+  const effectivePacingListingIds = sameStoreOnly ? sameStoreListingIds : listingIds;
 
   // Create lookup map for fast access to pre-aggregated metrics
   const metricsMap = useMemo(() => {
@@ -1253,11 +1290,29 @@ export default function PropertiesBulkEdit() {
             />
           </TabsContent>
 
-          <TabsContent value="pacing">
+          <TabsContent value="pacing" className="space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="same-store"
+                  checked={sameStoreOnly}
+                  onCheckedChange={(checked) => setSameStoreOnly(!!checked)}
+                />
+                <Label htmlFor="same-store" className="text-sm font-medium cursor-pointer">
+                  Same Store Only
+                </Label>
+              </div>
+              {sameStoreOnly && (
+                <span className="text-xs text-muted-foreground">
+                  Showing {sameStoreListingIds.length} of {listingIds.length} properties with data in both {new Date().getFullYear() - 1} and {new Date().getFullYear()}
+                </span>
+              )}
+            </div>
+            
             {allReservations.length > 0 ? (
               <PacingReport 
                 reservations={allReservations} 
-                listingIds={listingIds} 
+                listingIds={effectivePacingListingIds} 
               />
             ) : (
               <Card>
