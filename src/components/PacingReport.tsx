@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target, ChevronDown, ChevronRight } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target, ChevronDown, ChevronRight, TableIcon, LineChart as LineChartIcon } from "lucide-react";
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -15,6 +15,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from "recharts";
 import {
   Select,
   SelectContent,
@@ -56,6 +59,13 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
   const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
   const [selectedMonthYear, setSelectedMonthYear] = useState<number>(currentYear);
   const [isTableOpen, setIsTableOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
+  const [visibleMetrics, setVisibleMetrics] = useState({
+    revenue: true,
+    nights: false,
+    occupancy: false,
+    revPAR: false,
+  });
 
   // Resolve listing IDs for queries
   const effectiveListingIds = listingId ? [listingId] : (listingIds || []);
@@ -637,69 +647,296 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
         />
       </div>
 
-      {/* Monthly Data Table - Only visible in monthly mode */}
+      {/* Monthly Data Table/Chart - Only visible in monthly mode */}
       {periodType === 'monthly' && (
         <Collapsible open={isTableOpen} onOpenChange={setIsTableOpen}>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="flex items-center gap-2 w-full justify-start p-0 h-auto hover:bg-transparent">
-              {isTableOpen ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-              <span className="text-sm font-medium">Monthly Breakdown</span>
-            </Button>
-          </CollapsibleTrigger>
+          <div className="flex items-center justify-between">
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="flex items-center gap-2 justify-start p-0 h-auto hover:bg-transparent">
+                {isTableOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                <span className="text-sm font-medium">Monthly Breakdown</span>
+              </Button>
+            </CollapsibleTrigger>
+            {isTableOpen && (
+              <ToggleGroup
+                type="single"
+                value={viewMode}
+                onValueChange={(value) => value && setViewMode(value as 'table' | 'chart')}
+                size="sm"
+                className="bg-muted/50 p-1 rounded-lg"
+              >
+                <ToggleGroupItem value="table" className="text-xs px-2 gap-1">
+                  <TableIcon className="h-3 w-3" />
+                  Table
+                </ToggleGroupItem>
+                <ToggleGroupItem value="chart" className="text-xs px-2 gap-1">
+                  <LineChartIcon className="h-3 w-3" />
+                  Chart
+                </ToggleGroupItem>
+              </ToggleGroup>
+            )}
+          </div>
           <CollapsibleContent className="mt-4">
             <Card>
               <CardContent className="pt-6">
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Month</TableHead>
-                        <TableHead className="text-right">Revenue</TableHead>
-                        <TableHead className="text-right">vs LY</TableHead>
-                        <TableHead className="text-right">Nights</TableHead>
-                        <TableHead className="text-right">vs LY</TableHead>
-                        <TableHead className="text-right">Occupancy</TableHead>
-                        <TableHead className="text-right">vs LY</TableHead>
-                        <TableHead className="text-right">RevPAR</TableHead>
-                        <TableHead className="text-right">vs LY</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {monthlyData.map((row) => (
-                        <TableRow 
-                          key={row.month}
-                          className={row.month === format(new Date(selectedMonthYear, selectedMonth, 1), 'MMM yyyy') ? 'bg-muted/50' : ''}
-                        >
-                          <TableCell className="font-medium">{row.month}</TableCell>
-                          <TableCell className="text-right">
-                            ${row.currentRevenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                          </TableCell>
-                          <TableCell className={`text-right ${row.revenueChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-                            {row.revenueChange >= 0 ? '+' : ''}{row.revenueChange.toFixed(1)}%
-                          </TableCell>
-                          <TableCell className="text-right">{row.currentNights}</TableCell>
-                          <TableCell className={`text-right ${row.nightsChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-                            {row.nightsChange >= 0 ? '+' : ''}{row.nightsChange.toFixed(1)}%
-                          </TableCell>
-                          <TableCell className="text-right">{row.currentOccupancy.toFixed(1)}%</TableCell>
-                          <TableCell className={`text-right ${row.occupancyChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-                            {row.occupancyChange >= 0 ? '+' : ''}{row.occupancyChange.toFixed(1)}%
-                          </TableCell>
-                          <TableCell className="text-right">
-                            ${row.currentRevPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell className={`text-right ${row.revPARChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
-                            {row.revPARChange >= 0 ? '+' : ''}{row.revPARChange.toFixed(1)}%
-                          </TableCell>
+                {viewMode === 'table' ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Month</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                          <TableHead className="text-right">vs LY</TableHead>
+                          <TableHead className="text-right">Nights</TableHead>
+                          <TableHead className="text-right">vs LY</TableHead>
+                          <TableHead className="text-right">Occupancy</TableHead>
+                          <TableHead className="text-right">vs LY</TableHead>
+                          <TableHead className="text-right">RevPAR</TableHead>
+                          <TableHead className="text-right">vs LY</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {monthlyData.map((row) => (
+                          <TableRow 
+                            key={row.month}
+                            className={row.month === format(new Date(selectedMonthYear, selectedMonth, 1), 'MMM yyyy') ? 'bg-muted/50' : ''}
+                          >
+                            <TableCell className="font-medium">{row.month}</TableCell>
+                            <TableCell className="text-right">
+                              ${row.currentRevenue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                            </TableCell>
+                            <TableCell className={`text-right ${row.revenueChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                              {row.revenueChange >= 0 ? '+' : ''}{row.revenueChange.toFixed(1)}%
+                            </TableCell>
+                            <TableCell className="text-right">{row.currentNights}</TableCell>
+                            <TableCell className={`text-right ${row.nightsChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                              {row.nightsChange >= 0 ? '+' : ''}{row.nightsChange.toFixed(1)}%
+                            </TableCell>
+                            <TableCell className="text-right">{row.currentOccupancy.toFixed(1)}%</TableCell>
+                            <TableCell className={`text-right ${row.occupancyChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                              {row.occupancyChange >= 0 ? '+' : ''}{row.occupancyChange.toFixed(1)}%
+                            </TableCell>
+                            <TableCell className="text-right">
+                              ${row.currentRevPAR.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className={`text-right ${row.revPARChange >= 0 ? 'text-green-600 dark:text-green-500' : 'text-red-600 dark:text-red-500'}`}>
+                              {row.revPARChange >= 0 ? '+' : ''}{row.revPARChange.toFixed(1)}%
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Metric visibility checkboxes */}
+                    <div className="flex flex-wrap gap-4">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox 
+                          id="show-revenue" 
+                          checked={visibleMetrics.revenue}
+                          onCheckedChange={(checked) => setVisibleMetrics(prev => ({ ...prev, revenue: !!checked }))}
+                        />
+                        <Label htmlFor="show-revenue" className="text-sm flex items-center gap-1.5 cursor-pointer">
+                          <span className="w-3 h-3 rounded-full bg-blue-500"></span>
+                          Revenue
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox 
+                          id="show-nights" 
+                          checked={visibleMetrics.nights}
+                          onCheckedChange={(checked) => setVisibleMetrics(prev => ({ ...prev, nights: !!checked }))}
+                        />
+                        <Label htmlFor="show-nights" className="text-sm flex items-center gap-1.5 cursor-pointer">
+                          <span className="w-3 h-3 rounded-full bg-green-500"></span>
+                          Nights
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox 
+                          id="show-occupancy" 
+                          checked={visibleMetrics.occupancy}
+                          onCheckedChange={(checked) => setVisibleMetrics(prev => ({ ...prev, occupancy: !!checked }))}
+                        />
+                        <Label htmlFor="show-occupancy" className="text-sm flex items-center gap-1.5 cursor-pointer">
+                          <span className="w-3 h-3 rounded-full bg-purple-500"></span>
+                          Occupancy
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox 
+                          id="show-revpar" 
+                          checked={visibleMetrics.revPAR}
+                          onCheckedChange={(checked) => setVisibleMetrics(prev => ({ ...prev, revPAR: !!checked }))}
+                        />
+                        <Label htmlFor="show-revpar" className="text-sm flex items-center gap-1.5 cursor-pointer">
+                          <span className="w-3 h-3 rounded-full bg-orange-500"></span>
+                          RevPAR
+                        </Label>
+                      </div>
+                    </div>
+
+                    {/* Line Chart */}
+                    <div className="h-[400px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={monthlyData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                          <XAxis 
+                            dataKey="month" 
+                            tick={{ fontSize: 12 }}
+                            className="text-muted-foreground"
+                          />
+                          {/* Left Y-axis for Revenue/RevPAR (dollars) */}
+                          <YAxis 
+                            yAxisId="left"
+                            tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                            tick={{ fontSize: 12 }}
+                            className="text-muted-foreground"
+                          />
+                          {/* Right Y-axis for Occupancy (percentage) / Nights (count) */}
+                          <YAxis 
+                            yAxisId="right" 
+                            orientation="right"
+                            tickFormatter={(value) => visibleMetrics.occupancy && !visibleMetrics.nights ? `${value}%` : value.toString()}
+                            tick={{ fontSize: 12 }}
+                            className="text-muted-foreground"
+                          />
+                          <RechartsTooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'hsl(var(--background))', 
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px'
+                            }}
+                            formatter={(value: number, name: string) => {
+                              if (name.includes('Revenue')) return [`$${value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`, name];
+                              if (name.includes('RevPAR')) return [`$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, name];
+                              if (name.includes('Occupancy')) return [`${value.toFixed(1)}%`, name];
+                              return [value.toFixed(0), name];
+                            }}
+                          />
+                          <Legend />
+                          
+                          {/* Revenue Lines */}
+                          {visibleMetrics.revenue && (
+                            <>
+                              <Line 
+                                yAxisId="left"
+                                type="monotone" 
+                                dataKey="currentRevenue" 
+                                name={`Revenue (${currentYear})`}
+                                stroke="#3b82f6" 
+                                strokeWidth={2}
+                                dot={{ fill: '#3b82f6', strokeWidth: 2, r: 4 }}
+                                activeDot={{ r: 6 }}
+                              />
+                              <Line 
+                                yAxisId="left"
+                                type="monotone" 
+                                dataKey="lastRevenue" 
+                                name={`Revenue (${currentYear - 1})`}
+                                stroke="#3b82f6" 
+                                strokeWidth={2}
+                                strokeDasharray="5 5"
+                                dot={{ fill: '#3b82f6', strokeWidth: 2, r: 3 }}
+                                opacity={0.6}
+                              />
+                            </>
+                          )}
+                          
+                          {/* Nights Lines */}
+                          {visibleMetrics.nights && (
+                            <>
+                              <Line 
+                                yAxisId="right"
+                                type="monotone" 
+                                dataKey="currentNights" 
+                                name={`Nights (${currentYear})`}
+                                stroke="#22c55e" 
+                                strokeWidth={2}
+                                dot={{ fill: '#22c55e', strokeWidth: 2, r: 4 }}
+                                activeDot={{ r: 6 }}
+                              />
+                              <Line 
+                                yAxisId="right"
+                                type="monotone" 
+                                dataKey="lastNights" 
+                                name={`Nights (${currentYear - 1})`}
+                                stroke="#22c55e" 
+                                strokeWidth={2}
+                                strokeDasharray="5 5"
+                                dot={{ fill: '#22c55e', strokeWidth: 2, r: 3 }}
+                                opacity={0.6}
+                              />
+                            </>
+                          )}
+                          
+                          {/* Occupancy Lines */}
+                          {visibleMetrics.occupancy && (
+                            <>
+                              <Line 
+                                yAxisId="right"
+                                type="monotone" 
+                                dataKey="currentOccupancy" 
+                                name={`Occupancy (${currentYear})`}
+                                stroke="#a855f7" 
+                                strokeWidth={2}
+                                dot={{ fill: '#a855f7', strokeWidth: 2, r: 4 }}
+                                activeDot={{ r: 6 }}
+                              />
+                              <Line 
+                                yAxisId="right"
+                                type="monotone" 
+                                dataKey="lastOccupancy" 
+                                name={`Occupancy (${currentYear - 1})`}
+                                stroke="#a855f7" 
+                                strokeWidth={2}
+                                strokeDasharray="5 5"
+                                dot={{ fill: '#a855f7', strokeWidth: 2, r: 3 }}
+                                opacity={0.6}
+                              />
+                            </>
+                          )}
+                          
+                          {/* RevPAR Lines */}
+                          {visibleMetrics.revPAR && (
+                            <>
+                              <Line 
+                                yAxisId="left"
+                                type="monotone" 
+                                dataKey="currentRevPAR" 
+                                name={`RevPAR (${currentYear})`}
+                                stroke="#f97316" 
+                                strokeWidth={2}
+                                dot={{ fill: '#f97316', strokeWidth: 2, r: 4 }}
+                                activeDot={{ r: 6 }}
+                              />
+                              <Line 
+                                yAxisId="left"
+                                type="monotone" 
+                                dataKey="lastRevPAR" 
+                                name={`RevPAR (${currentYear - 1})`}
+                                stroke="#f97316" 
+                                strokeWidth={2}
+                                strokeDasharray="5 5"
+                                dot={{ fill: '#f97316', strokeWidth: 2, r: 3 }}
+                                opacity={0.6}
+                              />
+                            </>
+                          )}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                    
+                    <p className="text-xs text-muted-foreground text-center">
+                      Solid lines = {currentYear} | Dashed lines = {currentYear - 1}
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </CollapsibleContent>
