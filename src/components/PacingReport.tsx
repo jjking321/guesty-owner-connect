@@ -73,6 +73,14 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
   // Resolve listing IDs for queries
   const effectiveListingIds = listingId ? [listingId] : (listingIds || []);
 
+  // Filter reservations to only include those for the effective listing IDs
+  // This ensures Same Store and other listingIds-based filters work correctly
+  const filteredReservations = useMemo(() => {
+    if (effectiveListingIds.length === 0) return reservations;
+    const listingIdSet = new Set(effectiveListingIds);
+    return reservations.filter(r => r.listing_id && listingIdSet.has(r.listing_id));
+  }, [reservations, effectiveListingIds]);
+
   // Generate month options for the next 12 months
   const monthOptions = [];
   for (let i = 0; i < 12; i++) {
@@ -285,14 +293,14 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
     const currentData = calculateBookedRevenue(
       currentPeriod.start,
       currentPeriod.end,
-      reservations,
+      filteredReservations,
       currentCutoff
     );
 
     const lastData = calculateBookedRevenue(
       adjustedLastYearPeriod.start,
       adjustedLastYearPeriod.end,
-      reservations,
+      filteredReservations,
       lastYearCutoff
     );
 
@@ -327,8 +335,8 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
         : 0;
 
     // Calculate owner nights and blocked nights for adjusted occupancy
-    const currentOwnerNights = calculateOwnerNights(currentPeriod.start, currentPeriod.end, reservations, currentCutoff);
-    const lastOwnerNights = calculateOwnerNights(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end, reservations, lastYearCutoff);
+    const currentOwnerNights = calculateOwnerNights(currentPeriod.start, currentPeriod.end, filteredReservations, currentCutoff);
+    const lastOwnerNights = calculateOwnerNights(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end, filteredReservations, lastYearCutoff);
 
     const currentBlockedNights = calculateBlockedNights(currentPeriod.start, currentPeriod.end);
     const lastBlockedNights = calculateBlockedNights(adjustedLastYearPeriod.start, adjustedLastYearPeriod.end);
@@ -408,8 +416,8 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
       const currentCutoff = currentDate;
       const lastYearCutoff = new Date(currentYear - 1, currentMonth, currentDate.getDate());
 
-      const currentData = calculateBookedRevenue(periodStart, periodEnd, reservations, currentCutoff);
-      const lastData = calculateBookedRevenue(lastYearPeriodStart, lastYearPeriodEnd, reservations, lastYearCutoff);
+      const currentData = calculateBookedRevenue(periodStart, periodEnd, filteredReservations, currentCutoff);
+      const lastData = calculateBookedRevenue(lastYearPeriodStart, lastYearPeriodEnd, filteredReservations, lastYearCutoff);
 
       // Account for multiple properties in groups - multiply days by number of listings
       const numberOfProperties = effectiveListingIds.length || 1;
@@ -442,7 +450,7 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
     }
 
     return data;
-  }, [reservations, currentYear, currentMonth, currentDate, effectiveListingIds.length]);
+  }, [filteredReservations, currentYear, currentMonth, currentDate, effectiveListingIds.length]);
 
   // Export monthly pacing data to CSV
   const handleExportPacingCSV = () => {
