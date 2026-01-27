@@ -1,95 +1,102 @@
 
 
-## Add Chart View Toggle for Monthly Pacing Breakdown
+## Add CSV Export for Monthly Pacing Breakdown Table
 
 ### Overview
-Add a toggle to the Monthly Pacing Breakdown section in the PacingReport component that allows users to switch between the existing table view and a new line chart visualization. This will provide a more visual way to analyze monthly pacing data trends.
+Add a "Download CSV" button to the Monthly Pacing Breakdown section that exports all monthly data including current year values and year-over-year comparisons.
 
 ### Current State
-- The PacingReport component (`src/components/PacingReport.tsx`) displays a "Monthly Breakdown" collapsible table when in "monthly" mode
-- The table shows 12 months of data with Revenue, Nights, Occupancy, and RevPAR metrics
-- Each metric includes current year values and year-over-year percentage changes
-- The project uses Recharts library for charts (LineChart, ResponsiveContainer, etc.)
+- The PacingReport component displays a "Monthly Breakdown" collapsible section with a Table/Chart toggle
+- The `monthlyData` useMemo (lines 375-442) already computes all the data needed for export
+- The toggle group for Table/Chart is shown when the collapsible is open (lines 664-681)
 
 ### Implementation Plan
 
-#### 1. Update `src/components/PacingReport.tsx`
+#### Update `src/components/PacingReport.tsx`
 
-**Add View State:**
-- Add a new state variable to toggle between table and chart views: `const [viewMode, setViewMode] = useState<'table' | 'chart'>('table')`
+**Add Download Icon Import:**
+- Import `Download` from lucide-react
 
-**Add Toggle Group:**
-- Add a small toggle next to the "Monthly Breakdown" label with two options: "Table" and "Chart"
-- Use the existing `ToggleGroup` component from `@/components/ui/toggle-group`
+**Add Export Function:**
+Create a `handleExportCSV` function that:
+- Builds CSV headers: Month, Revenue, Revenue LY, Revenue vs LY %, Nights, Nights LY, Nights vs LY %, Occupancy, Occupancy LY, Occupancy vs LY %, RevPAR, RevPAR LY, RevPAR vs LY %
+- Maps `monthlyData` to CSV rows with properly formatted values
+- Creates a Blob and triggers download with filename `pacing-breakdown-{current-date}.csv`
 
-**Add Chart Visualization:**
-- Create a multi-line chart showing all four metrics (Revenue, Nights, Occupancy, RevPAR) for the current vs last year
-- Use LineChart from Recharts with:
-  - X-axis: Month names
-  - Y-axis: Dual axis (left for Revenue/RevPAR in $, right for Occupancy/Nights in %)
-  - Lines for current year vs last year values
-  - Different colors for each metric pair
-  - Interactive tooltip showing values on hover
-  - Legend to identify the lines
-
-**Chart Design:**
-- Revenue: Blue solid line (current) and blue dashed line (last year)
-- Nights: Green solid line (current) and green dashed line (last year)
-- Occupancy: Purple solid line (current) and purple dashed line (last year)
-- RevPAR: Orange solid line (current) and orange dashed line (last year)
-- Include checkboxes to show/hide individual metric pairs for cleaner visualization
+**Add Export Button:**
+- Place a "Download CSV" button next to the Table/Chart toggle group
+- Only visible when the collapsible is open (same condition as the toggle)
+- Use small variant with Download icon
 
 ### Technical Details
 
-**Imports to add:**
+**Export function:**
 ```typescript
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+const handleExportPacingCSV = () => {
+  const headers = [
+    "Month",
+    "Revenue",
+    "Revenue LY",
+    "Revenue vs LY %",
+    "Nights",
+    "Nights LY", 
+    "Nights vs LY %",
+    "Occupancy %",
+    "Occupancy LY %",
+    "Occupancy vs LY %",
+    "RevPAR",
+    "RevPAR LY",
+    "RevPAR vs LY %"
+  ];
+
+  const rows = monthlyData.map((row) => [
+    row.month,
+    row.currentRevenue.toFixed(2),
+    row.lastRevenue.toFixed(2),
+    row.revenueChange.toFixed(1),
+    row.currentNights,
+    row.lastNights,
+    row.nightsChange.toFixed(1),
+    row.currentOccupancy.toFixed(1),
+    row.lastOccupancy.toFixed(1),
+    row.occupancyChange.toFixed(1),
+    row.currentRevPAR.toFixed(2),
+    row.lastRevPAR.toFixed(2),
+    row.revPARChange.toFixed(1),
+  ]);
+
+  const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `pacing-breakdown-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
 ```
 
-**View toggle UI:**
+**Button placement (next to toggle group):**
 ```typescript
-<ToggleGroup
-  type="single"
-  value={viewMode}
-  onValueChange={(value) => value && setViewMode(value as 'table' | 'chart')}
-  size="sm"
->
-  <ToggleGroupItem value="table" className="text-xs px-2">
-    <TableIcon className="h-3 w-3 mr-1" />
-    Table
-  </ToggleGroupItem>
-  <ToggleGroupItem value="chart" className="text-xs px-2">
-    <LineChartIcon className="h-3 w-3 mr-1" />
-    Chart
-  </ToggleGroupItem>
-</ToggleGroup>
+{isTableOpen && (
+  <div className="flex items-center gap-2">
+    <Button variant="outline" size="sm" onClick={handleExportPacingCSV}>
+      <Download className="h-3 w-3 mr-1" />
+      Export
+    </Button>
+    <ToggleGroup ... />
+  </div>
+)}
 ```
-
-**Chart data structure:**
-The existing `monthlyData` useMemo already computes all required data. The chart will consume:
-- `month` - X-axis label
-- `currentRevenue` / `lastRevenue` - Revenue lines
-- `currentNights` / `lastNights` - Nights lines
-- `currentOccupancy` / `lastOccupancy` - Occupancy lines
-- `currentRevPAR` / `lastRevPAR` - RevPAR lines
-
-**Dual Y-Axis approach:**
-- Left Y-axis for Revenue (in dollars)
-- Right Y-axis for Occupancy (as percentage)
-- Include metric filter checkboxes to show 1-2 metrics at a time for clarity
 
 ### Files to Modify
 | File | Changes |
 |------|---------|
-| `src/components/PacingReport.tsx` | Add view toggle state, toggle UI, chart rendering, metric visibility checkboxes |
+| `src/components/PacingReport.tsx` | Add Download icon import, handleExportPacingCSV function, Export button next to toggle group |
 
 ### User Experience
-1. User navigates to Group Detail page and clicks the "Pacing" tab
-2. User selects "Monthly" period type to reveal the Monthly Breakdown section
-3. User expands the Monthly Breakdown collapsible
-4. By default, the table view is shown (preserving existing behavior)
-5. User can click "Chart" toggle to switch to the line chart visualization
-6. Chart shows trend lines for current year vs last year
-7. User can toggle individual metrics on/off via checkboxes for cleaner comparison
-8. Toggling back to "Table" shows the original table view
+1. User opens the Monthly Breakdown collapsible
+2. An "Export" button appears alongside the Table/Chart toggle
+3. Clicking Export downloads a CSV file with all 12 months of pacing data
+4. File includes both current year values and last year comparisons for each metric
 
