@@ -1,7 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target, ChevronDown, ChevronRight, TableIcon, LineChart as LineChartIcon, Download } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Moon, Percent, Target, ChevronDown, ChevronRight, TableIcon, LineChart as LineChartIcon, Download, FileText } from "lucide-react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 import { format, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
 import { parseLocalDate } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -66,6 +68,7 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
     occupancy: false,
     revPAR: false,
   });
+  const chartRef = useRef<HTMLDivElement>(null);
 
   // Resolve listing IDs for queries
   const effectiveListingIds = listingId ? [listingId] : (listingIds || []);
@@ -485,6 +488,41 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
     URL.revokeObjectURL(url);
   };
 
+  // Export chart to PDF
+  const handleExportPacingPDF = async () => {
+    if (!chartRef.current) return;
+    
+    try {
+      const canvas = await html2canvas(chartRef.current, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = Math.min((pdfWidth - 28) / imgWidth, (pdfHeight - 45) / imgHeight);
+      
+      // Add title
+      pdf.setFontSize(16);
+      pdf.text('Monthly Pacing Breakdown', 14, 15);
+      pdf.setFontSize(10);
+      pdf.text(`Generated: ${format(new Date(), 'MMMM d, yyyy')}`, 14, 22);
+      
+      // Add chart image with padding for title
+      const imgX = (pdfWidth - imgWidth * ratio) / 2;
+      pdf.addImage(imgData, 'PNG', imgX, 30, imgWidth * ratio, imgHeight * ratio);
+      
+      pdf.save(`pacing-chart-${format(new Date(), 'yyyy-MM-dd')}.pdf`);
+    } catch (error) {
+      console.error('Failed to export PDF:', error);
+    }
+  };
+
   // Get period description for display
   const getPeriodDescription = (): string => {
     switch (periodType) {
@@ -709,8 +747,14 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handleExportPacingCSV}>
                   <Download className="h-3 w-3 mr-1" />
-                  Export
+                  Export CSV
                 </Button>
+                {viewMode === 'chart' && (
+                  <Button variant="outline" size="sm" onClick={handleExportPacingPDF}>
+                    <FileText className="h-3 w-3 mr-1" />
+                    Export PDF
+                  </Button>
+                )}
                 <ToggleGroup
                   type="single"
                   value={viewMode}
@@ -782,7 +826,7 @@ export function PacingReport({ reservations, listingId, listingIds }: PacingRepo
                     </Table>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div ref={chartRef} className="space-y-4 bg-background p-4">
                     {/* Metric visibility checkboxes */}
                     <div className="flex flex-wrap gap-4">
                       <div className="flex items-center space-x-2">
