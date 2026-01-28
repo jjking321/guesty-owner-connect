@@ -1,100 +1,107 @@
 
-Goal
-- Fix the bulk reservations sync UI “loop” (0 → 3000 → 0 → 3000 …) by making progress counters monotonic across self-invocations. The sync is likely continuing correctly via offsets, but the progress counter is being overwritten by per-invocation counts.
+# Make Resume Sync Option Persistent
 
-What’s happening (root cause)
-- Each self-invoked run is a fresh execution context.
-- In `fetchAndSaveReservationsBatch()` we track `totalFetched` / `totalSaved` starting from 0 for that invocation.
-- We then write `sync_jobs.items_synced = totalSaved` (and in the outer progress callback we also write `items_synced = saved`), so every new invocation “starts progress over” even though `skip` (offset) may be advancing.
-- Result: the Settings progress card repeatedly shows 0→3000 then back to 0 on the next invocation, which looks like it’s stuck in a loop.
+## Problem
+When a sync job fails with progress to resume from (`last_synced_offset > 0`), the Resume option disappears because:
+1. The card auto-clears after 30 seconds
+2. On page reload, only jobs from the last 5 minutes are shown
+3. Once dismissed, there's no way to get the Resume button back
 
-High-confidence fix
-- Change what we store as `sync_jobs.items_synced` during reservations bulk sync to be an absolute, cumulative value that never resets.
-- Best available “absolute progress” without schema changes: use the absolute processed offset:
-  - `absoluteProcessed = startOffsetValue + fetchedThisInvocation`
-  - or equivalently inside the fetch loop: `absoluteProcessed = skip + reservations.length` / `skip + limit` (since `skip` is initialized to `startOffsetValue`)
+This is frustrating when syncing 27k records and the job fails at 21k - you lose the ability to resume.
 
-Implementation details
+## Solution
+Always show resumable failed jobs (those with `last_synced_offset > 0`) regardless of time, and never auto-dismiss them. Only hide them when the user explicitly dismisses OR when a new sync completes successfully.
 
-A) Backend function changes (primary fix)
-File: `supabase/functions/sync-guesty-data/index.ts`
+## Changes
 
-1) Treat `items_synced` as “processed so far” (monotonic) for the reservations sync
-- In the progress callback (currently sets `items_synced: saved`):
-  - Change to `items_synced: startOffsetValue + fetched`
-  - Keep `progress_message` showing both processed and saved, e.g.:
-    - `Processing: processed ${startOffsetValue + fetched}/${total ?? '?'} (saved +${savedThisInvocation})`
-  - Keep `total_items: total` as-is (Guesty’s `count`).
+### 1. SyncProgressCard.tsx - Update job loading logic
 
-2) Stop overwriting the job with per-invocation saved counts inside `fetchAndSaveReservationsBatch()`
-Inside `fetchAndSaveReservationsBatch()` there are multiple `updateSyncJob()` calls that currently do:
-- `items_synced: totalSaved`  (this resets per invocation)
-Change those writes to:
-- `items_synced: startOffset + totalFetched` (or `skip + limit` at save boundaries)
-Keep:
-- `last_synced_offset` = next offset to resume (still `skip + limit` is fine)
-- `total_items` = `data.count`
+**On mount loading (lines 48-86):**
+- Add a third query specifically for "resumable" failed jobs (no time limit)
+- Check for resumable jobs: `status = 'failed'` AND `last_synced_offset > 0`
+- Priority order: running > resumable failed > recent completed
 
-Practical approach (minimal diff):
-- Add a new param to `fetchAndSaveReservationsBatch()`:
-  - `baseOffset: number` (or reuse `startOffset`)
-- Compute `absoluteFetched = startOffset + totalFetched`
-- Replace every `items_synced: totalSaved` write with `items_synced: absoluteFetched`
-- Update the “Saved X reservations …” message to still show `totalSaved` but without using it for `items_synced`.
+**Realtime subscription (lines 108-121):**
+- Don't auto-clear failed jobs that have `last_synced_offset > 0`
+- Only auto-clear completed jobs and non-resumable failed jobs
 
-3) Fix self-invocation “handoff” update
-- In the `needsContinuation` block (before `supabase.functions.invoke`), it currently writes:
-  - `items_synced: totalSaved`
-Change to:
-  - `items_synced: nextOffset` (because `nextOffset` is the absolute processed offset we are resuming from)
-  - `last_synced_offset: nextOffset` remains.
+**Resume handlers:**
+- After successful resume, the new running job will naturally replace the failed one
 
-4) Fix completion update
-- On completion it currently writes:
-  - `items_synced: totalSaved`
-Change to:
-  - `items_synced: totalFetched + startOffsetValue` (or `total_items` if present)
-  - Keep `last_synced_offset: 0`
+### 2. Updated Logic Flow
 
-5) (Optional but recommended) Respect Stop more quickly
-- Add a lightweight cancellation check so the function stops soon after you press Stop:
-  - On each “save batch” (every ~1000), read job status:
-    - If `status !== 'running'`, exit early without self-invocation.
-- This avoids burning time/API calls after a user cancellation.
+```text
+On page load:
+  1. Check for running job -> Show with Stop button
+  2. Check for resumable failed job (any age) -> Show with Resume button  
+  3. Check for recent completed/failed (5 min) -> Show briefly then auto-clear
 
-B) UI improvements (secondary, makes behavior obvious)
-File: `src/components/SyncProgressCard.tsx`
+On job status change:
+  - Running: Show with Stop button
+  - Completed: Auto-clear after 30s
+  - Failed + offset > 0: Keep showing with Resume button (no auto-clear)
+  - Failed + offset = 0: Auto-clear after 30s
+```
 
-1) Show “Processed offset” when available
-- When `syncJob.last_synced_offset` exists and job is running, display something like:
-  - “Processed: {syncJob.items_synced} / {syncJob.total_items}”
-  - “Resume offset: {syncJob.last_synced_offset}”
-- This makes it clear that the job is advancing beyond 3000 even across self-invocations.
+### 3. Sync types that support resume
+- `reservations` - Uses `last_synced_offset` 
+- `capacity_calendar` - Uses resume logic (already persistent)
 
-2) Ensure the count badge uses the same monotonic value
-- Today it displays `items_synced / total_items`. After backend fix, this becomes stable.
-- Optionally, label it “Processed” for reservations to reduce confusion.
+---
 
-Validation / Testing plan (end-to-end)
-1) Start bulk “Sync Reservations” from /settings.
-2) Confirm the progress badge increases past 3000 (e.g., 3000 → 6000 → 9000…) without dropping back to 0.
-3) Confirm logs show increasing offsets (e.g., “Continuing … offset 3000”, then 6000, etc.).
-4) Click Stop mid-run:
-   - Confirm the job transitions to failed quickly and does not keep progressing.
-5) Click Resume:
-   - Confirm it continues from the prior `last_synced_offset` and the progress counter continues increasing (does not reset).
+## Technical Details
 
-Why this solves the “loop”
-- The “loop” is a display artifact caused by writing per-invocation counts to a single shared progress row.
-- By writing absolute progress (offset-based) each time, the progress bar and counter remain monotonic and accurately reflect overall progress across self-invocations.
+### File: `src/components/SyncProgressCard.tsx`
 
-Files to change
-- `supabase/functions/sync-guesty-data/index.ts` (required)
-- `src/components/SyncProgressCard.tsx` (optional but recommended)
+**Change 1: Add query for resumable jobs on mount**
+```typescript
+// After checking for running job, before checking recent jobs:
+// Check for resumable failed jobs (no time limit)
+const { data: resumableJob } = await supabase
+  .from('sync_jobs')
+  .select('*')
+  .eq('guesty_account_id', accountId)
+  .eq('sync_type', syncType)
+  .eq('status', 'failed')
+  .gt('last_synced_offset', 0)
+  .order('started_at', { ascending: false })
+  .limit(1)
+  .maybeSingle();
 
-Risks / trade-offs
-- Using offset-based “processed” counts is slightly different than “unique rows inserted,” but it matches how pagination and self-invocation work and is the most reliable monotonic progress indicator without adding new database columns.
-- If Guesty returns occasional duplicates across pages (rare), “processed” may slightly over-count relative to truly unique saved rows; progress will still converge and not reset.
+if (resumableJob) {
+  setSyncJob(resumableJob as SyncJob);
+  setDismissed(false);
+  return; // Don't auto-clear resumable jobs
+}
+```
 
-Deliverable
-- Bulk reservations sync no longer appears stuck; progress climbs smoothly until completion, even across multiple self-invocations.
+**Change 2: Update realtime auto-clear logic**
+```typescript
+// In the realtime subscription callback:
+if (job.status === 'completed' || job.status === 'completed_with_errors') {
+  // Auto-clear completed jobs
+  setTimeout(() => setSyncJob(null), 30000);
+} else if (job.status === 'failed') {
+  // Only auto-clear failed jobs that can't be resumed
+  if (!job.last_synced_offset || job.last_synced_offset === 0) {
+    setTimeout(() => setSyncJob(null), 30000);
+  }
+  // Resumable failed jobs stay visible until dismissed or resumed
+}
+```
+
+**Change 3: Show progress info for failed resumable jobs**
+```typescript
+// Update showProgress to also show for resumable failed jobs
+const canResume = isFailed && syncJob.last_synced_offset && syncJob.last_synced_offset > 0;
+const showProgress = (syncJob.status === 'running' || canResume) && 
+  (syncJob.items_synced !== null || syncJob.total_items !== null);
+```
+
+## Testing
+1. Start a reservations sync, let it reach ~5000 records
+2. Click Stop to cancel it
+3. Refresh the page - Resume button should still appear
+4. Wait 10+ minutes, refresh again - Resume button should still be there
+5. Click Resume - sync should continue from the offset
+6. After completion, the card should auto-dismiss normally
