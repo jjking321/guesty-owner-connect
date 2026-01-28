@@ -55,6 +55,10 @@ const LOCK_STALE_MS = 90000;
 const LOCK_POLL_INTERVAL_MS = 1000;
 const LOCK_MAX_POLLS = 6;
 
+// Self-invocation constants for handling large datasets
+const RESERVATION_BATCH_LIMIT = 3000; // Process this many records before self-invoking
+const FUNCTION_TIMEOUT_BUFFER = 50000; // 50 seconds - leave 10s buffer before edge function timeout
+
 function parseRetryAfter(header: string | null): number {
   if (!header) return 0;
   const seconds = Number(header);
@@ -334,14 +338,16 @@ async function fetchAndSaveReservationsBatch(
   accountId: string,
   jobId: string,
   startOffset: number = 0,
+  startTime: number = Date.now(),
   onProgress?: (fetched: number, saved: number, total?: number) => Promise<void>
-) {
+): Promise<{ totalFetched: number; totalSaved: number; needsContinuation: boolean; nextOffset: number }> {
   let skip = startOffset;
   const limit = 100;
   const batchSize = 1000; // Save every 1000 records
   let totalFetched = 0;
   let totalSaved = 0;
   let batch: GuestyReservation[] = [];
+  let recordsProcessedThisInvocation = 0;
 
   while (true) {
     console.log(`Fetching reservations: skip=${skip}, limit=${limit}`);
@@ -365,8 +371,9 @@ async function fetchAndSaveReservationsBatch(
       const reservations = data.results || [];
       batch.push(...reservations);
       totalFetched += reservations.length;
+      recordsProcessedThisInvocation += reservations.length;
       
-      console.log(`Fetched ${reservations.length} reservations (total: ${totalFetched})`);
+      console.log(`Fetched ${reservations.length} reservations (total: ${totalFetched}, this invocation: ${recordsProcessedThisInvocation})`);
 
       // Save batch if it reaches batch size or if it's the last batch
       if (batch.length >= batchSize || reservations.length < limit) {
@@ -434,6 +441,23 @@ async function fetchAndSaveReservationsBatch(
         await onProgress(totalFetched, totalSaved, data.count);
       }
 
+      // Check if we need to self-invoke (approaching timeout or batch limit)
+      const elapsedTime = Date.now() - startTime;
+      const shouldContinueLater = (
+        recordsProcessedThisInvocation >= RESERVATION_BATCH_LIMIT ||
+        elapsedTime >= FUNCTION_TIMEOUT_BUFFER
+      );
+
+      if (shouldContinueLater && reservations.length >= limit) {
+        console.log(`Self-invocation needed: processed ${recordsProcessedThisInvocation} records in ${Math.round(elapsedTime/1000)}s. Next offset: ${skip + limit}`);
+        return { 
+          totalFetched, 
+          totalSaved, 
+          needsContinuation: true, 
+          nextOffset: skip + limit 
+        };
+      }
+
       if (reservations.length < limit) {
         break;
       }
@@ -490,7 +514,7 @@ async function fetchAndSaveReservationsBatch(
     }
   }
 
-  return { totalFetched, totalSaved };
+  return { totalFetched, totalSaved, needsContinuation: false, nextOffset: 0 };
 }
 
 async function createSyncJob(supabase: any, accountId: string, syncType: string): Promise<string> {
@@ -524,7 +548,11 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { accountId, syncType, startDate } = await req.json();
+    // Extract auth token for self-invocation
+    const authHeader = req.headers.get('Authorization');
+    const authToken = authHeader?.replace('Bearer ', '') || '';
+    
+    const { accountId, syncType, startDate, resumeJobId } = await req.json();
 
     if (!accountId) {
       throw new Error('accountId is required');
@@ -643,33 +671,55 @@ Deno.serve(async (req) => {
 
     // Sync reservations with batch processing
     if (syncType === 'reservations' || syncType === 'both') {
-      // Check for existing incomplete sync job
-      const { data: existingJobs } = await supabase
-        .from('sync_jobs')
-        .select('*')
-        .eq('guesty_account_id', accountId)
-        .eq('sync_type', 'reservations')
-        .eq('status', 'running')
-        .order('started_at', { ascending: false })
-        .limit(1);
-      
       let jobId: string;
       let startOffsetValue = 0;
       
-      if (existingJobs && existingJobs.length > 0) {
-        // Resume from existing job
-        const existingJob = existingJobs[0];
-        jobId = existingJob.id;
-        startOffsetValue = existingJob.last_synced_offset || 0;
-        console.log(`Resuming reservations sync from offset ${startOffsetValue}. Already synced: ${existingJob.items_synced}`);
+      // If resumeJobId is provided (from self-invocation), use that job
+      if (resumeJobId) {
+        const { data: resumeJob } = await supabase
+          .from('sync_jobs')
+          .select('*')
+          .eq('id', resumeJobId)
+          .single();
         
-        await updateSyncJob(supabase, jobId, {
-          progress_message: `Resuming sync from ${startOffsetValue} reservations...`,
-        });
+        if (resumeJob && resumeJob.status === 'running') {
+          jobId = resumeJob.id;
+          startOffsetValue = resumeJob.last_synced_offset || 0;
+          console.log(`Continuing from resumeJobId ${resumeJobId}, offset ${startOffsetValue}`);
+        } else {
+          // Job was cancelled or completed, don't continue
+          console.log(`Resume job ${resumeJobId} is not running, skipping`);
+          return new Response(
+            JSON.stringify({ success: true, message: 'Job was cancelled or already completed' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
       } else {
-        // Create new sync job
-        jobId = await createSyncJob(supabase, accountId, 'reservations');
-        console.log('Starting new reservations sync from beginning');
+        // Check for existing incomplete sync job
+        const { data: existingJobs } = await supabase
+          .from('sync_jobs')
+          .select('*')
+          .eq('guesty_account_id', accountId)
+          .eq('sync_type', 'reservations')
+          .eq('status', 'running')
+          .order('started_at', { ascending: false })
+          .limit(1);
+        
+        if (existingJobs && existingJobs.length > 0) {
+          // Resume from existing job
+          const existingJob = existingJobs[0];
+          jobId = existingJob.id;
+          startOffsetValue = existingJob.last_synced_offset || 0;
+          console.log(`Resuming reservations sync from offset ${startOffsetValue}. Already synced: ${existingJob.items_synced}`);
+          
+          await updateSyncJob(supabase, jobId, {
+            progress_message: `Resuming sync from ${startOffsetValue} reservations...`,
+          });
+        } else {
+          // Create new sync job
+          jobId = await createSyncJob(supabase, accountId, 'reservations');
+          console.log('Starting new reservations sync from beginning');
+        }
       }
       
       try {
@@ -679,14 +729,17 @@ Deno.serve(async (req) => {
           progress_message: `${startOffsetValue > 0 ? 'Resuming' : 'Starting'} reservations sync (checkIn >= ${defaultStartDate})...` 
         });
 
-        const { totalFetched, totalSaved } = await fetchAndSaveReservationsBatch(
+        const syncStartTime = Date.now();
+        
+        const { totalFetched, totalSaved, needsContinuation, nextOffset } = await fetchAndSaveReservationsBatch(
           accessToken,
           defaultStartDate,
           supabase,
           accountId,
           jobId,
           startOffsetValue,
-          async (fetched, saved, total) => {
+          syncStartTime,
+          async (fetched: number, saved: number, total?: number) => {
             await updateSyncJob(supabase, jobId, {
               progress_message: `Processing: fetched ${fetched}, saved ${saved}${total ? `/${total}` : ''}`,
               items_synced: saved,
@@ -697,6 +750,41 @@ Deno.serve(async (req) => {
 
         reservationsCount = totalSaved;
 
+        // If self-invocation is needed, trigger continuation and return early
+        if (needsContinuation) {
+          console.log(`Self-invoking to continue from offset ${nextOffset}...`);
+          
+          await updateSyncJob(supabase, jobId, {
+            progress_message: `Saved ${totalSaved} reservations. Continuing in next batch from offset ${nextOffset}...`,
+            items_synced: totalSaved,
+            last_synced_offset: nextOffset,
+          });
+
+          // Self-invoke to continue processing
+          const { error: invokeError } = await supabase.functions.invoke('sync-guesty-data', {
+            headers: { Authorization: `Bearer ${authToken}` },
+            body: { accountId, syncType: 'reservations', startDate: defaultStartDate, resumeJobId: jobId },
+          });
+
+          if (invokeError) {
+            console.error('Self-invocation failed:', invokeError);
+            // Don't fail - the job is still running and can be resumed manually
+          }
+
+          // Return success - the continuation will handle the rest
+          return new Response(
+            JSON.stringify({
+              success: true,
+              listingsCount,
+              reservationsCount,
+              continuing: true,
+              message: `Processed ${totalSaved} reservations. Continuation triggered.`,
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Sync completed fully
         await updateSyncJob(supabase, jobId, {
           status: 'completed',
           progress_message: `Completed: ${totalSaved} reservations synced (fetched ${totalFetched})`,
