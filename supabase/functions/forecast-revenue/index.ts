@@ -647,6 +647,123 @@ serve(async (req) => {
       return { effectiveNights, weightedRevenue, details };
     }
 
+    // NEW: Analyze gap structure and apply quality penalties for orphan/short gaps
+    function analyzeGapQuality(
+      availableNights: Array<{ date: string; price: number; factor?: number }>,
+    ): { 
+      effectiveNights: number; 
+      weightedRevenue: number; 
+      gaps: Array<{ startDate: string; nights: number; penalty: number; reason: string }>;
+      originalNights: number;
+      originalRevenue: number;
+    } {
+      if (availableNights.length === 0) {
+        return { effectiveNights: 0, weightedRevenue: 0, gaps: [], originalNights: 0, originalRevenue: 0 };
+      }
+      
+      // Group consecutive available nights into gaps
+      const gaps: Array<{ dates: { date: string; price: number; factor?: number }[]; startDate: string }> = [];
+      let currentGap: { date: string; price: number; factor?: number }[] = [];
+      
+      const sortedNights = [...availableNights].sort((a, b) => 
+        new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
+      
+      for (let i = 0; i < sortedNights.length; i++) {
+        const night = sortedNights[i];
+        const prevNight = sortedNights[i - 1];
+        
+        if (prevNight) {
+          const dayDiff = Math.floor(
+            (new Date(night.date).getTime() - new Date(prevNight.date).getTime()) / (1000 * 60 * 60 * 24)
+          );
+          
+          if (dayDiff > 1) {
+            // Non-consecutive - save current gap and start new one
+            if (currentGap.length > 0) {
+              gaps.push({ dates: currentGap, startDate: currentGap[0].date });
+            }
+            currentGap = [night];
+          } else {
+            currentGap.push(night);
+          }
+        } else {
+          currentGap.push(night);
+        }
+      }
+      
+      // Don't forget the last gap
+      if (currentGap.length > 0) {
+        gaps.push({ dates: currentGap, startDate: currentGap[0].date });
+      }
+      
+      // Apply penalties based on gap size
+      let totalEffectiveNights = 0;
+      let totalWeightedRevenue = 0;
+      let originalNights = 0;
+      let originalRevenue = 0;
+      const gapResults: Array<{ startDate: string; nights: number; penalty: number; reason: string }> = [];
+      
+      for (const gap of gaps) {
+        const gapSize = gap.dates.length;
+        // Sum up revenue considering any lead-time factors already applied
+        const gapRevenue = gap.dates.reduce((sum, d) => sum + (d.price * (d.factor ?? 1)), 0);
+        const gapRawRevenue = gap.dates.reduce((sum, d) => sum + d.price, 0);
+        
+        originalNights += gapSize;
+        originalRevenue += gapRawRevenue;
+        
+        let penalty: number;
+        let reason: string;
+        
+        if (gapSize === 1) {
+          // Orphan night - very hard to book
+          penalty = 0.20;
+          reason = 'Orphan night (1-night gap)';
+        } else if (gapSize === 2) {
+          // 2-night gap - below many min stays but some properties have 2-night bookings
+          penalty = 0.50;
+          reason = '2-night gap (below typical min stay)';
+        } else if (gapSize === 3) {
+          // 3-night gap - common minimum stay
+          penalty = 0.65;
+          reason = '3-night gap';
+        } else if (gapSize <= 5) {
+          // 4-5 night gap - sweet spot based on typical booking patterns
+          penalty = 0.85;
+          reason = `${gapSize}-night gap (sweet spot)`;
+        } else if (gapSize <= 7) {
+          // 6-7 night gap - good size, likely to fill but maybe not completely
+          penalty = 0.80;
+          reason = `${gapSize}-night gap (likely partial fill)`;
+        } else {
+          // 8+ night gap - unlikely to fill completely
+          // Estimate: most likely to get a 4-5 night booking + maybe a 2-night
+          const expectedFill = Math.min(gapSize, 5 + 2); // ~7 nights max expected
+          penalty = expectedFill / gapSize;
+          reason = `${gapSize}-night gap (expect ~${expectedFill} nights booked)`;
+        }
+        
+        totalEffectiveNights += gapSize * penalty;
+        totalWeightedRevenue += gapRevenue * penalty;
+        
+        gapResults.push({
+          startDate: gap.startDate,
+          nights: gapSize,
+          penalty,
+          reason
+        });
+      }
+      
+      return {
+        effectiveNights: totalEffectiveNights,
+        weightedRevenue: totalWeightedRevenue,
+        gaps: gapResults,
+        originalNights,
+        originalRevenue
+      };
+    }
+
     // NEW: Look up historical compset occupancy for a specific month
     function getHistoricalCompsetOccupancy(
       compsetSummary: CompsetSummary | null,
@@ -856,7 +973,7 @@ serve(async (req) => {
         monthOccupancy = monthOccupancy || 0.65;
         appliedOccupancy = monthOccupancy;
         
-        // Apply lead time decay to available nights
+        // Step A: Apply lead time decay to available nights
         const leadTimeResult = applyLeadTimeDecay(
           capacityData,
           targetYear,
@@ -865,18 +982,36 @@ serve(async (req) => {
           medianBookingWindow
         );
         
-        effectiveNights = leadTimeResult.effectiveNights;
+        // Step B: Apply gap quality penalty to lead-time-adjusted nights
+        // This penalizes orphan nights (1-night gaps) and large gaps that are unlikely to fill completely
+        const gapAnalysis = analyzeGapQuality(
+          leadTimeResult.details.map(d => ({ date: d.date, price: d.price, factor: d.factor }))
+        );
+        
+        // Log gap analysis for debugging
+        if (gapAnalysis.gaps.length > 0) {
+          console.log(`  → Gap analysis for month ${targetMonth + 1}:`);
+          for (const gap of gapAnalysis.gaps) {
+            console.log(
+              `    • Gap ${gap.startDate}: ${gap.nights} nights × ${(gap.penalty * 100).toFixed(0)}% = ` +
+              `${(gap.nights * gap.penalty).toFixed(1)} effective (${gap.reason})`
+            );
+          }
+        }
+        
+        // Use gap-adjusted effective nights
+        effectiveNights = gapAnalysis.effectiveNights;
         
         // Calculate probability-adjusted expected additional revenue
-        // = weighted available revenue × compset occupancy rate
-        const expectedAdditional = leadTimeResult.weightedRevenue * monthOccupancy;
+        // = gap-weighted available revenue × compset occupancy rate
+        const expectedAdditional = gapAnalysis.weightedRevenue * monthOccupancy;
         const probabilityAdjustedForecast = onBooks + expectedAdditional;
         
         // If the blended forecast exceeds the probability-adjusted forecast, cap it
         if (blendedForecast > probabilityAdjustedForecast) {
           console.log(
             `  → Probability adjusted: $${blendedForecast.toFixed(0)} → $${probabilityAdjustedForecast.toFixed(0)} ` +
-            `(${leadTimeResult.effectiveNights.toFixed(1)} eff nights × ${(monthOccupancy * 100).toFixed(0)}% occ = $${expectedAdditional.toFixed(0)} expected additional)`
+            `(${gapAnalysis.effectiveNights.toFixed(1)} gap-adj nights × ${(monthOccupancy * 100).toFixed(0)}% occ = $${expectedAdditional.toFixed(0)} expected additional)`
           );
           blendedForecast = probabilityAdjustedForecast;
           probabilityAdjusted = true;
