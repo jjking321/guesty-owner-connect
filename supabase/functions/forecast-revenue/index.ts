@@ -588,6 +588,101 @@ serve(async (req) => {
       };
     }
 
+    // NEW: Apply lead time decay to available nights based on booking window patterns
+    function applyLeadTimeDecay(
+      capacityData: Array<{ date: string; price: number | null; status: string | null; is_available: boolean | null }>,
+      targetYear: number,
+      targetMonth: number,
+      asOfDate: Date,
+      medianBookingWindow: number = 30
+    ): { effectiveNights: number; weightedRevenue: number; details: Array<{ date: string; price: number; dba: number; factor: number }> } {
+      
+      let effectiveNights = 0;
+      let weightedRevenue = 0;
+      const details: Array<{ date: string; price: number; dba: number; factor: number }> = [];
+      
+      // Filter to available nights in the target month
+      const availableNights = (capacityData || []).filter(day => {
+        const dayDate = new Date(day.date);
+        if (dayDate.getFullYear() !== targetYear || dayDate.getMonth() !== targetMonth) return false;
+        if (day.status === 'available' || (day.is_available === true && !day.status)) return true;
+        return false;
+      });
+      
+      for (const night of availableNights) {
+        const nightDate = new Date(night.date);
+        const price = Number(night.price) || 0;
+        if (price === 0) continue;
+        
+        const dba = Math.floor((nightDate.getTime() - asOfDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Lead time decay factor based on typical booking window
+        let leadTimeFactor: number;
+        
+        if (dba > medianBookingWindow * 2) {
+          // Very far out - still time, but some uncertainty
+          leadTimeFactor = 0.85;
+        } else if (dba >= medianBookingWindow) {
+          // Prime booking window
+          leadTimeFactor = 1.0;
+        } else if (dba >= medianBookingWindow * 0.5) {
+          // Getting late
+          leadTimeFactor = 0.75;
+        } else if (dba >= 7) {
+          // Last minute territory
+          leadTimeFactor = 0.50;
+        } else if (dba >= 0) {
+          // Very last minute (0-7 days)
+          leadTimeFactor = 0.30;
+        } else {
+          // Past date - shouldn't happen but handle gracefully
+          leadTimeFactor = 0;
+        }
+        
+        effectiveNights += leadTimeFactor;
+        weightedRevenue += price * leadTimeFactor;
+        details.push({ date: night.date, price, dba, factor: leadTimeFactor });
+      }
+      
+      return { effectiveNights, weightedRevenue, details };
+    }
+
+    // NEW: Look up historical compset occupancy for a specific month
+    function getHistoricalCompsetOccupancy(
+      compsetSummary: CompsetSummary | null,
+      targetMonth: number // 0-11
+    ): number | null {
+      if (!compsetSummary?.monthly_averages) return null;
+      
+      const monthlyAvgs = compsetSummary.monthly_averages as any[];
+      const monthSuffix = `-${String(targetMonth + 1).padStart(2, '0')}`;
+      
+      // Find all historical months matching this month number (e.g., all Februaries)
+      const matchingMonths = monthlyAvgs.filter(m => {
+        const monthKey = m.month || m.year_month || m.yearMonth || '';
+        return monthKey.endsWith(monthSuffix);
+      });
+      
+      if (matchingMonths.length === 0) return null;
+      
+      // Average the occupancy across available years
+      let totalOcc = 0;
+      let count = 0;
+      
+      for (const m of matchingMonths) {
+        let occ = m.occupancy ?? m.occupancy_rate ?? null;
+        if (occ !== null && occ !== undefined) {
+          // Normalize to 0-1 if percentage
+          if (occ > 1) occ = occ / 100;
+          totalOcc += occ;
+          count++;
+        }
+      }
+      
+      if (count === 0) return null;
+      return totalOcc / count;
+    }
+
     // Build set of booked dates for the target year
     const bookedDates = new Set<string>();
     reservations?.forEach(r => {
@@ -606,6 +701,7 @@ serve(async (req) => {
     });
 
     // Main Forecast Function: Baseline × Velocity + Probability Blending + Capacity Ceiling
+    // UPDATED: Now applies probability adjustment BEFORE capacity ceiling
     function forecastEnhanced(
       targetYear: number,
       targetMonth: number,
@@ -616,7 +712,10 @@ serve(async (req) => {
       probabilityByDate: Map<string, BookingProbability>,
       bookedDates: Set<string>,
       compsetDemandByMonth: Map<string, { occupancyRate: number; demandSignal: string; bookedCount: number; totalCount: number }>,
-      capacityByMonth: Record<number, MonthCapacity>
+      capacityByMonth: Record<number, MonthCapacity>,
+      capacityData: Array<{ date: string; price: number | null; status: string | null; is_available: boolean | null }>,
+      compsetSummaryData: CompsetSummary | null,
+      medianBookingWindow: number = 30
     ): any {
       
       // Step 1: Get baseline from last year
@@ -662,7 +761,7 @@ serve(async (req) => {
       // Step 4: Calculate velocity-based forecast (existing approach)
       const velocityForecast = baseline * velocity.factor;
       
-      // Step 5: Calculate probability-weighted expected value (new approach)
+      // Step 5: Calculate probability-weighted expected value (from booking_probabilities table)
       const probExpected = calculateProbabilityExpectedValue(
         targetYear,
         targetMonth,
@@ -724,11 +823,70 @@ serve(async (req) => {
       // Ensure blended forecast is at least what's on books
       blendedForecast = Math.max(blendedForecast, onBooks);
       
-      // Step 8: Apply capacity ceiling - forecast cannot exceed what's physically possible
+      // Get compset demand signal for this month
+      const yearMonth = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
+      const compsetDemand = compsetDemandByMonth.get(yearMonth);
+      
+      // Get capacity info
       const capacity = capacityByMonth[targetMonth];
       let capacityCeiling: number | null = null;
       let capacityConstrained = false;
+      let probabilityAdjusted = false;
+      let appliedOccupancy: number | null = null;
+      let effectiveNights: number | null = null;
       
+      // ============================================================
+      // STEP 7 (NEW): Apply probability adjustment FIRST
+      // This uses compset occupancy + lead time decay for realistic estimates
+      // ============================================================
+      if (capacity && capacity.availableNights > 0 && capacity.avgAskingRate > 0) {
+        // Get occupancy rate: prefer future compset data, fall back to historical
+        let monthOccupancy = compsetDemand?.occupancyRate;
+        
+        if (!monthOccupancy || monthOccupancy === 0) {
+          // Look up historical occupancy for same month from compset
+          const historicalOcc = getHistoricalCompsetOccupancy(compsetSummaryData, targetMonth);
+          if (historicalOcc !== null) {
+            monthOccupancy = historicalOcc;
+            console.log(`  → Using historical compset occupancy for month ${targetMonth + 1}: ${(monthOccupancy * 100).toFixed(0)}%`);
+          }
+        }
+        
+        // Default to 65% if still no occupancy data
+        monthOccupancy = monthOccupancy || 0.65;
+        appliedOccupancy = monthOccupancy;
+        
+        // Apply lead time decay to available nights
+        const leadTimeResult = applyLeadTimeDecay(
+          capacityData,
+          targetYear,
+          targetMonth,
+          asOfDate,
+          medianBookingWindow
+        );
+        
+        effectiveNights = leadTimeResult.effectiveNights;
+        
+        // Calculate probability-adjusted expected additional revenue
+        // = weighted available revenue × compset occupancy rate
+        const expectedAdditional = leadTimeResult.weightedRevenue * monthOccupancy;
+        const probabilityAdjustedForecast = onBooks + expectedAdditional;
+        
+        // If the blended forecast exceeds the probability-adjusted forecast, cap it
+        if (blendedForecast > probabilityAdjustedForecast) {
+          console.log(
+            `  → Probability adjusted: $${blendedForecast.toFixed(0)} → $${probabilityAdjustedForecast.toFixed(0)} ` +
+            `(${leadTimeResult.effectiveNights.toFixed(1)} eff nights × ${(monthOccupancy * 100).toFixed(0)}% occ = $${expectedAdditional.toFixed(0)} expected additional)`
+          );
+          blendedForecast = probabilityAdjustedForecast;
+          probabilityAdjusted = true;
+        }
+      }
+      
+      // ============================================================
+      // STEP 8: Apply capacity ceiling as ABSOLUTE maximum (100% booking)
+      // This is now a safety cap, not the primary constraint
+      // ============================================================
       if (capacity && capacity.availableNights > 0 && capacity.avgAskingRate > 0) {
         const maxAdditional = capacity.availableNights * capacity.avgAskingRate;
         capacityCeiling = onBooks + maxAdditional;
@@ -753,27 +911,6 @@ serve(async (req) => {
         }
       }
       
-      // Step 9: Get compset demand signal for this month (needed for probability fallback)
-      const yearMonth = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
-      const compsetDemand = compsetDemandByMonth.get(yearMonth);
-      
-      // Step 10: If no probability data, use compset occupancy as booking probability proxy
-      let expectedAdditionalWithProbability = probExpected.expectedValue;
-      if (probExpected.openNights === 0 && capacity && capacity.availableNights > 0) {
-        // Fallback: Use compset occupancy as probability proxy
-        const compsetOccupancy = compsetDemand?.occupancyRate || 0.5; // 50% default
-        expectedAdditionalWithProbability = capacity.availableNights * capacity.avgAskingRate * compsetOccupancy;
-        
-        // Apply probability-adjusted cap: don't exceed on books + expected additional
-        const probabilityCappedForecast = onBooks + expectedAdditionalWithProbability;
-        if (blendedForecast > probabilityCappedForecast && !capacityConstrained) {
-          console.log(
-            `  → Probability cap (compset ${(compsetOccupancy * 100).toFixed(0)}% occ): $${blendedForecast.toFixed(0)} → $${probabilityCappedForecast.toFixed(0)}`
-          );
-          blendedForecast = probabilityCappedForecast;
-        }
-      }
-      
       const additionalNeeded = Math.max(0, blendedForecast - onBooks);
       
       console.log(
@@ -783,6 +920,7 @@ serve(async (req) => {
         `(${probExpected.openNights} open nights @ ${probExpected.avgProbability.toFixed(0)}% avg prob), ` +
         `Blended: $${blendedForecast.toFixed(0)} ` +
         `(${(velocityWeight * 100).toFixed(0)}%V/${(probabilityWeight * 100).toFixed(0)}%P)` +
+        (probabilityAdjusted ? ` [PROB ADJ ${((appliedOccupancy || 0) * 100).toFixed(0)}%]` : '') +
         (capacityConstrained ? ` [CAPACITY CAPPED]` : '') +
         `, Compset: ${compsetDemand?.demandSignal || 'N/A'}`
       );
@@ -816,6 +954,11 @@ serve(async (req) => {
         available_nights: capacity?.availableNights || null,
         avg_asking_rate: capacity?.avgAskingRate || null,
         capacity_constrained: capacityConstrained,
+        
+        // NEW: Lead time decay fields
+        probability_adjusted: probabilityAdjusted,
+        applied_occupancy: appliedOccupancy,
+        effective_nights: effectiveNights,
         
         // Backwards compatible fields
         additional_forecast: additionalNeeded,
@@ -893,6 +1036,9 @@ serve(async (req) => {
 
     console.log(`\n=== Enhanced Forecasting ${year} (as of ${asOfDate.toISOString().split('T')[0]}) ===\n`);
 
+    // Default median booking window (will be updated if booking stats available)
+    const defaultMedianBookingWindow = 30;
+
     for (let month = 0; month < 12; month++) {
       const forecast = forecastEnhanced(
         year,
@@ -904,7 +1050,10 @@ serve(async (req) => {
         probabilityByDate,
         bookedDates,
         compsetDemandByMonth,
-        capacityByMonth
+        capacityByMonth,
+        capacityData || [],
+        compsetSummary || null,
+        defaultMedianBookingWindow
       );
       
       monthlyForecasts.push(forecast);
