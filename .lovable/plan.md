@@ -1,216 +1,215 @@
 
 
-# Enhanced Forecast Accuracy: Apply Occupancy BEFORE Capacity Ceiling + Lead Time Decay
+# Add Gap Quality Penalty to Forecast Accuracy
 
 ## Current Problem
-The February 2026 forecast of **$10,044** is still too high because:
+The March 2026 forecast of $13,050 treats all 10 available nights equally, but they're not:
 
-1. **Capacity ceiling is applied BEFORE probability adjustment** - The code hits the 100% capacity ceiling ($10,044) and sets `capacityConstrained = true`, which prevents the more realistic probability cap from being applied
-2. **Fallback to 50% occupancy** - When no booking probabilities exist, the code falls back to `compset_occupancy || 0.5`, but `compsetDemandByMonth` is empty (future_monthly_averages has 0 entries), so it defaults to 50% instead of using the historical 76-84% February occupancy
-3. **No lead time decay** - With only 18 days until mid-February, some nights may be too late to book based on this property's booking patterns (61% of bookings come 60+ days out)
+| Gap | Dates | Nights | Current Treatment | Reality |
+|-----|-------|--------|-------------------|---------|
+| Gap 1 | Mar 6-13 | 8 nights | 100% weight each | Unlikely to get full 8-night booking |
+| Gap 2 | Mar 20 | 1 night | 100% weight | Orphan night - very hard to book |
+| Gap 3 | Mar 28 | 1 night | 100% weight | Orphan night - very hard to book |
 
-## Data Analysis
+### Historical Booking Patterns (102 De Leon)
+- **2-night stays**: 5 bookings (28%) - most common
+- **5-night stays**: 4 bookings (22%) 
+- **7-night stays**: 3 bookings (17%)
+- **3-4 night stays**: 2 bookings (11%)
+- **8+ night stays**: 2 bookings (11%) - rare
 
-### Your February 2026 Calendar
-- **9 available nights**: Feb 1-7, Feb 22, Feb 28
-- **19 booked nights**: $6,653 confirmed
-- **Asking rates**: $331-$446 (avg $377)
+## Solution: Add Gap Quality Analysis
 
-### Compset Historical February Occupancy
-| Year | Occupancy | Revenue |
-|------|-----------|---------|
-| 2025 | 84% | $10,797 |
-| 2024 | 72% | $9,288 |
-| 2023 | 72% | $8,267 |
-| 2022 | 92% | $8,283 |
-| **Avg** | **~76-80%** | **$9,159** |
+### Gap Penalty Logic
 
-### Your Booking Lead Time Pattern
-| Lead Time | Bookings | Share |
-|-----------|----------|-------|
-| 60+ days | 11 | 61% |
-| 30-60 days | 1 | 6% |
-| 14-30 days | 1 | 6% |
-| 7-14 days | 2 | 11% |
-| 0-7 days | 3 | 17% |
+**1. Orphan Nights (1-night gaps)**
+Single nights surrounded by booked dates are extremely hard to fill. Apply 15-25% booking probability.
 
-Most bookings come 60+ days out. Feb 1-7 are only 4-10 days away - these are in "last minute" territory.
+**2. Short Gaps (2-3 nights)**
+Below typical minimum stay requirements. Apply 40-60% probability.
 
-## Solution: Three-Part Fix
+**3. Medium Gaps (4-6 nights)**
+Sweet spot for this property's booking patterns. Apply 80-90% probability.
 
-### Part 1: Use Historical Compset Occupancy When Future Data is Missing
-```typescript
-// In forecastEnhanced(), before capacity ceiling logic:
+**4. Large Gaps (7+ nights)**
+Unlikely to fill completely. Calculate expected fill based on historical stay length distribution.
 
-// Look up historical occupancy for same month if future data missing
-let monthOccupancy = compsetDemand?.occupancyRate;
-
-if (!monthOccupancy && compsetSummary?.monthly_averages) {
-  // Find matching month from historical data (e.g., any "-02" for February)
-  const historicalMonths = (compsetSummary.monthly_averages as any[])
-    .filter(m => {
-      const monthKey = m.month || '';
-      return monthKey.endsWith(`-${String(targetMonth + 1).padStart(2, '0')}`);
-    });
-  
-  if (historicalMonths.length > 0) {
-    // Average the occupancy across available years
-    const totalOcc = historicalMonths.reduce((sum, m) => 
-      sum + (m.occupancy || m.occupancy_rate || 0), 0);
-    monthOccupancy = totalOcc / historicalMonths.length;
-    
-    // Normalize to 0-1 if percentage
-    if (monthOccupancy > 1) monthOccupancy = monthOccupancy / 100;
-  }
-}
-
-// Default to 65% if still no data
-monthOccupancy = monthOccupancy || 0.65;
-```
-
-### Part 2: Apply Lead Time Decay to Available Nights
-Different DBA (days before arrival) have different booking probabilities:
+### Implementation
 
 ```typescript
-// Calculate probability-weighted available nights
-function applyLeadTimeDecay(
-  availableNights: { date: string; price: number }[],
-  bookingStats: { median_booking_window: number },
-  today: Date
-): { effectiveNights: number; weightedRevenue: number } {
+// NEW: Analyze gap structure and apply quality penalties
+function analyzeGapQuality(
+  availableNights: Array<{ date: string; price: number }>,
+  historicalStayLengths: { nights: number; count: number }[]
+): { 
+  effectiveNights: number; 
+  weightedRevenue: number; 
+  gaps: Array<{ startDate: string; nights: number; penalty: number; reason: string }> 
+} {
   
-  let effectiveNights = 0;
-  let weightedRevenue = 0;
+  // Group consecutive available nights into gaps
+  const gaps: Array<{ dates: { date: string; price: number }[]; startDate: string }> = [];
+  let currentGap: { date: string; price: number }[] = [];
   
-  for (const night of availableNights) {
-    const nightDate = new Date(night.date);
-    const dba = Math.floor((nightDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    
-    // Lead time decay factor based on typical booking window
-    let leadTimeFactor: number;
-    const medianWindow = bookingStats.median_booking_window || 30;
-    
-    if (dba > medianWindow * 2) {
-      // Very far out - still time, but some uncertainty
-      leadTimeFactor = 0.85;
-    } else if (dba >= medianWindow) {
-      // Prime booking window
-      leadTimeFactor = 1.0;
-    } else if (dba >= medianWindow * 0.5) {
-      // Getting late
-      leadTimeFactor = 0.75;
-    } else if (dba >= 7) {
-      // Last minute territory
-      leadTimeFactor = 0.50;
-    } else {
-      // Very last minute (0-7 days)
-      leadTimeFactor = 0.30;
-    }
-    
-    effectiveNights += leadTimeFactor;
-    weightedRevenue += night.price * leadTimeFactor;
-  }
-  
-  return { effectiveNights, weightedRevenue };
-}
-```
-
-### Part 3: Apply Probability Adjustment BEFORE Capacity Ceiling
-The key fix is ordering - calculate the realistic probability-adjusted forecast FIRST:
-
-```typescript
-// Step 7 (NEW): Calculate probability-adjusted forecast FIRST
-let probabilityAdjustedForecast: number | null = null;
-
-if (capacity && capacity.availableNights > 0) {
-  // Get lead-time weighted available nights
-  const leadTimeAdjusted = applyLeadTimeDecay(
-    capacity.availableNightsDetails, // Need to pass the actual dates
-    bookingStats,
-    asOfDate
+  const sortedNights = [...availableNights].sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime()
   );
   
-  // Expected additional = weighted nights × avg rate × compset occupancy
-  const expectedAdditional = leadTimeAdjusted.weightedRevenue * monthOccupancy;
-  
-  probabilityAdjustedForecast = onBooks + expectedAdditional;
-  
-  if (blendedForecast > probabilityAdjustedForecast) {
-    console.log(
-      `  → Probability adjusted: $${blendedForecast.toFixed(0)} → $${probabilityAdjustedForecast.toFixed(0)} ` +
-      `(${leadTimeAdjusted.effectiveNights.toFixed(1)} effective nights × ${(monthOccupancy * 100).toFixed(0)}% occ)`
-    );
-    blendedForecast = probabilityAdjustedForecast;
+  for (let i = 0; i < sortedNights.length; i++) {
+    const night = sortedNights[i];
+    const prevNight = sortedNights[i - 1];
+    
+    if (prevNight) {
+      const dayDiff = Math.floor(
+        (new Date(night.date).getTime() - new Date(prevNight.date).getTime()) / (1000 * 60 * 60 * 24)
+      );
+      
+      if (dayDiff > 1) {
+        // Non-consecutive - save current gap and start new one
+        if (currentGap.length > 0) {
+          gaps.push({ dates: currentGap, startDate: currentGap[0].date });
+        }
+        currentGap = [night];
+      } else {
+        currentGap.push(night);
+      }
+    } else {
+      currentGap.push(night);
+    }
   }
+  
+  // Don't forget the last gap
+  if (currentGap.length > 0) {
+    gaps.push({ dates: currentGap, startDate: currentGap[0].date });
+  }
+  
+  // Apply penalties based on gap size
+  let totalEffectiveNights = 0;
+  let totalWeightedRevenue = 0;
+  const gapResults: Array<{ startDate: string; nights: number; penalty: number; reason: string }> = [];
+  
+  for (const gap of gaps) {
+    const gapSize = gap.dates.length;
+    const gapRevenue = gap.dates.reduce((sum, d) => sum + d.price, 0);
+    
+    let penalty: number;
+    let reason: string;
+    
+    if (gapSize === 1) {
+      // Orphan night - very hard to book
+      penalty = 0.20;
+      reason = 'Orphan night (1-night gap)';
+    } else if (gapSize === 2) {
+      // 2-night gap - below many min stays but this property has 2-night bookings
+      penalty = 0.50;
+      reason = '2-night gap (below typical min stay)';
+    } else if (gapSize === 3) {
+      // 3-night gap - common minimum stay
+      penalty = 0.65;
+      reason = '3-night gap';
+    } else if (gapSize <= 5) {
+      // 4-5 night gap - sweet spot based on booking patterns
+      penalty = 0.85;
+      reason = `${gapSize}-night gap (sweet spot)`;
+    } else if (gapSize <= 7) {
+      // 6-7 night gap - good size, likely to fill
+      penalty = 0.80;
+      reason = `${gapSize}-night gap (likely partial fill)`;
+    } else {
+      // 8+ night gap - unlikely to fill completely
+      // Estimate: most likely to get a 4-5 night booking + maybe a 2-night
+      const expectedFill = Math.min(gapSize, 5 + 2); // ~7 nights max expected
+      penalty = expectedFill / gapSize;
+      reason = `${gapSize}-night gap (expect ~${expectedFill} nights booked)`;
+    }
+    
+    totalEffectiveNights += gapSize * penalty;
+    totalWeightedRevenue += gapRevenue * penalty;
+    
+    gapResults.push({
+      startDate: gap.startDate,
+      nights: gapSize,
+      penalty,
+      reason
+    });
+  }
+  
+  return {
+    effectiveNights: totalEffectiveNights,
+    weightedRevenue: totalWeightedRevenue,
+    gaps: gapResults
+  };
 }
-
-// Step 8: Apply capacity ceiling as ABSOLUTE maximum (safety cap)
-// This is now a backup, not the primary constraint
 ```
 
-## Example Calculation for February 2026
+### Integration with Existing Lead Time Decay
 
-### Available Nights with Lead Time Decay (as of Jan 28)
-| Date | Asking Rate | DBA | Lead Time Factor | Weighted Value |
-|------|-------------|-----|------------------|----------------|
-| Feb 1 | $356 | 4 | 0.30 | $107 |
-| Feb 2 | $331 | 5 | 0.30 | $99 |
-| Feb 3 | $332 | 6 | 0.30 | $100 |
-| Feb 4 | $344 | 7 | 0.50 | $172 |
-| Feb 5 | $379 | 8 | 0.50 | $190 |
-| Feb 6 | $445 | 9 | 0.50 | $223 |
-| Feb 7 | $446 | 10 | 0.50 | $223 |
-| Feb 22 | $344 | 25 | 0.75 | $258 |
-| Feb 28 | $414 | 31 | 1.00 | $414 |
-| **Total** | | | **4.65 eff nights** | **$1,786** |
+The gap quality penalty should be applied AFTER lead time decay:
 
-### Final Calculation
-- **On Books**: $6,653
-- **Weighted Available Value**: $1,786
-- **Compset Occupancy**: 80% (Feb historical avg)
-- **Expected Additional**: $1,786 × 80% = **$1,429**
-- **Probability-Adjusted Forecast**: $6,653 + $1,429 = **$8,082**
-- **Capacity Ceiling**: $10,044 (backup max)
-- **Final Forecast**: **$8,082**
-
-## Additional Accuracy Improvements
-
-### 1. Day-of-Week Weighting (Future Enhancement)
-Your booking data shows uniform day-of-week distribution (13-14 nights each). For now, this isn't a factor, but for properties with weekend-heavy patterns, this could be added.
-
-### 2. Price Position Adjustment
-If your rates are significantly above/below compset, adjust probability accordingly:
 ```typescript
-const priceRatio = avgAskingRate / compsetAvgRate;
-let priceAdjustment = 1.0;
-if (priceRatio > 1.15) priceAdjustment = 0.85; // 15%+ above market
-else if (priceRatio > 1.05) priceAdjustment = 0.92; // 5-15% above
-else if (priceRatio < 0.85) priceAdjustment = 1.10; // 15%+ below
+// Step 1: Apply lead time decay (existing)
+const leadTimeResult = applyLeadTimeDecay(...);
 
-expectedAdditional *= priceAdjustment;
+// Step 2: Apply gap quality penalty (NEW)
+const gapResult = analyzeGapQuality(
+  leadTimeResult.details.map(d => ({ date: d.date, price: d.price })),
+  historicalStayLengths
+);
+
+// Final weighted revenue = lead time weighted × gap penalty
+const finalWeightedRevenue = gapResult.weightedRevenue;
+const finalEffectiveNights = gapResult.effectiveNights;
+
+// Log the gap analysis
+for (const gap of gapResult.gaps) {
+  console.log(
+    `  → Gap ${gap.startDate}: ${gap.nights} nights × ${(gap.penalty * 100).toFixed(0)}% = ` +
+    `${(gap.nights * gap.penalty).toFixed(1)} effective (${gap.reason})`
+  );
+}
 ```
 
-### 3. Booking Probabilities Calculation
-Run `calculate-booking-probabilities` for 102 De Leon to get per-night probability scores. This would replace the occupancy-based estimate with actual probability data.
+## March 2026 Calculation Example
+
+### Before (Current)
+| Component | Value |
+|-----------|-------|
+| On Books | $8,413 |
+| 10 available nights × $519 avg × 89% occ | $4,637 |
+| **Forecast** | **$13,050** |
+
+### After (With Gap Quality)
+| Gap | Nights | Avg Rate | Gap Penalty | Effective Value |
+|-----|--------|----------|-------------|-----------------|
+| Mar 6-13 | 8 | $534 | 87.5% (expect ~7 nights) | $3,738 |
+| Mar 20 | 1 | $443 | 20% (orphan) | $89 |
+| Mar 28 | 1 | $427 | 20% (orphan) | $85 |
+| **Total** | **10** | | | **$3,912** |
+
+Then apply compset occupancy (89%):
+- Expected Additional: $3,912 × 89% = **$3,482**
+- **New Forecast: $8,413 + $3,482 = $11,895**
+
+This is more realistic - acknowledging that the 2 orphan nights likely won't book and the 8-night gap probably won't fill completely.
 
 ## Changes Summary
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/forecast-revenue/index.ts` | Add historical occupancy lookup, lead time decay function, reorder probability vs capacity ceiling logic |
+| `supabase/functions/forecast-revenue/index.ts` | Add `analyzeGapQuality()` function, integrate with existing lead time decay, add gap logging |
 
 ## Expected Results
 
 | Month | Before | After | Notes |
 |-------|--------|-------|-------|
-| Feb 2026 | $10,044 | ~$8,000-8,500 | Lead time decay + 80% occupancy |
-| Mar 2026 | (check) | (check) | More time = less decay |
-| Apr 2026 | (check) | (check) | Far out = minimal decay |
+| Feb 2026 | $7,962 | ~$7,500 | 2 orphan nights get penalized |
+| Mar 2026 | $13,050 | ~$11,800 | 8-night gap + 2 orphans |
+| Apr+ | (check) | (check) | Depends on gap structure |
 
 ## Testing Plan
 1. Regenerate forecast for 102 De Leon
-2. Verify February shows ~$8,000-8,500 (not $10,044)
-3. Check logs show "Probability adjusted" with lead time info
-4. Verify months with longer lead times aren't over-penalized
-5. Run `calculate-booking-probabilities` to get per-night data
+2. Verify March shows ~$11,800 (not $13,050)
+3. Check logs show gap analysis breakdown
+4. Verify orphan nights show 20% penalty
+5. Verify large gaps show partial-fill expectation
 
