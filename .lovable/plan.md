@@ -1,68 +1,66 @@
 
 
-## Fix Same Store Filter in PacingReport Component
+## Fix Property-Level Reservation Sync
 
-### Problem Identified
-The `PacingReport` component receives a `listingIds` prop to filter which properties should be included in metrics, but the calculation functions (`calculateBookedRevenue`, `calculateOwnerNights`, and `monthlyData`) iterate over ALL reservations without checking if each reservation's `listing_id` is in the `effectiveListingIds` array.
+### Issues Identified
 
-**Current behavior:**
-- Revenue/Nights are calculated from ALL reservations (ignoring the filter)
-- Occupancy/RevPAR denominators use the filtered property count
-- This causes a mismatch when "Same Store Only" is checked
+1. **Wrong API Parameter**: The `sync-listing-reservations` edge function passes `listingId` (singular) to the Guesty API, but Guesty's `/v1/reservations` endpoint expects `listingIds` (plural, as a comma-separated string or using filters). This causes the function to fetch ALL account reservations instead of just the specific property.
 
-### Solution
-Filter reservations to only include those belonging to `effectiveListingIds` before using them in calculations.
+2. **Missing Reservation**: The Amy Park reservation `6972bb9c3e299b003290def0` isn't in the database because either:
+   - It was created after the last sync (14:52 UTC today)
+   - Or the API returned all reservations but this one has an unusual status
 
 ### Implementation Plan
 
-#### Update `src/components/PacingReport.tsx`
+#### Update `supabase/functions/sync-listing-reservations/index.ts`
 
-**1. Create Filtered Reservations:**
-Add a `useMemo` early in the component to pre-filter reservations by listing IDs:
+**Fix the Guesty API parameter:**
 
+Change line 383-388 from:
 ```typescript
-// Filter reservations to only include those for the effective listing IDs
-const filteredReservations = useMemo(() => {
-  if (effectiveListingIds.length === 0) return reservations;
-  const listingIdSet = new Set(effectiveListingIds);
-  return reservations.filter(r => r.listing_id && listingIdSet.has(r.listing_id));
-}, [reservations, effectiveListingIds]);
+const result = await fetchGuestyData(apiToken, 'reservations', {
+  limit,
+  skip,
+  listingId: listingId,
+  fields: '...',
+});
 ```
 
-**2. Update All Calculation Calls:**
-Replace `reservations` with `filteredReservations` in:
+To:
+```typescript
+const result = await fetchGuestyData(apiToken, 'reservations', {
+  limit,
+  skip,
+  listingIds: listingId,  // Changed from listingId to listingIds
+  fields: '...',
+});
+```
 
-- `calculatePacingMetrics()` function:
-  - Line 288: `calculateBookedRevenue(..., filteredReservations, ...)`
-  - Line 295: `calculateBookedRevenue(..., filteredReservations, ...)`
-  - Line 330: `calculateOwnerNights(..., filteredReservations, ...)`
-  - Line 331: `calculateOwnerNights(..., filteredReservations, ...)`
-
-- `monthlyData` useMemo (lines 411-412):
-  - `calculateBookedRevenue(periodStart, periodEnd, filteredReservations, currentCutoff)`
-  - `calculateBookedRevenue(lastYearPeriodStart, lastYearPeriodEnd, filteredReservations, lastYearCutoff)`
-
-**3. Update useMemo Dependencies:**
-Update the `monthlyData` dependency array to include `filteredReservations` instead of `reservations`.
+According to Guesty API documentation, the reservations endpoint accepts `listingIds` (plural) as a comma-separated string of listing IDs to filter by.
 
 ### Technical Details
 
-**Why a Set for filtering:**
-Using a `Set` for `listingIdSet` provides O(1) lookup time when filtering reservations, which is more efficient than checking `.includes()` on an array for large datasets.
-
-**Placement of the filter:**
-The filtered reservations memo should be placed right after the `effectiveListingIds` declaration (around line 74) so it's available for all subsequent calculations.
+| Current Behavior | Expected Behavior |
+|-----------------|-------------------|
+| Fetches 1460 reservations (entire account) | Should fetch ~37 reservations (single property) |
+| Parameter `listingId` is ignored by Guesty API | Parameter `listingIds` will filter correctly |
 
 ### Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/components/PacingReport.tsx` | Add filtered reservations memo; update all calculation function calls to use filtered data |
+| `supabase/functions/sync-listing-reservations/index.ts` | Change API parameter from `listingId` to `listingIds` |
 
-### Expected Behavior After Fix
-1. User navigates to Portfolio Overview > Pacing tab
-2. User checks "Same Store Only" checkbox
-3. All metrics (Revenue, Nights, Occupancy, RevPAR) update to only reflect properties with data in both years
-4. Revenue values decrease appropriately when new properties are excluded
-5. YoY comparisons become accurate "apples-to-apples" comparisons
+### After Implementation
+
+1. Re-run the property-level sync for 102 Deleon
+2. Should see ~37 reservations synced (not 1460)
+3. If Amy Park reservation still missing, check in Guesty dashboard that it exists and verify its status
+
+### About the Missing Reservation
+
+Once the fix is deployed, running the sync again should fetch only the correct property's reservations. If the Amy Park reservation (Jan 23-26) still doesn't appear:
+- Verify it exists in Guesty with status `confirmed`, `checked_in`, or `checked_out`
+- Check if the reservation was created very recently (after 14:52 UTC today)
+- The reservation might have a different status like `pending` that isn't being returned
 
