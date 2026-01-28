@@ -1,107 +1,102 @@
 
-# Make Resume Sync Option Persistent
+# Fix Forecast for New Properties Using Compset Data
 
-## Problem
-When a sync job fails with progress to resume from (`last_synced_offset > 0`), the Resume option disappears because:
-1. The card auto-clears after 30 seconds
-2. On page reload, only jobs from the last 5 minutes are shown
-3. Once dismissed, there's no way to get the Resume button back
+## Problem Summary
+102 Deleon is a new property with its first booking in October 2025. When forecasting 2026:
 
-This is frustrating when syncing 27k records and the job fails at 21k - you lose the ability to resume.
+- **No baseline data**: Only 3 months of partial actuals ($9,867)
+- **No velocity comparison**: Can't compare "this year vs last year" when last year doesn't exist
+- **Current baseline**: $368/month (nonsensically low)
+- **Actual bookings on file**: Already $28,552 for 2026
 
-## Solution
-Always show resumable failed jobs (those with `last_synced_offset > 0`) regardless of time, and never auto-dismiss them. Only hide them when the user explicitly dismisses OR when a new sync completes successfully.
+The forecast engine calculates a tiny baseline from the limited 2025 data, resulting in unrealistic projections.
 
-## Changes
+## Available Data
+Your compset already has excellent historical data:
+- 7 selected comparables with 18-60 months of history
+- Compset TTM Revenue: ~$101,000 average
+- Compset monthly averages stored in `property_compset_summary.monthly_averages`
+- Rich seasonality data going back to 2022
 
-### 1. SyncProgressCard.tsx - Update job loading logic
+## Solution: Compset-Based Cold Start
 
-**On mount loading (lines 48-86):**
-- Add a third query specifically for "resumable" failed jobs (no time limit)
-- Check for resumable jobs: `status = 'failed'` AND `last_synced_offset > 0`
-- Priority order: running > resumable failed > recent completed
-
-**Realtime subscription (lines 108-121):**
-- Don't auto-clear failed jobs that have `last_synced_offset > 0`
-- Only auto-clear completed jobs and non-resumable failed jobs
-
-**Resume handlers:**
-- After successful resume, the new running job will naturally replace the failed one
-
-### 2. Updated Logic Flow
+When a property lacks historical data, use compset monthly averages as the baseline:
 
 ```text
-On page load:
-  1. Check for running job -> Show with Stop button
-  2. Check for resumable failed job (any age) -> Show with Resume button  
-  3. Check for recent completed/failed (5 min) -> Show briefly then auto-clear
-
-On job status change:
-  - Running: Show with Stop button
-  - Completed: Auto-clear after 30s
-  - Failed + offset > 0: Keep showing with Resume button (no auto-clear)
-  - Failed + offset = 0: Auto-clear after 30s
+IF property has < 6 months of prior year data
+  THEN baseline = compset monthly averages for the same month
+  AND forecastFloor = compset TTM revenue * growth factor
 ```
 
-### 3. Sync types that support resume
-- `reservations` - Uses `last_synced_offset` 
-- `capacity_calendar` - Uses resume logic (already persistent)
+### Implementation Details
+
+**File: `supabase/functions/forecast-revenue/index.ts`**
+
+1. **Detect "cold start" properties**
+   - Count how many months of prior year data exist
+   - If fewer than 6 months have baselines, flag as "cold start"
+
+2. **Fetch compset monthly averages**
+   - Already querying `property_compset_summary.future_monthly_averages`
+   - Add query for `monthly_averages` (historical compset data)
+
+3. **Build compset-derived baseline**
+   - Extract the most recent 12 months of compset monthly averages
+   - Use these as the monthly baseline values
+   - Apply a slight discount factor (e.g., 0.85) since new properties typically underperform established comps initially
+
+4. **Set appropriate forecast floor**
+   - For cold start properties: floor = compset TTM revenue * 0.80
+   - This prevents unrealistic lows while allowing for new property ramp-up
+
+5. **Adjust velocity calculation**
+   - When no prior year data exists, use baseline (velocity = 1.0)
+   - Compare current bookings to compset occupancy patterns instead
+
+### Example Calculation for 102 Deleon
+
+| Month | Compset Avg | Adjusted Baseline (0.85x) | Current On Books |
+|-------|-------------|---------------------------|------------------|
+| Jan   | $7,318      | $6,220                    | $640             |
+| Feb   | $10,797     | $9,178                    | $6,653           |
+| Mar   | $13,912     | $11,825                   | $8,413           |
+| Apr   | $10,780     | $9,163                    | $5,810           |
+| ...   | ...         | ...                       | ...              |
+
+**Projected Annual**: ~$85,000-95,000 (vs current ~$48,000)
+
+This is much more realistic for a 3BR Cocoa Beach property with comparable ADRs in the $300-400 range.
+
+### Changes Summary
+
+```text
+1. Add cold start detection logic (~15 lines)
+2. Query property_compset_summary.monthly_averages (~5 lines)
+3. Build compset-derived baseline when needed (~30 lines)
+4. Adjust forecastFloor for cold start properties (~10 lines)
+5. Log cold start mode for debugging (~5 lines)
+```
+
+### Alternative Approaches Considered
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Compset baseline (recommended)** | Uses real market data, accounts for seasonality | Requires compset setup |
+| Manual goal entry | Simple, user-controlled | Doesn't improve automated forecast |
+| ADR * occupancy estimate | Quick calculation | Ignores seasonal patterns |
+
+### Testing
+
+After implementation:
+1. Regenerate forecast for 102 Deleon
+2. Verify baseline values reflect compset averages
+3. Confirm forecast shows realistic annual projection ($80k-100k)
+4. Ensure properties WITH historical data are unaffected
 
 ---
 
-## Technical Details
+## What You'll See After This Fix
 
-### File: `src/components/SyncProgressCard.tsx`
-
-**Change 1: Add query for resumable jobs on mount**
-```typescript
-// After checking for running job, before checking recent jobs:
-// Check for resumable failed jobs (no time limit)
-const { data: resumableJob } = await supabase
-  .from('sync_jobs')
-  .select('*')
-  .eq('guesty_account_id', accountId)
-  .eq('sync_type', syncType)
-  .eq('status', 'failed')
-  .gt('last_synced_offset', 0)
-  .order('started_at', { ascending: false })
-  .limit(1)
-  .maybeSingle();
-
-if (resumableJob) {
-  setSyncJob(resumableJob as SyncJob);
-  setDismissed(false);
-  return; // Don't auto-clear resumable jobs
-}
-```
-
-**Change 2: Update realtime auto-clear logic**
-```typescript
-// In the realtime subscription callback:
-if (job.status === 'completed' || job.status === 'completed_with_errors') {
-  // Auto-clear completed jobs
-  setTimeout(() => setSyncJob(null), 30000);
-} else if (job.status === 'failed') {
-  // Only auto-clear failed jobs that can't be resumed
-  if (!job.last_synced_offset || job.last_synced_offset === 0) {
-    setTimeout(() => setSyncJob(null), 30000);
-  }
-  // Resumable failed jobs stay visible until dismissed or resumed
-}
-```
-
-**Change 3: Show progress info for failed resumable jobs**
-```typescript
-// Update showProgress to also show for resumable failed jobs
-const canResume = isFailed && syncJob.last_synced_offset && syncJob.last_synced_offset > 0;
-const showProgress = (syncJob.status === 'running' || canResume) && 
-  (syncJob.items_synced !== null || syncJob.total_items !== null);
-```
-
-## Testing
-1. Start a reservations sync, let it reach ~5000 records
-2. Click Stop to cancel it
-3. Refresh the page - Resume button should still appear
-4. Wait 10+ minutes, refresh again - Resume button should still be there
-5. Click Resume - sync should continue from the offset
-6. After completion, the card should auto-dismiss normally
+- 102 Deleon's 2026 forecast will show ~$85-95k projected revenue
+- The seasonal pattern will match the local market (peak in summer, March)
+- Current bookings ($28k) will be shown as healthy pacing vs compset patterns
