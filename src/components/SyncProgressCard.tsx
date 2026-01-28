@@ -64,7 +64,25 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
         return;
       }
       
-      // If no running job, look for recent completed/failed jobs (last 5 minutes)
+      // Check for resumable failed jobs (no time limit) - these persist until dismissed or resumed
+      const { data: resumableJob } = await supabase
+        .from('sync_jobs')
+        .select('*')
+        .eq('guesty_account_id', accountId)
+        .eq('sync_type', syncType)
+        .eq('status', 'failed')
+        .gt('last_synced_offset', 0)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (resumableJob) {
+        setSyncJob(resumableJob as SyncJob);
+        setDismissed(false);
+        return; // Don't auto-clear resumable jobs
+      }
+      
+      // If no running or resumable job, look for recent completed/failed jobs (last 5 minutes)
       const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       const { data: recentJob } = await supabase
         .from('sync_jobs')
@@ -105,7 +123,7 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
             setSyncJob(job);
             setDismissed(false); // Show new job, clear any previous dismissal
             
-            // Auto-clear after completed/failed and trigger callbacks
+            // Handle completed/failed jobs
             if (job.status === 'completed' || job.status === 'completed_with_errors' || job.status === 'failed') {
               // Invalidate comparables query to refresh data
               if (syncType === 'comparable_historical' || syncType === 'comparable_future_rates') {
@@ -117,7 +135,17 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
                 onComplete();
               }
               
-              setTimeout(() => setSyncJob(null), 30000); // 30 seconds
+              // Only auto-clear if job is not resumable
+              // Resumable jobs (failed with offset > 0) stay visible until dismissed
+              if (job.status === 'completed' || job.status === 'completed_with_errors') {
+                setTimeout(() => setSyncJob(null), 30000); // 30 seconds
+              } else if (job.status === 'failed') {
+                // Only auto-clear failed jobs that can't be resumed
+                if (!job.last_synced_offset || job.last_synced_offset === 0) {
+                  setTimeout(() => setSyncJob(null), 30000);
+                }
+                // Resumable failed jobs stay visible until dismissed or resumed
+              }
             }
           }
         }
@@ -216,9 +244,13 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
     ? (syncJob.items_synced / syncJob.total_items) * 100
     : undefined;
 
-  const showProgress = syncJob.status === 'running' && (syncJob.items_synced !== null || syncJob.total_items !== null);
   const isCompleted = syncJob.status === 'completed' || syncJob.status === 'completed_with_errors';
   const isFailed = syncJob.status === 'failed';
+  const canResume = isFailed && syncJob.last_synced_offset && syncJob.last_synced_offset > 0;
+  
+  // Show progress for running jobs AND resumable failed jobs (so user sees where they left off)
+  const showProgress = (syncJob.status === 'running' || canResume) && 
+    (syncJob.items_synced !== null || syncJob.total_items !== null);
 
   return (
     <Card className="border-primary/50 bg-primary/5">
