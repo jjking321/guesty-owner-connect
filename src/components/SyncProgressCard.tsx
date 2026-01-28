@@ -184,6 +184,32 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
     }
   };
 
+  const handleResumeReservations = async () => {
+    if (!syncJob) return;
+    
+    try {
+      setStopping(true);
+      const { data, error } = await supabase.functions.invoke('sync-guesty-data', {
+        body: { accountId, syncType: 'reservations' }
+      });
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Reservations sync resumed",
+        description: "Sync has been resumed from where it left off",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Failed to resume reservations sync",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setStopping(false);
+    }
+  };
+
   if (!syncJob || dismissed) return null;
 
   const progress = syncJob.total_items && syncJob.items_synced
@@ -237,8 +263,7 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
                 </Button>
               )}
               
-              
-              {/* Resume button - only show for failed capacity_calendar */}
+              {/* Resume button - show for failed capacity_calendar or reservations with offset > 0 */}
               {isFailed && syncType === 'capacity_calendar' && (
                 <Button
                   variant="ghost"
@@ -249,6 +274,20 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
                 >
                   <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
                   Resume
+                </Button>
+              )}
+              
+              {/* Resume button for reservations with progress to resume from */}
+              {isFailed && syncType === 'reservations' && syncJob.last_synced_offset && syncJob.last_synced_offset > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleResumeReservations}
+                  disabled={stopping}
+                >
+                  <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
+                  Resume from {syncJob.last_synced_offset.toLocaleString()}
                 </Button>
               )}
               

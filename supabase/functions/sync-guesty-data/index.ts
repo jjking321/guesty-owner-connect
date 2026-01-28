@@ -339,8 +339,8 @@ async function fetchAndSaveReservationsBatch(
   jobId: string,
   startOffset: number = 0,
   startTime: number = Date.now(),
-  onProgress?: (fetched: number, saved: number, total?: number) => Promise<void>
-): Promise<{ totalFetched: number; totalSaved: number; needsContinuation: boolean; nextOffset: number }> {
+  onProgress?: (fetched: number, saved: number, total?: number, absoluteProcessed?: number) => Promise<void>
+): Promise<{ totalFetched: number; totalSaved: number; needsContinuation: boolean; nextOffset: number; cancelled: boolean }> {
   let skip = startOffset;
   const limit = 100;
   const batchSize = 1000; // Save every 1000 records
@@ -417,28 +417,41 @@ async function fetchAndSaveReservationsBatch(
           }
 
           totalSaved += uniqueReservations.length;
-          console.log(`Saved batch successfully. Total saved: ${totalSaved}`);
+          const absoluteProcessed = skip + limit; // Use offset-based progress (monotonic)
+          console.log(`Saved batch successfully. Total saved this invocation: ${totalSaved}, Absolute processed: ${absoluteProcessed}`);
           
-          // Update progress
+          // Update progress with absolute offset-based count
           if (onProgress) {
-            await onProgress(totalFetched, totalSaved, data.count);
+            await onProgress(totalFetched, totalSaved, data.count, absoluteProcessed);
           }
           
           // Update job with last synced offset for resumability
-          // Save the NEXT offset to resume from, not the current one
+          // Use absolute processed offset for items_synced (monotonic across invocations)
           await updateSyncJob(supabase, jobId, {
-            progress_message: `Saved ${totalSaved} reservations (fetched ${totalFetched}${data.count ? `/${data.count}` : ''})`,
-            items_synced: totalSaved,
+            progress_message: `Processed ${absoluteProcessed.toLocaleString()}${data.count ? ` of ${data.count.toLocaleString()}` : ''} (saved +${totalSaved.toLocaleString()} this batch)`,
+            items_synced: absoluteProcessed, // MONOTONIC: offset-based, never resets
             total_items: data.count,
             last_synced_offset: skip + limit,
           });
+          
+          // Check if job was cancelled (user clicked Stop)
+          const { data: jobStatus } = await supabase
+            .from('sync_jobs')
+            .select('status')
+            .eq('id', jobId)
+            .single();
+          
+          if (jobStatus && jobStatus.status !== 'running') {
+            console.log(`Job ${jobId} was cancelled (status: ${jobStatus.status}), stopping gracefully`);
+            return { totalFetched, totalSaved, needsContinuation: false, nextOffset: 0, cancelled: true };
+          }
           
           // Clear batch
           batch = [];
         }
       } else if (onProgress) {
-        // Update progress without saving
-        await onProgress(totalFetched, totalSaved, data.count);
+        // Update progress without saving (use current offset as absolute progress)
+        await onProgress(totalFetched, totalSaved, data.count, skip + reservations.length);
       }
 
       // Check if we need to self-invoke (approaching timeout or batch limit)
@@ -454,7 +467,8 @@ async function fetchAndSaveReservationsBatch(
           totalFetched, 
           totalSaved, 
           needsContinuation: true, 
-          nextOffset: skip + limit 
+          nextOffset: skip + limit,
+          cancelled: false
         };
       }
 
@@ -514,7 +528,7 @@ async function fetchAndSaveReservationsBatch(
     }
   }
 
-  return { totalFetched, totalSaved, needsContinuation: false, nextOffset: 0 };
+  return { totalFetched, totalSaved, needsContinuation: false, nextOffset: 0, cancelled: false };
 }
 
 async function createSyncJob(supabase: any, accountId: string, syncType: string): Promise<string> {
@@ -731,7 +745,7 @@ Deno.serve(async (req) => {
 
         const syncStartTime = Date.now();
         
-        const { totalFetched, totalSaved, needsContinuation, nextOffset } = await fetchAndSaveReservationsBatch(
+        const { totalFetched, totalSaved, needsContinuation, nextOffset, cancelled } = await fetchAndSaveReservationsBatch(
           accessToken,
           defaultStartDate,
           supabase,
@@ -739,10 +753,12 @@ Deno.serve(async (req) => {
           jobId,
           startOffsetValue,
           syncStartTime,
-          async (fetched: number, saved: number, total?: number) => {
+          async (fetched: number, saved: number, total?: number, absoluteProcessed?: number) => {
+            // Use absoluteProcessed (offset-based) for items_synced to maintain monotonic progress
+            const progressValue = absoluteProcessed ?? (startOffsetValue + fetched);
             await updateSyncJob(supabase, jobId, {
-              progress_message: `Processing: fetched ${fetched}, saved ${saved}${total ? `/${total}` : ''}`,
-              items_synced: saved,
+              progress_message: `Processed ${progressValue.toLocaleString()}${total ? ` of ${total.toLocaleString()}` : ''} (saved +${saved.toLocaleString()} this batch)`,
+              items_synced: progressValue, // MONOTONIC: offset-based progress
               total_items: total,
             });
           }
@@ -750,13 +766,28 @@ Deno.serve(async (req) => {
 
         reservationsCount = totalSaved;
 
+        // If cancelled by user, exit gracefully without self-invocation
+        if (cancelled) {
+          console.log('Sync was cancelled by user, exiting gracefully');
+          return new Response(
+            JSON.stringify({
+              success: true,
+              listingsCount,
+              reservationsCount,
+              cancelled: true,
+              message: 'Sync was stopped by user',
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         // If self-invocation is needed, trigger continuation and return early
         if (needsContinuation) {
           console.log(`Self-invoking to continue from offset ${nextOffset}...`);
           
           await updateSyncJob(supabase, jobId, {
-            progress_message: `Saved ${totalSaved} reservations. Continuing in next batch from offset ${nextOffset}...`,
-            items_synced: totalSaved,
+            progress_message: `Processed ${nextOffset.toLocaleString()} so far. Continuing in next batch...`,
+            items_synced: nextOffset, // MONOTONIC: use nextOffset as absolute progress
             last_synced_offset: nextOffset,
           });
 
@@ -778,17 +809,18 @@ Deno.serve(async (req) => {
               listingsCount,
               reservationsCount,
               continuing: true,
-              message: `Processed ${totalSaved} reservations. Continuation triggered.`,
+              message: `Processed ${nextOffset} reservations. Continuation triggered.`,
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
 
-        // Sync completed fully
+        // Sync completed fully - use absolute offset for final count
+        const finalProcessed = startOffsetValue + totalFetched;
         await updateSyncJob(supabase, jobId, {
           status: 'completed',
-          progress_message: `Completed: ${totalSaved} reservations synced (fetched ${totalFetched})`,
-          items_synced: totalSaved,
+          progress_message: `Completed: ${finalProcessed.toLocaleString()} reservations processed (${totalSaved.toLocaleString()} saved this batch)`,
+          items_synced: finalProcessed, // MONOTONIC: absolute offset-based final count
           completed_at: new Date().toISOString(),
           last_synced_offset: 0,
         });
