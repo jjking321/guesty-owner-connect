@@ -107,6 +107,73 @@ serve(async (req) => {
       console.log('Warning: Could not fetch compset summary:', compsetError.message);
     }
 
+    // Fetch capacity calendar for available nights and asking rates
+    const { data: capacityData, error: capacityError } = await supabase
+      .from('capacity_calendar')
+      .select('date, price, status, is_available')
+      .eq('listing_id', listingId)
+      .gte('date', `${year}-01-01`)
+      .lte('date', `${year}-12-31`);
+
+    if (capacityError) {
+      console.log('Warning: Could not fetch capacity calendar:', capacityError.message);
+    }
+
+    // Build capacity summary by month
+    interface MonthCapacity {
+      availableNights: number;
+      bookedNights: number;
+      blockedNights: number;
+      avgAskingRate: number;
+      maxPossibleRevenue: number;
+      prices: number[];
+    }
+    
+    const capacityByMonth: Record<number, MonthCapacity> = {};
+    
+    for (const day of capacityData || []) {
+      const month = new Date(day.date).getMonth();
+      if (!capacityByMonth[month]) {
+        capacityByMonth[month] = {
+          availableNights: 0,
+          bookedNights: 0,
+          blockedNights: 0,
+          avgAskingRate: 0,
+          maxPossibleRevenue: 0,
+          prices: []
+        };
+      }
+      
+      const price = Number(day.price) || 0;
+      
+      // Check status - 'available' means bookable, 'booked' or 'reserved' means confirmed
+      // Some records use is_available boolean, others use status string
+      if (day.status === 'available' || (day.is_available === true && !day.status)) {
+        capacityByMonth[month].availableNights++;
+        if (price > 0) {
+          capacityByMonth[month].prices.push(price);
+        }
+      } else if (day.status === 'booked' || day.status === 'reserved') {
+        capacityByMonth[month].bookedNights++;
+      } else {
+        capacityByMonth[month].blockedNights++;
+      }
+    }
+    
+    // Calculate averages and max possible revenue for each month
+    for (const monthKey of Object.keys(capacityByMonth)) {
+      const month = parseInt(monthKey);
+      const cap = capacityByMonth[month];
+      cap.avgAskingRate = cap.prices.length > 0 
+        ? cap.prices.reduce((a, b) => a + b, 0) / cap.prices.length 
+        : 0;
+      cap.maxPossibleRevenue = cap.availableNights * cap.avgAskingRate;
+    }
+
+    console.log('Capacity by month:', Object.entries(capacityByMonth).map(([m, c]) => 
+      `${parseInt(m) + 1}: ${c.availableNights} avail, ${c.bookedNights} booked, $${c.avgAskingRate.toFixed(0)} avg rate`
+    ).join(' | '));
+
     // Build lookup maps for probability data
     const probabilityByDate = new Map<string, BookingProbability>();
     if (bookingProbabilities) {
@@ -538,7 +605,7 @@ serve(async (req) => {
       }
     });
 
-    // Main Forecast Function: Baseline × Velocity + Probability Blending
+    // Main Forecast Function: Baseline × Velocity + Probability Blending + Capacity Ceiling
     function forecastEnhanced(
       targetYear: number,
       targetMonth: number,
@@ -548,7 +615,8 @@ serve(async (req) => {
       reservations: any[],
       probabilityByDate: Map<string, BookingProbability>,
       bookedDates: Set<string>,
-      compsetDemandByMonth: Map<string, { occupancyRate: number; demandSignal: string; bookedCount: number; totalCount: number }>
+      compsetDemandByMonth: Map<string, { occupancyRate: number; demandSignal: string; bookedCount: number; totalCount: number }>,
+      capacityByMonth: Record<number, MonthCapacity>
     ): any {
       
       // Step 1: Get baseline from last year
@@ -656,11 +724,57 @@ serve(async (req) => {
       // Ensure blended forecast is at least what's on books
       blendedForecast = Math.max(blendedForecast, onBooks);
       
-      const additionalNeeded = Math.max(0, blendedForecast - onBooks);
+      // Step 8: Apply capacity ceiling - forecast cannot exceed what's physically possible
+      const capacity = capacityByMonth[targetMonth];
+      let capacityCeiling: number | null = null;
+      let capacityConstrained = false;
       
-      // Step 7: Get compset demand signal for this month
+      if (capacity && capacity.availableNights > 0 && capacity.avgAskingRate > 0) {
+        const maxAdditional = capacity.availableNights * capacity.avgAskingRate;
+        capacityCeiling = onBooks + maxAdditional;
+        
+        if (blendedForecast > capacityCeiling) {
+          console.log(
+            `  → Capacity ceiling applied: $${blendedForecast.toFixed(0)} → $${capacityCeiling.toFixed(0)} ` +
+            `(${capacity.availableNights} avail nights × $${capacity.avgAskingRate.toFixed(0)} = $${maxAdditional.toFixed(0)} max additional)`
+          );
+          blendedForecast = capacityCeiling;
+          capacityConstrained = true;
+        }
+      } else if (capacity && capacity.availableNights === 0) {
+        // No available nights - forecast should just be what's on books
+        capacityCeiling = onBooks;
+        if (blendedForecast > onBooks) {
+          console.log(
+            `  → Fully booked: $${blendedForecast.toFixed(0)} → $${onBooks.toFixed(0)} (0 available nights)`
+          );
+          blendedForecast = onBooks;
+          capacityConstrained = true;
+        }
+      }
+      
+      // Step 9: Get compset demand signal for this month (needed for probability fallback)
       const yearMonth = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
       const compsetDemand = compsetDemandByMonth.get(yearMonth);
+      
+      // Step 10: If no probability data, use compset occupancy as booking probability proxy
+      let expectedAdditionalWithProbability = probExpected.expectedValue;
+      if (probExpected.openNights === 0 && capacity && capacity.availableNights > 0) {
+        // Fallback: Use compset occupancy as probability proxy
+        const compsetOccupancy = compsetDemand?.occupancyRate || 0.5; // 50% default
+        expectedAdditionalWithProbability = capacity.availableNights * capacity.avgAskingRate * compsetOccupancy;
+        
+        // Apply probability-adjusted cap: don't exceed on books + expected additional
+        const probabilityCappedForecast = onBooks + expectedAdditionalWithProbability;
+        if (blendedForecast > probabilityCappedForecast && !capacityConstrained) {
+          console.log(
+            `  → Probability cap (compset ${(compsetOccupancy * 100).toFixed(0)}% occ): $${blendedForecast.toFixed(0)} → $${probabilityCappedForecast.toFixed(0)}`
+          );
+          blendedForecast = probabilityCappedForecast;
+        }
+      }
+      
+      const additionalNeeded = Math.max(0, blendedForecast - onBooks);
       
       console.log(
         `${yearMonth} - ` +
@@ -668,8 +782,9 @@ serve(async (req) => {
         `Probability Forecast: $${probabilityForecast.toFixed(0)} ` +
         `(${probExpected.openNights} open nights @ ${probExpected.avgProbability.toFixed(0)}% avg prob), ` +
         `Blended: $${blendedForecast.toFixed(0)} ` +
-        `(${(velocityWeight * 100).toFixed(0)}%V/${(probabilityWeight * 100).toFixed(0)}%P), ` +
-        `Compset: ${compsetDemand?.demandSignal || 'N/A'}`
+        `(${(velocityWeight * 100).toFixed(0)}%V/${(probabilityWeight * 100).toFixed(0)}%P)` +
+        (capacityConstrained ? ` [CAPACITY CAPPED]` : '') +
+        `, Compset: ${compsetDemand?.demandSignal || 'N/A'}`
       );
       
       return {
@@ -682,7 +797,7 @@ serve(async (req) => {
         last_year_bookings: velocity.lastYearBookings,
         revenue_on_books: onBooks,
         
-        // NEW: Enhanced forecast data
+        // Enhanced forecast data
         velocity_forecast: velocityForecast,
         probability_forecast: probabilityForecast,
         blended_forecast: blendedForecast,
@@ -695,6 +810,12 @@ serve(async (req) => {
         forecast_confidence: forecastConfidence,
         compset_demand: compsetDemand?.demandSignal || null,
         compset_occupancy: compsetDemand?.occupancyRate || null,
+        
+        // Capacity constraint fields
+        capacity_ceiling: capacityCeiling,
+        available_nights: capacity?.availableNights || null,
+        avg_asking_rate: capacity?.avgAskingRate || null,
+        capacity_constrained: capacityConstrained,
         
         // Backwards compatible fields
         additional_forecast: additionalNeeded,
@@ -782,7 +903,8 @@ serve(async (req) => {
         reservations || [],
         probabilityByDate,
         bookedDates,
-        compsetDemandByMonth
+        compsetDemandByMonth,
+        capacityByMonth
       );
       
       monthlyForecasts.push(forecast);
