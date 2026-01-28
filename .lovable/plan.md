@@ -1,74 +1,79 @@
 
 
-## Fix Property-Level Reservation Sync (Correct Approach)
+## Fix Bulk Reservation Sync Timeout with Self-Invocation
 
-### Root Cause
-The Guesty API does not accept `listingIds` as a direct query parameter. Instead, it requires using the `filters` parameter with a JSON array of filter objects. The previous fix was incorrect.
+### Problem
+The `sync-guesty-data` edge function tries to sync all 27,333 reservations in a single call. Edge functions have a ~60-second timeout, causing the sync to fail consistently around 11,000 records.
 
-### Correct API Syntax
-From Guesty documentation:
-```
-filters=[{"operator": "$eq", "field": "listingId", "value": "1234"}]
-```
+### Solution
+Add self-invocation pattern (same as `sync-bulk-calendar`) to process reservations in chunks, with automatic continuation.
 
 ### Implementation Plan
 
-#### Update `supabase/functions/sync-listing-reservations/index.ts`
-
-**1. Create the filters JSON before the pagination loop (around line 378):**
-
-Add:
+#### 1. Add Constants for Batch Processing
 ```typescript
-// Create filter to only fetch reservations for this specific listing
-const filters = JSON.stringify([
-  {
-    field: 'listingId',
-    operator: '$eq',
-    value: listingId,
-  }
-]);
+const RESERVATION_BATCH_LIMIT = 3000; // Process this many before self-invoking
+const FUNCTION_TIMEOUT_BUFFER = 50000; // 50 seconds - leave 10s buffer before timeout
 ```
 
-**2. Update the fetchGuestyData call (lines 383-388):**
+#### 2. Track Execution Time
+Add a start time tracker at the beginning of the reservations sync to detect when we're approaching the timeout.
 
-Change from:
+#### 3. Modify `fetchAndSaveReservationsBatch` Function
+Add parameters for:
+- `maxRecords`: Stop after processing this many records
+- `startTime`: Track elapsed time
+- Return whether there are more records to process
+
+#### 4. Add Self-Invocation Logic
+After saving a batch, check if:
+- We've processed `RESERVATION_BATCH_LIMIT` records, OR
+- We're within `FUNCTION_TIMEOUT_BUFFER` of the timeout
+
+If either condition is met:
+- Save current progress to `sync_jobs` (with `last_synced_offset`)
+- Self-invoke the function with the same parameters
+- Return early with success
+
+#### 5. Handle Continuation
+When the function starts, check for:
+- Existing "running" sync job for this account/type
+- Use `last_synced_offset` to resume from where it left off
+
+### Technical Changes
+
+| Component | Change |
+|-----------|--------|
+| Constants | Add `RESERVATION_BATCH_LIMIT`, `FUNCTION_TIMEOUT_BUFFER` |
+| `fetchAndSaveReservationsBatch` | Add time tracking, early exit when batch limit reached |
+| Reservations sync block | Add self-invocation after batch completion |
+| Request handling | Pass auth token for self-invocation |
+
+### Self-Invocation Pattern (from sync-bulk-calendar)
 ```typescript
-const result = await fetchGuestyData(apiToken, 'reservations', {
-  limit,
-  skip,
-  listingIds: listingId,
-  fields: '...',
+// After processing batch, if more records exist:
+const { error: invokeError } = await supabase.functions.invoke('sync-guesty-data', {
+  headers: { Authorization: `Bearer ${authToken}` },
+  body: { accountId, syncType: 'reservations', startDate, resumeJobId: jobId },
 });
 ```
-
-To:
-```typescript
-const result = await fetchGuestyData(apiToken, 'reservations', {
-  limit,
-  skip,
-  filters,  // Use proper filters parameter
-  fields: '...',
-});
-```
-
-### Technical Details
-
-| Item | Value |
-|------|-------|
-| Current (broken) | `listingIds: listingId` - ignored by Guesty API |
-| Correct approach | `filters: JSON.stringify([{field:'listingId',operator:'$eq',value:listingId}])` |
-| Evidence | `sync-new-reservations` uses same pattern successfully for date filtering |
 
 ### Files to Modify
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/sync-listing-reservations/index.ts` | Add filters variable, replace `listingIds` with `filters` in API call |
+| `supabase/functions/sync-guesty-data/index.ts` | Add self-invocation logic, batch limits, time tracking |
 
-### After Implementation
+### Expected Behavior After Fix
 
-1. Re-deploy the edge function
-2. Re-run the property-level sync for 102 Deleon
-3. Should see ~37 reservations synced (not 1463)
-4. Amy Park reservation should appear if it exists in Guesty
+1. User clicks "Sync Reservations"
+2. Function processes ~3000 reservations (~50 seconds)
+3. Function saves progress and self-invokes
+4. New invocation continues from offset 3000
+5. Repeat until all 27,333 reservations are synced
+6. Total time: ~9 invocations over ~8 minutes
+7. Progress bar updates continuously throughout
+
+### Rollback Risk
+Low - the function already has resume capability via `last_synced_offset`. This change just automates the continuation.
 
