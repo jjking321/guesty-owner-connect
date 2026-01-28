@@ -1,166 +1,216 @@
 
 
-# Capacity-Constrained Forecast Enhancement
+# Enhanced Forecast Accuracy: Apply Occupancy BEFORE Capacity Ceiling + Lead Time Decay
 
-## Problem Summary
-The forecast for 102 De Leon shows $11,931 for February 2026, but this is physically impossible:
-- **19 nights already booked**: $6,653 confirmed revenue
-- **9 nights still available**: Maximum possible = 9 × $377 avg rate = $3,393
-- **Realistic maximum**: $6,653 + $3,393 = **$10,046**
+## Current Problem
+The February 2026 forecast of **$10,044** is still too high because:
 
-The current forecast uses compset baselines and velocity factors but ignores the fundamental constraint: **you can't earn more than (available nights × asking rate)**.
+1. **Capacity ceiling is applied BEFORE probability adjustment** - The code hits the 100% capacity ceiling ($10,044) and sets `capacityConstrained = true`, which prevents the more realistic probability cap from being applied
+2. **Fallback to 50% occupancy** - When no booking probabilities exist, the code falls back to `compset_occupancy || 0.5`, but `compsetDemandByMonth` is empty (future_monthly_averages has 0 entries), so it defaults to 50% instead of using the historical 76-84% February occupancy
+3. **No lead time decay** - With only 18 days until mid-February, some nights may be too late to book based on this property's booking patterns (61% of bookings come 60+ days out)
 
-## Root Cause
-1. **No booking probabilities calculated** for this property (0 records exist)
-2. Even when probabilities exist, the forecast doesn't apply a **capacity ceiling**
-3. The compset baseline ($11,931) assumes full-month potential without checking what's actually bookable
+## Data Analysis
 
-## Solution: Add Capacity-Constrained Ceiling
+### Your February 2026 Calendar
+- **9 available nights**: Feb 1-7, Feb 22, Feb 28
+- **19 booked nights**: $6,653 confirmed
+- **Asking rates**: $331-$446 (avg $377)
 
-Enhance the forecast to:
-1. **Fetch capacity data** for each month to know what's actually bookable
-2. **Calculate revenue ceiling** = On Books + (Available Nights × Avg Asking Rate)
-3. **Cap the forecast** so it never exceeds what's physically achievable
-4. **Adjust probability weighting** to reflect realistic booking expectations
+### Compset Historical February Occupancy
+| Year | Occupancy | Revenue |
+|------|-----------|---------|
+| 2025 | 84% | $10,797 |
+| 2024 | 72% | $9,288 |
+| 2023 | 72% | $8,267 |
+| 2022 | 92% | $8,283 |
+| **Avg** | **~76-80%** | **$9,159** |
 
-### Implementation Details
+### Your Booking Lead Time Pattern
+| Lead Time | Bookings | Share |
+|-----------|----------|-------|
+| 60+ days | 11 | 61% |
+| 30-60 days | 1 | 6% |
+| 14-30 days | 1 | 6% |
+| 7-14 days | 2 | 11% |
+| 0-7 days | 3 | 17% |
 
-**File: `supabase/functions/forecast-revenue/index.ts`**
+Most bookings come 60+ days out. Feb 1-7 are only 4-10 days away - these are in "last minute" territory.
 
-#### Change 1: Fetch capacity_calendar data
+## Solution: Three-Part Fix
+
+### Part 1: Use Historical Compset Occupancy When Future Data is Missing
 ```typescript
-// Fetch capacity calendar for available nights and asking rates
-const { data: capacityData, error: capacityError } = await supabase
-  .from('capacity_calendar')
-  .select('date, price, status')
-  .eq('listing_id', listingId)
-  .gte('date', `${year}-01-01`)
-  .lte('date', `${year}-12-31`);
-```
+// In forecastEnhanced(), before capacity ceiling logic:
 
-#### Change 2: Build monthly capacity summary
-```typescript
-// Build capacity summary by month
-const capacityByMonth: Record<number, {
-  availableNights: number;
-  bookedNights: number;
-  avgAskingRate: number;
-  maxPossibleRevenue: number;
-}> = {};
+// Look up historical occupancy for same month if future data missing
+let monthOccupancy = compsetDemand?.occupancyRate;
 
-for (const day of capacityData || []) {
-  const month = new Date(day.date).getMonth();
-  if (!capacityByMonth[month]) {
-    capacityByMonth[month] = {
-      availableNights: 0,
-      bookedNights: 0,
-      avgAskingRate: 0,
-      maxPossibleRevenue: 0,
-      prices: [] // for averaging
-    };
-  }
+if (!monthOccupancy && compsetSummary?.monthly_averages) {
+  // Find matching month from historical data (e.g., any "-02" for February)
+  const historicalMonths = (compsetSummary.monthly_averages as any[])
+    .filter(m => {
+      const monthKey = m.month || '';
+      return monthKey.endsWith(`-${String(targetMonth + 1).padStart(2, '0')}`);
+    });
   
-  if (day.status === 'available') {
-    capacityByMonth[month].availableNights++;
-    capacityByMonth[month].prices.push(day.price);
-  } else if (day.status === 'booked') {
-    capacityByMonth[month].bookedNights++;
+  if (historicalMonths.length > 0) {
+    // Average the occupancy across available years
+    const totalOcc = historicalMonths.reduce((sum, m) => 
+      sum + (m.occupancy || m.occupancy_rate || 0), 0);
+    monthOccupancy = totalOcc / historicalMonths.length;
+    
+    // Normalize to 0-1 if percentage
+    if (monthOccupancy > 1) monthOccupancy = monthOccupancy / 100;
   }
 }
 
-// Calculate averages and max possible revenue
-for (const month of Object.keys(capacityByMonth)) {
-  const cap = capacityByMonth[month];
-  cap.avgAskingRate = cap.prices.length > 0 
-    ? cap.prices.reduce((a, b) => a + b, 0) / cap.prices.length 
-    : 0;
-  cap.maxPossibleRevenue = cap.availableNights * cap.avgAskingRate;
+// Default to 65% if still no data
+monthOccupancy = monthOccupancy || 0.65;
+```
+
+### Part 2: Apply Lead Time Decay to Available Nights
+Different DBA (days before arrival) have different booking probabilities:
+
+```typescript
+// Calculate probability-weighted available nights
+function applyLeadTimeDecay(
+  availableNights: { date: string; price: number }[],
+  bookingStats: { median_booking_window: number },
+  today: Date
+): { effectiveNights: number; weightedRevenue: number } {
+  
+  let effectiveNights = 0;
+  let weightedRevenue = 0;
+  
+  for (const night of availableNights) {
+    const nightDate = new Date(night.date);
+    const dba = Math.floor((nightDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Lead time decay factor based on typical booking window
+    let leadTimeFactor: number;
+    const medianWindow = bookingStats.median_booking_window || 30;
+    
+    if (dba > medianWindow * 2) {
+      // Very far out - still time, but some uncertainty
+      leadTimeFactor = 0.85;
+    } else if (dba >= medianWindow) {
+      // Prime booking window
+      leadTimeFactor = 1.0;
+    } else if (dba >= medianWindow * 0.5) {
+      // Getting late
+      leadTimeFactor = 0.75;
+    } else if (dba >= 7) {
+      // Last minute territory
+      leadTimeFactor = 0.50;
+    } else {
+      // Very last minute (0-7 days)
+      leadTimeFactor = 0.30;
+    }
+    
+    effectiveNights += leadTimeFactor;
+    weightedRevenue += night.price * leadTimeFactor;
+  }
+  
+  return { effectiveNights, weightedRevenue };
 }
 ```
 
-#### Change 3: Apply capacity ceiling in forecastEnhanced()
-```typescript
-// After calculating blended forecast...
+### Part 3: Apply Probability Adjustment BEFORE Capacity Ceiling
+The key fix is ordering - calculate the realistic probability-adjusted forecast FIRST:
 
-// Step 8: Apply capacity ceiling
-const capacity = capacityByMonth[targetMonth];
-if (capacity) {
-  const revenueOnBooks = onBooks;
-  const maxAdditional = capacity.availableNights * capacity.avgAskingRate;
-  const capacityCeiling = revenueOnBooks + maxAdditional;
+```typescript
+// Step 7 (NEW): Calculate probability-adjusted forecast FIRST
+let probabilityAdjustedForecast: number | null = null;
+
+if (capacity && capacity.availableNights > 0) {
+  // Get lead-time weighted available nights
+  const leadTimeAdjusted = applyLeadTimeDecay(
+    capacity.availableNightsDetails, // Need to pass the actual dates
+    bookingStats,
+    asOfDate
+  );
   
-  // Forecast cannot exceed what's physically possible
-  if (blendedForecast > capacityCeiling) {
+  // Expected additional = weighted nights × avg rate × compset occupancy
+  const expectedAdditional = leadTimeAdjusted.weightedRevenue * monthOccupancy;
+  
+  probabilityAdjustedForecast = onBooks + expectedAdditional;
+  
+  if (blendedForecast > probabilityAdjustedForecast) {
     console.log(
-      `  → Capacity ceiling applied: ${blendedForecast.toFixed(0)} → ${capacityCeiling.toFixed(0)} ` +
-      `(${capacity.availableNights} avail nights × $${capacity.avgAskingRate.toFixed(0)} = $${maxAdditional.toFixed(0)} max additional)`
+      `  → Probability adjusted: $${blendedForecast.toFixed(0)} → $${probabilityAdjustedForecast.toFixed(0)} ` +
+      `(${leadTimeAdjusted.effectiveNights.toFixed(1)} effective nights × ${(monthOccupancy * 100).toFixed(0)}% occ)`
     );
-    blendedForecast = capacityCeiling;
+    blendedForecast = probabilityAdjustedForecast;
   }
 }
 
-// Ensure blended forecast is at least what's on books
-blendedForecast = Math.max(blendedForecast, onBooks);
+// Step 8: Apply capacity ceiling as ABSOLUTE maximum (safety cap)
+// This is now a backup, not the primary constraint
 ```
 
-#### Change 4: Apply booking probability to available nights
-Rather than assuming 100% of available nights will book, apply a realistic probability:
+## Example Calculation for February 2026
+
+### Available Nights with Lead Time Decay (as of Jan 28)
+| Date | Asking Rate | DBA | Lead Time Factor | Weighted Value |
+|------|-------------|-----|------------------|----------------|
+| Feb 1 | $356 | 4 | 0.30 | $107 |
+| Feb 2 | $331 | 5 | 0.30 | $99 |
+| Feb 3 | $332 | 6 | 0.30 | $100 |
+| Feb 4 | $344 | 7 | 0.50 | $172 |
+| Feb 5 | $379 | 8 | 0.50 | $190 |
+| Feb 6 | $445 | 9 | 0.50 | $223 |
+| Feb 7 | $446 | 10 | 0.50 | $223 |
+| Feb 22 | $344 | 25 | 0.75 | $258 |
+| Feb 28 | $414 | 31 | 1.00 | $414 |
+| **Total** | | | **4.65 eff nights** | **$1,786** |
+
+### Final Calculation
+- **On Books**: $6,653
+- **Weighted Available Value**: $1,786
+- **Compset Occupancy**: 80% (Feb historical avg)
+- **Expected Additional**: $1,786 × 80% = **$1,429**
+- **Probability-Adjusted Forecast**: $6,653 + $1,429 = **$8,082**
+- **Capacity Ceiling**: $10,044 (backup max)
+- **Final Forecast**: **$8,082**
+
+## Additional Accuracy Improvements
+
+### 1. Day-of-Week Weighting (Future Enhancement)
+Your booking data shows uniform day-of-week distribution (13-14 nights each). For now, this isn't a factor, but for properties with weekend-heavy patterns, this could be added.
+
+### 2. Price Position Adjustment
+If your rates are significantly above/below compset, adjust probability accordingly:
 ```typescript
-// Calculate expected additional revenue using probability estimates
-let expectedAdditionalRevenue: number;
+const priceRatio = avgAskingRate / compsetAvgRate;
+let priceAdjustment = 1.0;
+if (priceRatio > 1.15) priceAdjustment = 0.85; // 15%+ above market
+else if (priceRatio > 1.05) priceAdjustment = 0.92; // 5-15% above
+else if (priceRatio < 0.85) priceAdjustment = 1.10; // 15%+ below
 
-if (probExpected.openNights > 0 && probExpected.avgProbability > 0) {
-  // Use calculated probabilities
-  expectedAdditionalRevenue = probExpected.expectedValue;
-} else if (capacity && capacity.availableNights > 0) {
-  // Fallback: Use compset occupancy as probability proxy
-  const compsetOccupancy = compsetDemand?.occupancyRate || 0.5; // 50% default
-  expectedAdditionalRevenue = capacity.availableNights * capacity.avgAskingRate * compsetOccupancy;
-}
-
-// Probability-capped forecast
-const probabilityCappedForecast = onBooks + expectedAdditionalRevenue;
+expectedAdditional *= priceAdjustment;
 ```
 
-## Example: February 2026 for 102 De Leon
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Compset Baseline | $11,931 | $11,931 |
-| On Books | $6,653 | $6,653 |
-| Available Nights | (ignored) | 9 nights |
-| Avg Asking Rate | (ignored) | $377 |
-| Max Additional | (no limit) | $3,393 |
-| Capacity Ceiling | N/A | $10,046 |
-| Compset Occupancy | N/A | ~65% |
-| Expected Additional | (formula-based) | $2,205 |
-| **Final Forecast** | **$11,931** | **$8,858** |
-
-## Additional Enhancement: Log capacity constraints for visibility
-```typescript
-// Add to monthly forecast output
-capacity_ceiling: capacityCeiling,
-available_nights: capacity?.availableNights || null,
-avg_asking_rate: capacity?.avgAskingRate || null,
-capacity_constrained: blendedForecast === capacityCeiling
-```
+### 3. Booking Probabilities Calculation
+Run `calculate-booking-probabilities` for 102 De Leon to get per-night probability scores. This would replace the occupancy-based estimate with actual probability data.
 
 ## Changes Summary
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/forecast-revenue/index.ts` | Add capacity_calendar query, build monthly capacity map, apply ceiling logic, include capacity fields in output |
+| `supabase/functions/forecast-revenue/index.ts` | Add historical occupancy lookup, lead time decay function, reorder probability vs capacity ceiling logic |
+
+## Expected Results
+
+| Month | Before | After | Notes |
+|-------|--------|-------|-------|
+| Feb 2026 | $10,044 | ~$8,000-8,500 | Lead time decay + 80% occupancy |
+| Mar 2026 | (check) | (check) | More time = less decay |
+| Apr 2026 | (check) | (check) | Far out = minimal decay |
 
 ## Testing Plan
 1. Regenerate forecast for 102 De Leon
-2. Verify February 2026 shows ~$8,500-9,500 (not $11,931)
-3. Check logs show "Capacity ceiling applied" message
-4. Ensure months with ample availability aren't artificially capped
-5. Verify established properties with full history still work correctly
-
-## What You'll See After This Fix
-- February forecast drops from $11,931 to a realistic ~$8,500-9,500
-- Each month shows awareness of remaining bookable nights
-- Forecasts become more actionable for pricing decisions
-- Cold start properties get grounded in both market data AND physical constraints
+2. Verify February shows ~$8,000-8,500 (not $10,044)
+3. Check logs show "Probability adjusted" with lead time info
+4. Verify months with longer lead times aren't over-penalized
+5. Run `calculate-booking-probabilities` to get per-night data
 
