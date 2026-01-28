@@ -383,7 +383,7 @@ Deno.serve(async (req) => {
       const result = await fetchGuestyData(apiToken, 'reservations', {
         limit,
         skip,
-        listingId: listingId,
+        listingIds: listingId,  // Changed from listingId to listingIds - Guesty expects plural parameter
         fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue',
       });
 
