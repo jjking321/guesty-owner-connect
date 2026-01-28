@@ -375,7 +375,16 @@ Deno.serve(async (req) => {
     const limit = 100;
     let lastRateLimits = { sec: 999, min: 999, hr: 999 };
 
-    console.log('Fetching reservations from Guesty...');
+    // Create filter to only fetch reservations for this specific listing
+    const filters = JSON.stringify([
+      {
+        field: 'listingId',
+        operator: '$eq',
+        value: listingId,
+      }
+    ]);
+
+    console.log('Fetching reservations from Guesty with filter:', filters);
 
     while (true) {
       console.log(`Fetching: skip=${skip}, limit=${limit}`);
@@ -383,7 +392,7 @@ Deno.serve(async (req) => {
       const result = await fetchGuestyData(apiToken, 'reservations', {
         limit,
         skip,
-        listingIds: listingId,  // Changed from listingId to listingIds - Guesty expects plural parameter
+        filters,
         fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue',
       });
 
