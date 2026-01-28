@@ -28,6 +28,16 @@ interface CompsetSummary {
     booked_count: number;
     total_count: number;
   }> | null;
+  monthly_averages: Array<{
+    month: string;
+    revenue?: number;
+    avg_revenue?: number;
+    adr?: number;
+    avg_rate?: number;
+    occupancy?: number;
+    occupancy_rate?: number;
+  }> | null;
+  avg_ttm_revenue: number | null;
 }
 
 serve(async (req) => {
@@ -86,10 +96,10 @@ serve(async (req) => {
       console.log('Warning: Could not fetch booking probabilities:', probError.message);
     }
 
-    // Fetch compset summary for demand signals
+    // Fetch compset summary for demand signals AND historical monthly averages
     const { data: compsetSummary, error: compsetError } = await supabase
       .from('property_compset_summary')
-      .select('future_monthly_averages')
+      .select('future_monthly_averages, monthly_averages, avg_ttm_revenue')
       .eq('listing_id', listingId)
       .maybeSingle();
 
@@ -174,6 +184,68 @@ serve(async (req) => {
       }
     });
 
+    // Count months with prior year data for cold start detection
+    const monthsWithPriorData = Object.keys(baselineByMonth).length;
+    const isColdStart = monthsWithPriorData < 6;
+    
+    // Build compset monthly averages lookup for cold start properties
+    const compsetMonthlyRevenue: Record<number, number> = {};
+    let compsetTTMRevenue = compsetSummary?.avg_ttm_revenue || 0;
+    
+    if (isColdStart && compsetSummary?.monthly_averages) {
+      console.log(`\n⚠️ COLD START DETECTED: Only ${monthsWithPriorData} months of prior year data. Using compset baseline.\n`);
+      
+      const monthlyAvgs = compsetSummary.monthly_averages as any[];
+      
+      // Get the most recent 12 months of compset data
+      const sortedMonths = monthlyAvgs
+        .filter(m => m.month || m.year_month || m.yearMonth)
+        .sort((a, b) => {
+          const monthA = a.month || a.year_month || a.yearMonth;
+          const monthB = b.month || b.year_month || b.yearMonth;
+          return monthB.localeCompare(monthA); // descending
+        })
+        .slice(0, 24); // Get last 24 months to ensure we have coverage
+      
+      // Build lookup by month number (0-11)
+      sortedMonths.forEach(entry => {
+        const monthKey = entry.month || entry.year_month || entry.yearMonth;
+        if (!monthKey) return;
+        
+        // Extract month number from YYYY-MM format
+        const monthNum = parseInt(monthKey.split('-')[1], 10) - 1; // Convert to 0-11
+        
+        // Try multiple field names for revenue
+        const revenue = entry.revenue || entry.avg_revenue || 
+                       (entry.revpar && entry.occupancy ? entry.revpar * 30 : null) ||
+                       (entry.adr || entry.avg_rate || 0) * ((entry.occupancy || entry.occupancy_rate || 0.5) * 30);
+        
+        if (revenue && !compsetMonthlyRevenue[monthNum]) {
+          compsetMonthlyRevenue[monthNum] = revenue;
+        }
+      });
+      
+      // Calculate compset TTM from monthly averages if not available
+      if (!compsetTTMRevenue && Object.keys(compsetMonthlyRevenue).length >= 6) {
+        compsetTTMRevenue = Object.values(compsetMonthlyRevenue).reduce((sum, v) => sum + v, 0);
+      }
+      
+      console.log('Compset monthly revenue lookup:', compsetMonthlyRevenue);
+      console.log(`Compset TTM Revenue: $${compsetTTMRevenue.toFixed(0)}`);
+    }
+
+    // Apply cold start baseline: use compset averages with 0.85x discount for new properties
+    const COLD_START_DISCOUNT = 0.85;
+    
+    if (isColdStart && Object.keys(compsetMonthlyRevenue).length > 0) {
+      for (let month = 0; month < 12; month++) {
+        if (!baselineByMonth[month] && compsetMonthlyRevenue[month]) {
+          baselineByMonth[month] = compsetMonthlyRevenue[month] * COLD_START_DISCOUNT;
+          console.log(`Month ${month + 1}: Using compset baseline $${compsetMonthlyRevenue[month].toFixed(0)} * ${COLD_START_DISCOUNT} = $${baselineByMonth[month].toFixed(0)}`);
+        }
+      }
+    }
+
     const annualTotal = Object.values(baselineByMonth).reduce((sum, v) => sum + v, 0);
     const annualAverage = annualTotal / 12;
 
@@ -182,16 +254,27 @@ serve(async (req) => {
       ? priorYearActual / priorPriorYearActual 
       : 1.0;
 
-    // Forecast floor = prior year actual * capped growth trend (between 0.95x and 1.10x)
-    const cappedGrowthRate = Math.max(0.95, Math.min(yoyGrowthRate, 1.10));
-    const forecastFloor = priorYearActual * cappedGrowthRate;
+    // Forecast floor calculation
+    let forecastFloor: number;
+    
+    if (isColdStart && compsetTTMRevenue > 0) {
+      // For cold start properties: floor = compset TTM * 0.80
+      // This accounts for new property ramp-up while preventing unrealistic lows
+      forecastFloor = compsetTTMRevenue * 0.80;
+      console.log(`Cold start forecast floor: Compset TTM $${compsetTTMRevenue.toFixed(0)} * 0.80 = $${forecastFloor.toFixed(0)}`);
+    } else {
+      // Standard calculation: prior year actual * capped growth trend (between 0.95x and 1.10x)
+      const cappedGrowthRate = Math.max(0.95, Math.min(yoyGrowthRate, 1.10));
+      forecastFloor = priorYearActual * cappedGrowthRate;
+      console.log(`Forecast floor: Prior year $${priorYearActual.toFixed(0)} * ${cappedGrowthRate.toFixed(2)} = $${forecastFloor.toFixed(0)}`);
+    }
 
-    console.log('Last year monthly baselines:', baselineByMonth);
-    console.log(`Annual average: $${annualAverage.toFixed(0)}`);
+    console.log('\nLast year monthly baselines:', baselineByMonth);
+    console.log(`Annual baseline total: $${annualTotal.toFixed(0)}, Monthly average: $${annualAverage.toFixed(0)}`);
     console.log(`Prior year (${year - 1}) actual: $${priorYearActual.toFixed(0)}`);
     console.log(`Prior-prior year (${year - 2}) actual: $${priorPriorYearActual.toFixed(0)}`);
-    console.log(`YoY growth rate: ${yoyGrowthRate.toFixed(2)}x (capped to ${cappedGrowthRate.toFixed(2)}x)`);
-    console.log(`Forecast floor: $${forecastFloor.toFixed(0)}\n`);
+    console.log(`YoY growth rate: ${yoyGrowthRate.toFixed(2)}x`);
+    console.log(`Cold start mode: ${isColdStart ? 'YES' : 'NO'}\n`);
 
     const currentYear = year;
     const currentMonth = today.getMonth();
