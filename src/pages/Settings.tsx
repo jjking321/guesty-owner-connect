@@ -105,6 +105,7 @@ export default function Settings() {
       }
 
       const { error } = await supabase.from("guesty_accounts").insert({
+        user_id: user.id,
         organization_id: membership.organization_id,
         account_name: accountName,
         client_id: clientId,
