@@ -212,8 +212,9 @@ export function GoalsReviewTable({
   };
 
   return (
-    <ScrollArea className="border rounded-lg max-h-[calc(100vh-300px)]" scrollbars="both">
-      <div className="w-max min-w-full">
+    <div className="border rounded-lg overflow-hidden bg-card">
+      <ScrollArea className="h-[calc(100vh-300px)]" scrollbars="both">
+        <div className="w-max min-w-full">
         <Table>
         <TableHeader className="sticky top-0 bg-background z-[1]">
           <TableRow>
@@ -368,5 +369,6 @@ export function GoalsReviewTable({
         </Table>
       </div>
     </ScrollArea>
+    </div>
   );
 }
