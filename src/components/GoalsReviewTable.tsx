@@ -367,6 +367,7 @@ export function GoalsReviewTable({
         </TableBody>
         </Table>
       </div>
+      <ScrollBar orientation="vertical" />
       <ScrollBar orientation="horizontal" />
     </ScrollArea>
   );
