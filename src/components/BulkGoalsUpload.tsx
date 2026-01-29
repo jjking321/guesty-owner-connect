@@ -36,28 +36,89 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [detectedYear, setDetectedYear] = useState(2025);
   const { toast } = useToast();
 
-  const parseCSV = (csvText: string): ParsedGoal[] => {
-    const parsed = Papa.parse(csvText, {
-      skipEmptyLines: true,
+  // Detect CSV format based on headers
+  const detectCSVFormat = (headers: string[]): 'wide' | 'long' => {
+    // Long format has columns: Name, Month, Listing, Guesty ID, Projected Revenue
+    if (headers.some(h => h?.toLowerCase().includes('guesty id')) && 
+        headers.some(h => h?.toLowerCase() === 'month')) {
+      return 'long';
+    }
+    return 'wide';
+  };
+
+  // Parse long format: each row is one month for one property
+  const parseLongFormat = (rows: string[][], headers: string[]): { goals: ParsedGoal[], guestyIds: Map<string, string>, detectedYear: number } => {
+    const listingIdCol = headers.findIndex(h => h?.toLowerCase().includes('guesty id'));
+    const listingNameCol = headers.findIndex(h => h?.toLowerCase() === 'listing');
+    const monthCol = headers.findIndex(h => h?.toLowerCase() === 'month');
+    const revenueCol = headers.findIndex(h => h?.toLowerCase().includes('projected revenue'));
+
+    const listingMap = new Map<string, { unitAlias: string; guestyId: string; projections: Record<number, number> }>();
+    let detectedYear = new Date().getFullYear();
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const guestyId = row[listingIdCol]?.trim();
+      const listingName = row[listingNameCol]?.trim();
+      const monthStr = row[monthCol]?.trim();
+      const revenueStr = row[revenueCol]?.trim();
+
+      if (!guestyId || !monthStr) continue;
+
+      // Parse month from date string like "1/1/2026"
+      const monthDate = new Date(monthStr);
+      if (isNaN(monthDate.getTime())) continue;
+      
+      const month = monthDate.getMonth() + 1; // 1-12
+      detectedYear = monthDate.getFullYear();
+
+      // Parse revenue
+      const cleaned = revenueStr?.replace(/[$,]/g, '') || '';
+      const revenue = parseFloat(cleaned);
+      if (isNaN(revenue) || revenue <= 0) continue;
+
+      // Group by guestyId
+      if (!listingMap.has(guestyId)) {
+        listingMap.set(guestyId, {
+          unitAlias: listingName || guestyId,
+          guestyId,
+          projections: {}
+        });
+      }
+      listingMap.get(guestyId)!.projections[month] = revenue;
+    }
+
+    const goals: ParsedGoal[] = [];
+    const guestyIds = new Map<string, string>();
+
+    listingMap.forEach((data, guestyId) => {
+      if (Object.keys(data.projections).length > 0) {
+        goals.push({
+          unitAlias: data.unitAlias,
+          monthlyProjections: data.projections
+        });
+        guestyIds.set(data.unitAlias, guestyId);
+      }
     });
-    
-    const rows = parsed.data as string[][];
+
+    return { goals, guestyIds, detectedYear };
+  };
+
+  // Parse wide format: each row is one property with 12 month columns
+  const parseWideFormat = (rows: string[][]): { goals: ParsedGoal[], detectedYear: number } => {
     const results: ParsedGoal[] = [];
     
-    // Skip header (row 0)
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const unitAlias = row[0]?.trim();
       
-      // Skip empty rows or total row
       if (!unitAlias || unitAlias === 'Total Property Income' || unitAlias === '') continue;
       
       const monthlyProjections: Record<number, number> = {};
       
-      // Parse columns 2-13 (Jan-Dec 2025)
-      // Column 0: Unit Alias, Column 1: 2024 Revenue, Columns 2-13: Jan-Dec 2025
       for (let month = 1; month <= 12; month++) {
         const value = row[month + 1]?.trim();
         if (value && value !== '') {
@@ -69,19 +130,31 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
         }
       }
       
-      // Only include if at least one month has data
       if (Object.keys(monthlyProjections).length > 0) {
-        results.push({
-          unitAlias,
-          monthlyProjections
-        });
+        results.push({ unitAlias, monthlyProjections });
       }
     }
     
-    return results;
+    return { goals: results, detectedYear: 2025 };
   };
 
-  const matchListingsToCSV = async (parsedData: ParsedGoal[]): Promise<MatchResult> => {
+  const parseCSV = (csvText: string): { goals: ParsedGoal[], guestyIds?: Map<string, string>, detectedYear: number } => {
+    const parsed = Papa.parse(csvText, { skipEmptyLines: true });
+    const rows = parsed.data as string[][];
+    const headers = rows[0] || [];
+    
+    const format = detectCSVFormat(headers);
+    
+    if (format === 'long') {
+      return parseLongFormat(rows, headers);
+    }
+    return parseWideFormat(rows);
+  };
+
+  const matchListingsToCSV = async (
+    parsedData: ParsedGoal[], 
+    guestyIds?: Map<string, string>
+  ): Promise<MatchResult> => {
     const { data: listings, error } = await supabase
       .from('listings')
       .select('id, nickname');
@@ -94,9 +167,20 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
     const unmatched: Array<{ unitAlias: string }> = [];
     
     for (const csvRow of parsedData) {
-      const listing = listings?.find(l => 
-        l.nickname?.toLowerCase().trim() === csvRow.unitAlias.toLowerCase().trim()
-      );
+      let listing = null;
+      
+      // If we have Guesty IDs, match by ID first
+      if (guestyIds?.has(csvRow.unitAlias)) {
+        const guestyId = guestyIds.get(csvRow.unitAlias)!;
+        listing = listings?.find(l => l.id === guestyId);
+      }
+      
+      // Fall back to nickname matching
+      if (!listing) {
+        listing = listings?.find(l => 
+          l.nickname?.toLowerCase().trim() === csvRow.unitAlias.toLowerCase().trim()
+        );
+      }
       
       if (listing) {
         const totalProjection = Object.values(csvRow.monthlyProjections).reduce((sum, val) => sum + val, 0);
@@ -132,13 +216,14 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
 
     try {
       const text = await selectedFile.text();
-      const parsed = parseCSV(text);
-      const result = await matchListingsToCSV(parsed);
+      const { goals, guestyIds, detectedYear: year } = parseCSV(text);
+      setDetectedYear(year);
+      const result = await matchListingsToCSV(goals, guestyIds);
       setMatchResult(result);
       
       toast({
         title: "CSV Parsed",
-        description: `${result.matched.length} of ${parsed.length} properties matched`,
+        description: `${result.matched.length} of ${goals.length} properties matched for ${year}`,
       });
     } catch (error) {
       toast({
@@ -169,7 +254,7 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
     try {
       const { data, error } = await supabase.functions.invoke('bulk-upload-goals', {
         body: {
-          year: 2025,
+          year: detectedYear,
           updates: matchResult.matched.map(m => ({
             listingId: m.listingId,
             monthlyProjections: m.projections
@@ -218,9 +303,10 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Upload 2025 Goals from CSV</DialogTitle>
+          <DialogTitle>Upload {detectedYear} Goals from CSV</DialogTitle>
           <DialogDescription>
             Upload a CSV file to bulk update goal values for all properties.
+            Supports both wide format (properties as rows) and long format (Guesty ID + monthly rows).
             All updated goals will be locked.
           </DialogDescription>
         </DialogHeader>
@@ -242,7 +328,7 @@ export function BulkGoalsUpload({ open, onOpenChange, onSuccess }: BulkGoalsUplo
                 />
               </label>
               <p className="text-sm text-muted-foreground mt-2">
-                CSV must have Unit Alias in column 1 and monthly goals in columns 3-14
+                Supports: Wide format (Unit Alias + 12 month columns) or Long format (Guesty ID, Month, Projected Revenue)
               </p>
             </div>
           )}
