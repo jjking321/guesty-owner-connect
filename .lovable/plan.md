@@ -1,41 +1,60 @@
 
-Goal
-- Make the Goals Review table actually scroll vertically (and show an accessible vertical scrollbar) so you can get past “114 N Orlando Ave”.
 
-What’s happening (root cause)
-- Our `ScrollArea` viewport is set to `h-full` (100% height).
-- In `GoalsReviewTable.tsx` the `ScrollArea` root only has a `max-h-[calc(100vh-300px)]` (no explicit `height`).
-- In CSS, percentage heights (like `h-full`) don’t work reliably unless the parent has an explicit height.
-- Result: the viewport can end up sizing to its content instead of becoming a constrained scroll container, so content gets clipped and you can’t scroll further (exactly what you’re seeing at that “114 N Orlando Ave” cutoff).
+# Fix Sidebar Access for michael@renjoy.com
 
-Implementation approach
-- Give the Goals Review table scroll container an explicit height (not just max-height), matching the pattern already used on the Reservations page where scrolling works (`h-[calc(100vh-320px)]`).
-- Keep `scrollbars="both"` so the Radix scrollbars render correctly.
+## Problem
 
-Changes to make
+Michael (`michael@renjoy.com`) cannot see the sidebar because they have no organization membership. The sidebar visibility depends on the user's role, which is retrieved from the `organization_members` table via the `useUserRole` hook. Currently, Michael exists in the system but has no role assigned.
 
-1) Update the Goals Review scroll container height (primary fix)
-- File: `src/components/GoalsReviewTable.tsx`
-- Change the `ScrollArea` className from using `max-h-[calc(100vh-300px)]` to an explicit height:
-  - Replace:
-    - `max-h-[calc(100vh-300px)]`
-  - With:
-    - `h-[calc(100vh-300px)]`
-- Keep `scrollbars="both"`.
+**Current State:**
+| Table | Status |
+|-------|--------|
+| `auth.users` | User exists (`14385d36-cc49-45f5-a540-800bbc80e3bf`) |
+| `profiles` | Profile exists |
+| `organization_members` | **Missing - no membership** |
 
-2) (Optional but recommended) Prevent layout/scroll quirks by matching the known-good wrapper pattern
-- File: `src/components/GoalsReviewTable.tsx`
-- Wrap the `ScrollArea` in a container like:
-  - `div` with `border rounded-lg overflow-hidden bg-card`
-- Then remove `border rounded-lg` from the `ScrollArea` itself (so we don’t double-border).
-- This matches what we do in `Reservations.tsx` and reduces “scroll chaining” and clipping issues.
+## Solution
 
-How we’ll verify
-- Go to `/goals-review`
-- Hover the table and scroll down with mouse wheel/trackpad: confirm you can move past “114 N Orlando Ave”.
-- Drag the vertical scrollbar thumb: confirm it moves and continues past that row.
-- Also verify horizontal scrolling still works and the sticky header/left columns still behave correctly.
+Create a new organization for Renjoy and add Michael as the super_admin.
 
-Edge cases to check
-- Smaller laptop screens (short viewport height): table should still scroll and not clip.
-- Very small portfolios (few rows): the fixed-height container will show empty space; if that’s undesirable, we can refine later (e.g., use a responsive min/max strategy), but this fix prioritizes correct scrolling for large portfolios.
+## Data Changes Required
+
+### Step 1: Create the Renjoy organization
+
+```sql
+INSERT INTO organizations (id, name)
+VALUES (gen_random_uuid(), 'Renjoy');
+```
+
+### Step 2: Add Michael as super_admin to the new organization
+
+```sql
+INSERT INTO organization_members (organization_id, user_id, role)
+SELECT 
+  o.id,
+  '14385d36-cc49-45f5-a540-800bbc80e3bf',
+  'super_admin'
+FROM organizations o
+WHERE o.name = 'Renjoy';
+```
+
+## Expected Result
+
+After these changes:
+- Michael will have the `super_admin` role for the Renjoy organization
+- The `useUserRole` hook will return `role: 'super_admin'` for Michael
+- The sidebar will display all menu items available to super_admins:
+  - Portfolio View
+  - Goals Review  
+  - Groups
+  - Owners
+  - Reservations
+  - Reviews
+  - Forecast Admin
+  - Comparables
+  - Settings
+
+## Additional Note
+
+Since this is a new organization, Michael will start with no data (no listings, no reservations, etc.). They will need to connect a Guesty account in Settings to sync property data into their organization.
+
