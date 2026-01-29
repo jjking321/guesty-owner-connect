@@ -1,27 +1,39 @@
-# Gap Quality Penalty - IMPLEMENTED ✅
 
-## Summary
-Added `analyzeGapQuality()` function to `supabase/functions/forecast-revenue/index.ts` that penalizes orphan nights and adjusts expectations for gaps unlikely to fill completely.
 
-## Key Changes
-- **New Function**: `analyzeGapQuality()` (lines ~649-758) groups consecutive available nights into gaps and applies penalties:
-  - 1-night gaps (orphans): 20% weight
-  - 2-night gaps: 50% weight  
-  - 3-night gaps: 65% weight
-  - 4-5 night gaps: 85% weight (sweet spot)
-  - 6-7 night gaps: 80% weight
-  - 8+ night gaps: dynamic penalty based on expected ~7-night fill
+# Add Vertical Scroll Bar to Goals Review Table
 
-- **Integration**: Applied after lead time decay in the probability adjustment step (lines ~990-1015)
+## Current Situation
+The Goals Review table already has:
+- A horizontal `ScrollBar` for navigating across the 12 months
+- A max height constraint `max-h-[calc(100vh-300px)]` that enables vertical scrolling
+- Uses Radix `ScrollArea` component
 
-- **Logging**: Gap analysis details are logged for each month showing gap breakdown
+However, the vertical scrollbar is not visible because only the horizontal `ScrollBar` component is included.
 
-## Expected Results
-| Month | Before | After | Notes |
-|-------|--------|-------|-------|
-| Mar 2026 | $13,050 | ~$11,800 | 8-night gap + 2 orphans penalized |
+## Solution
+Add a vertical `ScrollBar` component alongside the existing horizontal one.
 
-## Testing
-1. Regenerate forecast for 102 De Leon
-2. Check logs for gap analysis breakdown
-3. Verify March forecast is ~$11,800 (not $13,050)
+## Technical Changes
+
+### File: `src/components/GoalsReviewTable.tsx`
+
+**Current code (lines 370-371):**
+```tsx
+      <ScrollBar orientation="horizontal" />
+    </ScrollArea>
+```
+
+**Updated code:**
+```tsx
+      <ScrollBar orientation="vertical" />
+      <ScrollBar orientation="horizontal" />
+    </ScrollArea>
+```
+
+This will render both scrollbars, allowing users to scroll vertically through the list of properties while also being able to scroll horizontally across the months.
+
+## Expected Result
+- Users will see a styled vertical scrollbar on the right side of the table when there are more properties than fit in the viewport
+- The horizontal scrollbar will continue to work for navigating across months
+- Both scrollbars will match the existing Radix UI styling with the subtle, rounded thumb design
+
