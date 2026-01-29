@@ -212,7 +212,7 @@ export function GoalsReviewTable({
   };
 
   return (
-    <ScrollArea className="border rounded-lg max-h-[calc(100vh-300px)]">
+    <ScrollArea className="border rounded-lg max-h-[calc(100vh-300px)]" scrollbars="both">
       <div className="w-max min-w-full">
         <Table>
         <TableHeader className="sticky top-0 bg-background z-[1]">
@@ -367,8 +367,6 @@ export function GoalsReviewTable({
         </TableBody>
         </Table>
       </div>
-      <ScrollBar orientation="vertical" />
-      <ScrollBar orientation="horizontal" />
     </ScrollArea>
   );
 }
