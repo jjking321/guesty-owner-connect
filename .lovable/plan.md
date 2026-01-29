@@ -1,39 +1,88 @@
 
 
-# Add Vertical Scroll Bar to Goals Review Table
+# Fix Vertical Scrollbar in Goals Review Table
 
-## Current Situation
-The Goals Review table already has:
-- A horizontal `ScrollBar` for navigating across the 12 months
-- A max height constraint `max-h-[calc(100vh-300px)]` that enables vertical scrolling
-- Uses Radix `ScrollArea` component
+## Problem Analysis
 
-However, the vertical scrollbar is not visible because only the horizontal `ScrollBar` component is included.
+The current implementation has a structural issue with how Radix UI ScrollArea works:
+
+1. **Current `ScrollArea` component (line 10-14):**
+   ```tsx
+   <ScrollAreaPrimitive.Root ...>
+     <ScrollAreaPrimitive.Viewport>{children}</ScrollAreaPrimitive.Viewport>
+     <ScrollBar />  // Only vertical, hardcoded
+     <ScrollAreaPrimitive.Corner />
+   </ScrollAreaPrimitive.Root>
+   ```
+
+2. **Current `GoalsReviewTable` usage:**
+   ```tsx
+   <ScrollArea>
+     <div>...table...</div>
+     <ScrollBar orientation="vertical" />   // Goes INSIDE viewport - wrong!
+     <ScrollBar orientation="horizontal" /> // Goes INSIDE viewport - wrong!
+   </ScrollArea>
+   ```
+
+The `ScrollBar` components are being placed INSIDE the viewport (as children), but Radix requires them to be SIBLINGS of the viewport.
 
 ## Solution
-Add a vertical `ScrollBar` component alongside the existing horizontal one.
 
-## Technical Changes
+Modify the `ScrollArea` component to accept a `scrollbars` prop that controls which scrollbars are rendered:
+
+### File: `src/components/ui/scroll-area.tsx`
+
+**Updated component:**
+```tsx
+interface ScrollAreaProps extends React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> {
+  scrollbars?: "vertical" | "horizontal" | "both";
+}
+
+const ScrollArea = React.forwardRef<
+  React.ElementRef<typeof ScrollAreaPrimitive.Root>,
+  ScrollAreaProps
+>(({ className, children, scrollbars = "vertical", ...props }, ref) => (
+  <ScrollAreaPrimitive.Root ref={ref} className={cn("relative overflow-hidden", className)} {...props}>
+    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+      {children}
+    </ScrollAreaPrimitive.Viewport>
+    {(scrollbars === "vertical" || scrollbars === "both") && (
+      <ScrollBar orientation="vertical" />
+    )}
+    {(scrollbars === "horizontal" || scrollbars === "both") && (
+      <ScrollBar orientation="horizontal" />
+    )}
+    <ScrollAreaPrimitive.Corner />
+  </ScrollAreaPrimitive.Root>
+));
+```
 
 ### File: `src/components/GoalsReviewTable.tsx`
 
-**Current code (lines 370-371):**
+**Updated usage (simplified):**
 ```tsx
-      <ScrollBar orientation="horizontal" />
-    </ScrollArea>
+<ScrollArea className="border rounded-lg max-h-[calc(100vh-300px)]" scrollbars="both">
+  <div className="w-max min-w-full">
+    <Table>
+      ...
+    </Table>
+  </div>
+</ScrollArea>
 ```
 
-**Updated code:**
-```tsx
-      <ScrollBar orientation="vertical" />
-      <ScrollBar orientation="horizontal" />
-    </ScrollArea>
-```
+Remove the manual `ScrollBar` components from children since they'll now be rendered by the `ScrollArea` component itself.
 
-This will render both scrollbars, allowing users to scroll vertically through the list of properties while also being able to scroll horizontally across the months.
+## Summary of Changes
+
+| File | Change |
+|------|--------|
+| `src/components/ui/scroll-area.tsx` | Add `scrollbars` prop to control which scrollbars are rendered as siblings of viewport |
+| `src/components/GoalsReviewTable.tsx` | Use `scrollbars="both"` prop instead of manually adding ScrollBar children |
 
 ## Expected Result
-- Users will see a styled vertical scrollbar on the right side of the table when there are more properties than fit in the viewport
-- The horizontal scrollbar will continue to work for navigating across months
-- Both scrollbars will match the existing Radix UI styling with the subtle, rounded thumb design
+
+- Both vertical and horizontal scrollbars will appear correctly
+- Vertical scrollbar on the right side when content exceeds height
+- Horizontal scrollbar at the bottom when content exceeds width
+- Styled consistently with the Radix UI design
 
