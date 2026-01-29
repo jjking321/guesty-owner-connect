@@ -1,88 +1,41 @@
 
+Goal
+- Make the Goals Review table actually scroll vertically (and show an accessible vertical scrollbar) so you can get past “114 N Orlando Ave”.
 
-# Fix Vertical Scrollbar in Goals Review Table
+What’s happening (root cause)
+- Our `ScrollArea` viewport is set to `h-full` (100% height).
+- In `GoalsReviewTable.tsx` the `ScrollArea` root only has a `max-h-[calc(100vh-300px)]` (no explicit `height`).
+- In CSS, percentage heights (like `h-full`) don’t work reliably unless the parent has an explicit height.
+- Result: the viewport can end up sizing to its content instead of becoming a constrained scroll container, so content gets clipped and you can’t scroll further (exactly what you’re seeing at that “114 N Orlando Ave” cutoff).
 
-## Problem Analysis
+Implementation approach
+- Give the Goals Review table scroll container an explicit height (not just max-height), matching the pattern already used on the Reservations page where scrolling works (`h-[calc(100vh-320px)]`).
+- Keep `scrollbars="both"` so the Radix scrollbars render correctly.
 
-The current implementation has a structural issue with how Radix UI ScrollArea works:
+Changes to make
 
-1. **Current `ScrollArea` component (line 10-14):**
-   ```tsx
-   <ScrollAreaPrimitive.Root ...>
-     <ScrollAreaPrimitive.Viewport>{children}</ScrollAreaPrimitive.Viewport>
-     <ScrollBar />  // Only vertical, hardcoded
-     <ScrollAreaPrimitive.Corner />
-   </ScrollAreaPrimitive.Root>
-   ```
+1) Update the Goals Review scroll container height (primary fix)
+- File: `src/components/GoalsReviewTable.tsx`
+- Change the `ScrollArea` className from using `max-h-[calc(100vh-300px)]` to an explicit height:
+  - Replace:
+    - `max-h-[calc(100vh-300px)]`
+  - With:
+    - `h-[calc(100vh-300px)]`
+- Keep `scrollbars="both"`.
 
-2. **Current `GoalsReviewTable` usage:**
-   ```tsx
-   <ScrollArea>
-     <div>...table...</div>
-     <ScrollBar orientation="vertical" />   // Goes INSIDE viewport - wrong!
-     <ScrollBar orientation="horizontal" /> // Goes INSIDE viewport - wrong!
-   </ScrollArea>
-   ```
+2) (Optional but recommended) Prevent layout/scroll quirks by matching the known-good wrapper pattern
+- File: `src/components/GoalsReviewTable.tsx`
+- Wrap the `ScrollArea` in a container like:
+  - `div` with `border rounded-lg overflow-hidden bg-card`
+- Then remove `border rounded-lg` from the `ScrollArea` itself (so we don’t double-border).
+- This matches what we do in `Reservations.tsx` and reduces “scroll chaining” and clipping issues.
 
-The `ScrollBar` components are being placed INSIDE the viewport (as children), but Radix requires them to be SIBLINGS of the viewport.
+How we’ll verify
+- Go to `/goals-review`
+- Hover the table and scroll down with mouse wheel/trackpad: confirm you can move past “114 N Orlando Ave”.
+- Drag the vertical scrollbar thumb: confirm it moves and continues past that row.
+- Also verify horizontal scrolling still works and the sticky header/left columns still behave correctly.
 
-## Solution
-
-Modify the `ScrollArea` component to accept a `scrollbars` prop that controls which scrollbars are rendered:
-
-### File: `src/components/ui/scroll-area.tsx`
-
-**Updated component:**
-```tsx
-interface ScrollAreaProps extends React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> {
-  scrollbars?: "vertical" | "horizontal" | "both";
-}
-
-const ScrollArea = React.forwardRef<
-  React.ElementRef<typeof ScrollAreaPrimitive.Root>,
-  ScrollAreaProps
->(({ className, children, scrollbars = "vertical", ...props }, ref) => (
-  <ScrollAreaPrimitive.Root ref={ref} className={cn("relative overflow-hidden", className)} {...props}>
-    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
-      {children}
-    </ScrollAreaPrimitive.Viewport>
-    {(scrollbars === "vertical" || scrollbars === "both") && (
-      <ScrollBar orientation="vertical" />
-    )}
-    {(scrollbars === "horizontal" || scrollbars === "both") && (
-      <ScrollBar orientation="horizontal" />
-    )}
-    <ScrollAreaPrimitive.Corner />
-  </ScrollAreaPrimitive.Root>
-));
-```
-
-### File: `src/components/GoalsReviewTable.tsx`
-
-**Updated usage (simplified):**
-```tsx
-<ScrollArea className="border rounded-lg max-h-[calc(100vh-300px)]" scrollbars="both">
-  <div className="w-max min-w-full">
-    <Table>
-      ...
-    </Table>
-  </div>
-</ScrollArea>
-```
-
-Remove the manual `ScrollBar` components from children since they'll now be rendered by the `ScrollArea` component itself.
-
-## Summary of Changes
-
-| File | Change |
-|------|--------|
-| `src/components/ui/scroll-area.tsx` | Add `scrollbars` prop to control which scrollbars are rendered as siblings of viewport |
-| `src/components/GoalsReviewTable.tsx` | Use `scrollbars="both"` prop instead of manually adding ScrollBar children |
-
-## Expected Result
-
-- Both vertical and horizontal scrollbars will appear correctly
-- Vertical scrollbar on the right side when content exceeds height
-- Horizontal scrollbar at the bottom when content exceeds width
-- Styled consistently with the Radix UI design
-
+Edge cases to check
+- Smaller laptop screens (short viewport height): table should still scroll and not clip.
+- Very small portfolios (few rows): the fixed-height container will show empty space; if that’s undesirable, we can refine later (e.g., use a responsive min/max strategy), but this fix prioritizes correct scrolling for large portfolios.
