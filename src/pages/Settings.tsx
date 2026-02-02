@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap } from "lucide-react";
+import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
@@ -35,6 +35,7 @@ export default function Settings() {
   const [syncingCalendar, setSyncingCalendar] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [incompleteSyncJobs, setIncompleteSyncJobs] = useState<Record<string, any>>({});
+  const [autoSyncFailures, setAutoSyncFailures] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     loadAccounts();
@@ -52,7 +53,7 @@ export default function Settings() {
       if (error) throw error;
       setGuestyAccounts(data || []);
       
-      // Check for incomplete sync jobs
+      // Check for incomplete sync jobs and auto sync failures
       if (data && data.length > 0) {
         const accountIds = data.map(acc => acc.id);
         const { data: jobs } = await supabase
@@ -72,6 +73,29 @@ export default function Settings() {
           });
           setIncompleteSyncJobs(jobsMap);
         }
+
+        // Check for failures in last automated sync for each account
+        const failuresMap: Record<string, string[]> = {};
+        for (const account of data) {
+          if (account.last_automated_sync) {
+            const syncTime = new Date(account.last_automated_sync);
+            const windowStart = new Date(syncTime.getTime() - 60 * 60 * 1000); // 1 hour before
+            const windowEnd = new Date(syncTime.getTime() + 60 * 1000); // 1 minute after
+            
+            const { data: failedJobs } = await supabase
+              .from('sync_jobs')
+              .select('sync_type')
+              .eq('guesty_account_id', account.id)
+              .eq('status', 'failed')
+              .gte('started_at', windowStart.toISOString())
+              .lte('started_at', windowEnd.toISOString());
+            
+            if (failedJobs && failedJobs.length > 0) {
+              failuresMap[account.id] = failedJobs.map(j => j.sync_type);
+            }
+          }
+        }
+        setAutoSyncFailures(failuresMap);
       }
     } catch (error: any) {
       toast({
@@ -456,6 +480,12 @@ export default function Settings() {
                                 <div className="flex items-center gap-1">
                                   <Clock className="h-3 w-3" />
                                   <span>Last Auto Sync: {new Date(account.last_automated_sync).toLocaleString()}</span>
+                                  {autoSyncFailures[account.id]?.length > 0 && (
+                                    <Badge variant="destructive" className="ml-1 text-xs py-0 px-1.5 gap-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      {autoSyncFailures[account.id].length} sync{autoSyncFailures[account.id].length > 1 ? 's' : ''} failed
+                                    </Badge>
+                                  )}
                                 </div>
                               )}
                               {!account.last_listings_sync && !account.last_reservations_sync && !account.last_owners_sync && !account.last_reviews_sync && !account.last_calendar_sync && (
