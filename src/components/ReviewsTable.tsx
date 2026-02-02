@@ -9,15 +9,15 @@ import { ReviewManagementDialog } from "./ReviewManagementDialog";
 
 interface Review {
   id: string;
-  guest_name: string;
-  rating: number;
-  review_text?: string;
-  response_text?: string;
-  review_date: string;
-  source: string;
+  guest_name: string | null;
+  rating: number | null;
+  review_text?: string | null;
+  response_text?: string | null;
+  review_date: string | null;
+  source: string | null;
   is_removed: boolean;
-  removed_reason?: string;
-  category_ratings?: Record<string, number>;
+  removed_reason?: string | null;
+  category_ratings?: Record<string, number> | null;
 }
 
 interface ReviewsTableProps {
@@ -50,21 +50,24 @@ export function ReviewsTable({ reviews, onMarkAsRemoved, onRestore, selectedPlat
   const sortedReviews = [...filteredReviews].sort((a, b) => {
     let comparison = 0;
     if (sortBy === 'date') {
-      comparison = new Date(a.review_date).getTime() - new Date(b.review_date).getTime();
+      const dateA = a.review_date ? new Date(a.review_date).getTime() : 0;
+      const dateB = b.review_date ? new Date(b.review_date).getTime() : 0;
+      comparison = dateA - dateB;
     } else {
-      comparison = a.rating - b.rating;
+      comparison = (a.rating ?? 0) - (b.rating ?? 0);
     }
     return sortOrder === 'asc' ? comparison : -comparison;
   });
 
-  const renderStars = (rating: number) => {
+  const renderStars = (rating: number | null) => {
+    const safeRating = rating ?? 0;
     return (
       <div className="flex items-center gap-0.5">
         {[...Array(5)].map((_, i) => (
           <Star
             key={i}
             className={`w-4 h-4 ${
-              i < Math.floor(rating)
+              i < Math.floor(safeRating)
                 ? 'fill-yellow-400 text-yellow-400'
                 : 'fill-muted text-muted'
             }`}
@@ -139,13 +142,15 @@ export function ReviewsTable({ reviews, onMarkAsRemoved, onRestore, selectedPlat
                 className={review.is_removed ? 'opacity-50 bg-muted/50' : ''}
               >
                 <TableCell className="whitespace-nowrap">
-                  {format(new Date(review.review_date), 'MMM d, yyyy')}
+                  {review.review_date ? format(new Date(review.review_date), 'MMM d, yyyy') : '—'}
                 </TableCell>
-                <TableCell>{review.guest_name}</TableCell>
+                <TableCell>{review.guest_name || 'Unknown'}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
                     {renderStars(review.rating)}
-                    <span className="text-sm font-medium">{review.rating.toFixed(1)}</span>
+                    <span className="text-sm font-medium">
+                      {review.rating !== null ? review.rating.toFixed(1) : '—'}
+                    </span>
                   </div>
                 </TableCell>
                 <TableCell>
