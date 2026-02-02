@@ -14,6 +14,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { startOfMonth, endOfMonth, getDaysInMonth, format, parseISO, differenceInDays, addDays, addMonths, isSameMonth, subMonths, isWithinInterval, startOfDay, endOfDay, startOfYear } from "date-fns";
 import { formatDateDisplay, parseLocalDate } from "@/lib/utils";
 import { StripeDateRangePicker, DateRange } from "@/components/StripeDateRangePicker";
+import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 
 import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
@@ -645,11 +646,7 @@ export default function PropertyDetail() {
                     className="flex items-center hover:opacity-80 transition-opacity"
                     title="View on Airbnb"
                   >
-                    <img 
-                      src="/airbnb-icon.svg" 
-                      alt="View on Airbnb" 
-                      className="h-6 w-6"
-                    />
+                    <AirbnbIcon className="h-6 w-6 text-primary" title="View on Airbnb" />
                   </a>
                 )}
               </div>
