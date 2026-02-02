@@ -1,100 +1,182 @@
 
 
-# Add Failure Notification to Last Auto Sync Display
+# Fix Sync Reviews Edge Function
 
-## Overview
+## Problem Analysis
 
-When the automated nightly sync encounters failures, users currently have no way to know unless they check the logs. This enhancement will add a visual indicator next to the "Last Auto Sync" timestamp showing if any sync operations failed, prompting users to try a manual sync.
+The current `sync-reviews` function iterates through each listing and queries the Guesty API with `listingId` parameter, but the API returns 0 reviews for every listing. After 223 listings, the sync completes with "Successfully synced 0 reviews from 223 listings".
 
-## Current State
-
-The Settings page shows:
+From the logs:
 ```
-Last Auto Sync: 2/2/2026, 12:50:37 PM
-```
-
-But there's no indication that the reservations sync failed with a statement timeout.
-
-## Proposed Change
-
-Show a warning badge when failures occurred:
-```
-Last Auto Sync: 2/2/2026, 12:50:37 PM ⚠️ Sync issues - try manual
+Received 0 reviews for listing 68767954bfdf52002f6f35b1
+Received 0 reviews for listing 64b986eb75f8b80034ada6e1
+... (all 223 listings return 0 reviews)
 ```
 
-## Implementation
+## Root Cause
 
-### Step 1: Add State to Track Sync Failures
+The Guesty Reviews API works better when queried **globally** with date filters rather than per-listing. The working pattern from your other project:
 
-Add a new state variable to track which accounts had failures in their last automated sync:
+```
+GET https://open-api.guesty.com/v1/reviews
+Query Parameters:
+- skip - Pagination offset (e.g., 0, 100, 200)
+- limit - Page size (max 100)
+- startDate - Filter by updatedAt from date
+- endDate - Filter by updatedAt to date
+```
+
+## Solution
+
+Rewrite the sync function to:
+1. Query all reviews for the account without the listingId filter
+2. Use startDate/endDate parameters to limit to past X days (user configurable)
+3. Use skip/limit pagination (100 per page)
+4. Continue using the existing OAuth token caching and rate limit handling
+
+## Implementation Changes
+
+### 1. Add daysSince Parameter
+
+Allow users to specify how many days back to sync (default: 30 days).
 
 ```typescript
-const [autoSyncFailures, setAutoSyncFailures] = useState<Record<string, string[]>>({});
+const { guestyAccountId, daysSince = 30 } = await req.json();
 ```
 
-### Step 2: Query for Failed Syncs
+### 2. Rewrite fetchReviewsPage Function
 
-In `loadAccounts()`, after loading the accounts, query for failed sync jobs that occurred around each account's `last_automated_sync` time:
+Remove the listingId parameter and add date filters:
+
+| Before | After |
+|--------|-------|
+| `url.searchParams.append('listingId', listingId)` | `url.searchParams.append('startDate', startDateISO)` |
+| N/A | `url.searchParams.append('endDate', endDateISO)` |
 
 ```typescript
-// Check for failures in last automated sync
-const { data: failedSyncs } = await supabase
-  .from('sync_jobs')
-  .select('guesty_account_id, sync_type, error_message')
-  .in('guesty_account_id', accountIds)
-  .eq('status', 'failed')
-  .gte('started_at', /* last_automated_sync - 1 hour */)
-  .lte('started_at', /* last_automated_sync + 1 minute */);
+async function fetchReviewsPage(
+  accessToken: string,
+  limit: number,
+  skip: number,
+  startDate: string,
+  endDate: string
+) {
+  const url = new URL('https://open-api.guesty.com/v1/reviews');
+  url.searchParams.append('limit', limit.toString());
+  url.searchParams.append('skip', skip.toString());
+  url.searchParams.append('startDate', startDate);
+  url.searchParams.append('endDate', endDate);
+  // ... rest of fetch logic with rate limiting
+}
 ```
 
-### Step 3: Update the Display
+### 3. Simplify performSync Function
 
-Modify the "Last Auto Sync" display section to show a warning when failures exist:
+Instead of looping through listings, fetch all reviews with pagination:
 
-```tsx
-{account.last_automated_sync && (
-  <div className="flex items-center gap-1">
-    <Clock className="h-3 w-3" />
-    <span>Last Auto Sync: {new Date(account.last_automated_sync).toLocaleString()}</span>
-    {autoSyncFailures[account.id]?.length > 0 && (
-      <Badge variant="destructive" className="ml-1 text-xs">
-        Sync issues
-      </Badge>
-    )}
-  </div>
-)}
+```typescript
+async function performSync(
+  guestyAccountId: string,
+  syncJobId: string,
+  daysSince: number
+) {
+  // Calculate date range
+  const endDate = new Date().toISOString();
+  const startDate = new Date(Date.now() - daysSince * 24 * 60 * 60 * 1000).toISOString();
+  
+  let totalReviewsSynced = 0;
+  let currentOffset = 0;
+  let hasMore = true;
+  
+  while (hasMore) {
+    const reviewsData = await fetchReviewsPage(
+      accessToken,
+      REVIEWS_BATCH_SIZE, // 100
+      currentOffset,
+      startDate,
+      endDate
+    );
+    
+    const results = reviewsData.results || [];
+    
+    if (results.length === 0) {
+      hasMore = false;
+      break;
+    }
+    
+    // Upsert reviews (filter to only this account's listings)
+    // ... upsert logic
+    
+    totalReviewsSynced += results.length;
+    currentOffset += results.length;
+    
+    // Update progress
+    await updateSyncJobProgress(syncJobId, totalReviewsSynced);
+    
+    if (results.length < REVIEWS_BATCH_SIZE) {
+      hasMore = false;
+    }
+    
+    // Rate limit delay
+    await delay(REQUEST_DELAY_MS);
+  }
+}
 ```
 
-Optionally show a tooltip or expand to show which specific syncs failed.
+### 4. Keep Existing Token Caching
 
-## Technical Details
+The OAuth token caching with single-flight lock is already implemented correctly.
+
+### 5. Filter Reviews to Account's Listings
+
+Since we're fetching all reviews without listingId filter, we need to ensure we only save reviews for listings that belong to this account:
+
+```typescript
+// Get list of this account's listing IDs
+const { data: accountListings } = await supabase
+  .from('listings')
+  .select('id')
+  .eq('guesty_account_id', guestyAccountId);
+
+const accountListingIds = new Set(accountListings?.map(l => l.id) || []);
+
+// Filter results to only this account's listings
+const validReviews = results.filter(r => accountListingIds.has(r.listingId));
+```
+
+## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/pages/Settings.tsx` | Add failure tracking state, query sync_jobs for failures, display warning badge |
+| `supabase/functions/sync-reviews/index.ts` | Complete rewrite of fetch logic - remove per-listing loop, add date-based global query |
 
-### Query Logic
+## API Request Pattern
 
-For each account with a `last_automated_sync` timestamp, find sync_jobs where:
-- `guesty_account_id` matches the account
-- `status = 'failed'`
-- `started_at` is within a window around `last_automated_sync` (e.g., from 1 hour before to 1 minute after)
+| Parameter | Value |
+|-----------|-------|
+| Endpoint | `GET https://open-api.guesty.com/v1/reviews` |
+| skip | 0, 100, 200, etc. |
+| limit | 100 (max) |
+| startDate | ISO date X days ago |
+| endDate | Current ISO date |
 
-This captures all syncs that were part of the nightly run.
+## Rate Limiting (Preserved)
 
-### UI Options
-
-1. **Simple Badge**: Just show "Sync issues" badge
-2. **Detailed Badge**: Show "1 of 4 syncs failed" 
-3. **Expandable Details**: Show which specific sync types failed with their error messages
-
-I recommend starting with option 2 (showing count) as it gives users enough information without being overwhelming.
+The existing rate limiting code is solid and will be preserved:
+- Exponential backoff on 429 errors
+- Rate limit header logging
+- 500ms delay between requests
+- Max 5 retries per request
 
 ## Expected Result
 
-| Scenario | Display |
-|----------|---------|
-| All syncs succeeded | `Last Auto Sync: 2/2/2026, 12:50 PM` |
-| 1 sync failed | `Last Auto Sync: 2/2/2026, 12:50 PM` + red badge "1 sync failed" |
-| Multiple failures | `Last Auto Sync: 2/2/2026, 12:50 PM` + red badge "2 syncs failed" |
+| Before | After |
+|--------|-------|
+| 223 API calls (one per listing) | ~1-10 API calls (paginated) |
+| 0 reviews synced | All reviews from past X days |
+| ~3 minutes runtime | ~10-30 seconds |
+
+## UI Integration
+
+The Settings page already has a reviews sync button. We could optionally add a dropdown to select how many days back to sync (7, 30, 90, all).
 
