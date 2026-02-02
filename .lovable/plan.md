@@ -1,135 +1,152 @@
 
-# Fix Reviews - Guest Names and Platform Display
 
-## Problem Summary
-The reviews table shows "Unknown" for guest names and blank for platform because:
-1. **Platform**: The API returns `channelId` (e.g., "airbnb2") but the code was looking for `review.source` which doesn't exist
-2. **Guest Name**: The Guesty reviews API doesn't include guest name - only a `guestId` reference. However, the **reservations** API includes `guest.fullName`
+# Extend Reviews Sync to 2 Years and Add "Sync New Reviews"
 
-## Solution Approach
-Instead of making additional API calls to fetch guest info, we'll:
-1. Add `guest_name` to the reservations table
-2. Update reservation sync to capture `guest.fullName` 
-3. In reviews sync, join with reservations table to get guest name via `reservation_id`
-4. Fix the platform/source mapping to use `channelId`
+## Overview
+
+This plan implements two changes:
+1. Update the Settings page reviews sync to fetch 2 years of history (matching reservations)
+2. Create a new "sync-new-reviews" function for incremental sync from the Reviews page
 
 ---
 
 ## Changes Required
 
-### 1. Database Migration - Add guest_name to reservations
-
-```sql
-ALTER TABLE reservations ADD COLUMN IF NOT EXISTS guest_name TEXT;
-```
-
-### 2. Update sync-guesty-data Edge Function
-
-Add `guest.fullName` to the fields requested and map it during upsert.
-
-**File**: `supabase/functions/sync-guesty-data/index.ts`
-
-Changes:
-- Add `guest.fullName` to the API fields parameter
-- Map `reservation.guest?.fullName` to `guest_name` in the upsert
-
-### 3. Update sync-listing-reservations Edge Function
-
-Same changes for per-listing reservation sync.
-
-**File**: `supabase/functions/sync-listing-reservations/index.ts`
-
-Changes:
-- Add `guest.fullName` to the API fields parameter  
-- Map the guest name in the upsert
-
-### 4. Update sync-reviews Edge Function
+### 1. Update sync-reviews to Support 2-Year Lookback
 
 **File**: `supabase/functions/sync-reviews/index.ts`
 
-Changes:
-- After fetching reviews, collect all `reservation_id` values
-- Query the reservations table to get guest names
-- Create a map of reservation_id to guest_name
-- Update field mapping:
-  - `source`: Use `formatChannelId(review.channelId)` instead of `review.source`
-  - `guest_name`: Look up from reservations map, with fallback to rawReview.reviewer
+Current behavior:
+- `daysSince` defaults to 30 days
+- Maximum capped at 365 days
 
-Add channel ID formatter helper:
+Changes:
+- Increase the max cap from 365 to 730 days (2 years)
+- When called from Settings page, pass `daysSince: 730`
+
 ```typescript
-function formatChannelId(channelId: string | null): string {
-  if (!channelId) return 'Unknown';
-  const channelMap: Record<string, string> = {
-    'airbnb': 'Airbnb',
-    'airbnb2': 'Airbnb',
-    'vrbo': 'VRBO',
-    'homeaway': 'VRBO',
-    'homeaway2': 'VRBO',
-    'booking': 'Booking.com',
-    'bookingcom': 'Booking.com',
-    'manual': 'Direct',
-  };
-  return channelMap[channelId.toLowerCase()] || channelId;
-}
+// Line 578: Change validation cap from 365 to 730
+const validDaysSince = Math.max(1, Math.min(730, Number(daysSince) || 30));
 ```
+
+### 2. Update Settings Page to Pass 730 Days
+
+**File**: `src/pages/Settings.tsx`
+
+Current call:
+```typescript
+body: { guestyAccountId: accountId }
+```
+
+Updated call:
+```typescript
+body: { guestyAccountId: accountId, daysSince: 730 }
+```
+
+---
+
+### 3. Create sync-new-reviews Edge Function
+
+**New File**: `supabase/functions/sync-new-reviews/index.ts`
+
+This function will:
+1. Find the most recent review date in the database for the account
+2. Query Guesty for reviews created/updated since that date
+3. Upsert only the new reviews
+
+Logic pattern (following sync-new-reservations):
+- Query `reviews` table for latest `imported_at` or `review_date`
+- Use that as the `startDate` for Guesty API query
+- If no existing reviews found, return error requiring initial sync first
+- Sync type: `new_reviews`
+
+---
+
+### 4. Add "Sync New Reviews" Button to Reviews Page
+
+**File**: `src/pages/Reviews.tsx`
+
+Add a sync button in the header area that:
+- Calls the `sync-new-reviews` edge function
+- Shows loading state during sync
+- Displays toast notifications for success/failure
+- Gets the guesty_account_id from the listings (or a separate query)
+
+UI additions:
+- "Sync New Reviews" button in the header (similar to how PropertyDetail has sync buttons)
+- Loading spinner during sync
+- Toast feedback
 
 ---
 
 ## Technical Details
 
-### Reservation Sync Field Addition
+### sync-new-reviews Function Structure
 
-Current fields request:
-```
-_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue
+```text
+sync-new-reviews/index.ts
+|
++-- GET most recent review imported_at from reviews table
+|
++-- IF no reviews exist -> return error "Run initial sync first"
+|
++-- GET Guesty account credentials
+|
++-- GET OAuth token (using cached token manager)
+|
++-- FETCH reviews from Guesty with startDate = most recent review date
+|
++-- FILTER to this account's listings
+|
++-- LOOKUP guest names from reservations table
+|
++-- UPSERT new reviews
+|
++-- UPDATE sync_jobs progress
 ```
 
-Updated fields request:
-```
-_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue guest.fullName
-```
+### Reviews Page Changes
 
-### Reviews Sync - Guest Name Lookup
-
+Add state and handlers:
 ```typescript
-// Collect reservation IDs from reviews
-const reservationIds = validReviews
-  .map(r => r.reservationId)
-  .filter(Boolean);
+const [syncingReviews, setSyncingReviews] = useState(false);
+const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
 
-// Fetch guest names from reservations table
-const { data: reservations } = await supabaseClient
-  .from('reservations')
-  .select('id, guest_name')
-  .in('id', reservationIds);
+// Fetch guesty account ID on load
+useEffect(() => {
+  // Get account from listings or guesty_accounts table
+}, []);
 
-// Create lookup map
-const guestNameMap = new Map(
-  (reservations || []).map(r => [r.id, r.guest_name])
-);
-
-// Use in mapping
-guest_name: guestNameMap.get(review.reservationId) 
-            || rawReview.reviewer?.name 
-            || rawReview.reviewer?.first_name 
-            || null,
+const handleSyncNewReviews = async () => {
+  // Call sync-new-reviews function
+  // Handle success/error with toast
+};
 ```
+
+Add button in header:
+```jsx
+<Button onClick={handleSyncNewReviews} disabled={syncingReviews || !guestyAccountId}>
+  {syncingReviews ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+  Sync New Reviews
+</Button>
+```
+
+---
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `supabase/functions/sync-reviews/index.ts` | Increase daysSince max from 365 to 730 |
+| `src/pages/Settings.tsx` | Pass `daysSince: 730` to sync-reviews call |
+| `supabase/functions/sync-new-reviews/index.ts` | **NEW** - Incremental review sync |
+| `src/pages/Reviews.tsx` | Add "Sync New Reviews" button and handler |
 
 ---
 
 ## Expected Outcome
 
 After implementation:
-1. **Platform column** will show formatted names like "Airbnb", "VRBO", "Booking.com" instead of blank
-2. **Guest name** will be populated from reservation data for reviews that have a linked reservation
-3. Future reservation syncs will capture guest names for new reviews
-4. Existing reviews can be re-synced to pick up guest names
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| Database migration | Add `guest_name` column to reservations |
-| `sync-guesty-data/index.ts` | Add `guest.fullName` field, map to `guest_name` |
-| `sync-listing-reservations/index.ts` | Add `guest.fullName` field, map to `guest_name` |
-| `sync-reviews/index.ts` | Fix channelId mapping, add reservation lookup for guest names |
+1. **Settings page**: "Sync Reviews" button fetches 2 years of review history
+2. **Reviews page**: "Sync New Reviews" button fetches only reviews since last sync (fast, incremental)
+3. Same guest name and platform formatting logic in both functions
