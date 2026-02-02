@@ -1,182 +1,92 @@
 
+# Add Airbnb Listing ID to Listings
 
-# Fix Sync Reviews Edge Function
+## Overview
 
-## Problem Analysis
+Add support for extracting and storing the Airbnb listing ID from the Guesty API. The ID is located in the `integrations.airbnb2.externalId` field of each listing.
 
-The current `sync-reviews` function iterates through each listing and queries the Guesty API with `listingId` parameter, but the API returns 0 reviews for every listing. After 223 listings, the sync completes with "Successfully synced 0 reviews from 223 listings".
+## Implementation Steps
 
-From the logs:
-```
-Received 0 reviews for listing 68767954bfdf52002f6f35b1
-Received 0 reviews for listing 64b986eb75f8b80034ada6e1
-... (all 223 listings return 0 reviews)
-```
+### Step 1: Database Migration
 
-## Root Cause
+Add a new nullable column `airbnb_listing_id` to the `listings` table:
 
-The Guesty Reviews API works better when queried **globally** with date filters rather than per-listing. The working pattern from your other project:
-
-```
-GET https://open-api.guesty.com/v1/reviews
-Query Parameters:
-- skip - Pagination offset (e.g., 0, 100, 200)
-- limit - Page size (max 100)
-- startDate - Filter by updatedAt from date
-- endDate - Filter by updatedAt to date
+```sql
+ALTER TABLE listings 
+ADD COLUMN airbnb_listing_id TEXT;
 ```
 
-## Solution
+### Step 2: Update GuestyListing Interface
 
-Rewrite the sync function to:
-1. Query all reviews for the account without the listingId filter
-2. Use startDate/endDate parameters to limit to past X days (user configurable)
-3. Use skip/limit pagination (100 per page)
-4. Continue using the existing OAuth token caching and rate limit handling
-
-## Implementation Changes
-
-### 1. Add daysSince Parameter
-
-Allow users to specify how many days back to sync (default: 30 days).
+Add the `integrations` field to the interface:
 
 ```typescript
-const { guestyAccountId, daysSince = 30 } = await req.json();
+interface GuestyListing {
+  _id: string;
+  createdAt: string;
+  nickname: string;
+  status: string;
+  isListed: boolean;
+  active: boolean;
+  propertyType: string;
+  accommodates: number;
+  bedrooms: number;
+  address: any;
+  picture?: { thumbnail?: string; _id?: string; original?: string; };
+  pictures?: Array<{ thumbnail?: string; _id?: string; original?: string; }>;
+  integrations?: {
+    airbnb2?: {
+      externalId?: string;
+    };
+  };
+}
 ```
 
-### 2. Rewrite fetchReviewsPage Function
+### Step 3: Update API Fields Request
 
-Remove the listingId parameter and add date filters:
+Add `integrations` to the fields being fetched:
 
 | Before | After |
 |--------|-------|
-| `url.searchParams.append('listingId', listingId)` | `url.searchParams.append('startDate', startDateISO)` |
-| N/A | `url.searchParams.append('endDate', endDateISO)` |
+| `_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures` | `_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures integrations` |
+
+### Step 4: Update Upsert Logic
+
+Extract the Airbnb ID and include it in the upsert:
 
 ```typescript
-async function fetchReviewsPage(
-  accessToken: string,
-  limit: number,
-  skip: number,
-  startDate: string,
-  endDate: string
-) {
-  const url = new URL('https://open-api.guesty.com/v1/reviews');
-  url.searchParams.append('limit', limit.toString());
-  url.searchParams.append('skip', skip.toString());
-  url.searchParams.append('startDate', startDate);
-  url.searchParams.append('endDate', endDate);
-  // ... rest of fetch logic with rate limiting
-}
-```
-
-### 3. Simplify performSync Function
-
-Instead of looping through listings, fetch all reviews with pagination:
-
-```typescript
-async function performSync(
-  guestyAccountId: string,
-  syncJobId: string,
-  daysSince: number
-) {
-  // Calculate date range
-  const endDate = new Date().toISOString();
-  const startDate = new Date(Date.now() - daysSince * 24 * 60 * 60 * 1000).toISOString();
+const listingsToUpsert = guestyListings.map((listing: GuestyListing) => {
+  // ... existing thumbnail extraction ...
   
-  let totalReviewsSynced = 0;
-  let currentOffset = 0;
-  let hasMore = true;
+  // Extract Airbnb listing ID from integrations
+  const airbnbListingId = listing.integrations?.airbnb2?.externalId || null;
   
-  while (hasMore) {
-    const reviewsData = await fetchReviewsPage(
-      accessToken,
-      REVIEWS_BATCH_SIZE, // 100
-      currentOffset,
-      startDate,
-      endDate
-    );
-    
-    const results = reviewsData.results || [];
-    
-    if (results.length === 0) {
-      hasMore = false;
-      break;
-    }
-    
-    // Upsert reviews (filter to only this account's listings)
-    // ... upsert logic
-    
-    totalReviewsSynced += results.length;
-    currentOffset += results.length;
-    
-    // Update progress
-    await updateSyncJobProgress(syncJobId, totalReviewsSynced);
-    
-    if (results.length < REVIEWS_BATCH_SIZE) {
-      hasMore = false;
-    }
-    
-    // Rate limit delay
-    await delay(REQUEST_DELAY_MS);
-  }
-}
-```
-
-### 4. Keep Existing Token Caching
-
-The OAuth token caching with single-flight lock is already implemented correctly.
-
-### 5. Filter Reviews to Account's Listings
-
-Since we're fetching all reviews without listingId filter, we need to ensure we only save reviews for listings that belong to this account:
-
-```typescript
-// Get list of this account's listing IDs
-const { data: accountListings } = await supabase
-  .from('listings')
-  .select('id')
-  .eq('guesty_account_id', guestyAccountId);
-
-const accountListingIds = new Set(accountListings?.map(l => l.id) || []);
-
-// Filter results to only this account's listings
-const validReviews = results.filter(r => accountListingIds.has(r.listingId));
+  return {
+    id: listing._id,
+    guesty_account_id: accountId,
+    // ... existing fields ...
+    airbnb_listing_id: airbnbListingId,
+    updated_at: new Date().toISOString(),
+  };
+});
 ```
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/sync-reviews/index.ts` | Complete rewrite of fetch logic - remove per-listing loop, add date-based global query |
-
-## API Request Pattern
-
-| Parameter | Value |
-|-----------|-------|
-| Endpoint | `GET https://open-api.guesty.com/v1/reviews` |
-| skip | 0, 100, 200, etc. |
-| limit | 100 (max) |
-| startDate | ISO date X days ago |
-| endDate | Current ISO date |
-
-## Rate Limiting (Preserved)
-
-The existing rate limiting code is solid and will be preserved:
-- Exponential backoff on 429 errors
-- Rate limit header logging
-- 500ms delay between requests
-- Max 5 retries per request
+| Database migration | Add `airbnb_listing_id` column to `listings` table |
+| `supabase/functions/sync-guesty-data/index.ts` | Update interface, API fields, and upsert logic |
 
 ## Expected Result
 
-| Before | After |
-|--------|-------|
-| 223 API calls (one per listing) | ~1-10 API calls (paginated) |
-| 0 reviews synced | All reviews from past X days |
-| ~3 minutes runtime | ~10-30 seconds |
+After syncing listings, each listing will have its Airbnb ID populated (if integrated with Airbnb) in the `airbnb_listing_id` column. This can be used for:
+- Deep linking to Airbnb listings
+- Cross-referencing with Airbnb data sources
+- Display in property details
 
-## UI Integration
+## Technical Notes
 
-The Settings page already has a reviews sync button. We could optionally add a dropdown to select how many days back to sync (7, 30, 90, all).
-
+- The `integrations` field may contain other channel data (VRBO, Booking.com, etc.) but we're specifically targeting `airbnb2.externalId`
+- Not all listings will have an Airbnb integration, so the field is nullable
+- The field is a simple TEXT type to handle various ID formats
