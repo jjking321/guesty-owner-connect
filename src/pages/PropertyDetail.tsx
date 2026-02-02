@@ -636,20 +636,7 @@ export default function PropertyDetail() {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-3xl font-bold tracking-tight">{listing.nickname || "Unnamed Property"}</h2>
-                {listing.airbnb_listing_id && (
-                  <a
-                    href={`https://www.airbnb.com/rooms/${listing.airbnb_listing_id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center hover:opacity-80 transition-opacity"
-                    title="View on Airbnb"
-                  >
-                    <AirbnbIcon className="h-6 w-6 text-primary" title="View on Airbnb" />
-                  </a>
-                )}
-              </div>
+              <h2 className="text-3xl font-bold tracking-tight">{listing.nickname || "Unnamed Property"}</h2>
               <p className="text-muted-foreground flex items-center gap-1 mt-1">
                 <MapPin className="h-4 w-4" />
                 {getAddress(listing.address)}
@@ -688,7 +675,20 @@ export default function PropertyDetail() {
             </div>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>Property Details</CardTitle>
+                <div className="flex items-center gap-3">
+                  <CardTitle>Property Details</CardTitle>
+                  {listing.airbnb_listing_id && (
+                    <a
+                      href={`https://www.airbnb.com/rooms/${listing.airbnb_listing_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center hover:opacity-80 transition-opacity"
+                      title="View on Airbnb"
+                    >
+                      <AirbnbIcon className="h-5 w-5" style={{ color: '#FF385C' }} title="View on Airbnb" />
+                    </a>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   {listing.active && <Badge variant="secondary">Active</Badge>}
                   {listing.is_listed && <Badge variant="outline">Listed</Badge>}
