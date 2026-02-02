@@ -65,6 +65,7 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
       }
       
       // Check for resumable failed jobs (no time limit) - these persist until dismissed or resumed
+      // BUT only if there's no successful sync after the failed one
       const { data: resumableJob } = await supabase
         .from('sync_jobs')
         .select('*')
@@ -77,9 +78,23 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
         .maybeSingle();
       
       if (resumableJob) {
-        setSyncJob(resumableJob as SyncJob);
-        setDismissed(false);
-        return; // Don't auto-clear resumable jobs
+        // Check if there's a completed sync after this failed one
+        const { data: laterCompletedJob } = await supabase
+          .from('sync_jobs')
+          .select('id')
+          .eq('guesty_account_id', accountId)
+          .eq('sync_type', syncType)
+          .in('status', ['completed', 'completed_with_errors'])
+          .gt('started_at', resumableJob.started_at)
+          .limit(1)
+          .maybeSingle();
+        
+        // Only show resumable job if no successful sync happened after it
+        if (!laterCompletedJob) {
+          setSyncJob(resumableJob as SyncJob);
+          setDismissed(false);
+          return;
+        }
       }
       
       // If no running or resumable job, look for recent completed/failed jobs (last 5 minutes)
