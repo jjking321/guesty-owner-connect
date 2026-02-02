@@ -23,6 +23,9 @@ interface GuestyReservation {
     totalPaid?: number;
     ownerRevenue?: number;
   };
+  guest?: {
+    fullName?: string;
+  };
 }
 
 interface GuestyListing {
@@ -372,7 +375,7 @@ async function fetchAndSaveReservationsBatch(
         limit,
         skip,
         filters,
-        fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue',
+        fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue guest.fullName',
       }, 5); // 5 retries
 
       const reservations = data.results || [];
@@ -404,6 +407,7 @@ async function fetchAndSaveReservationsBatch(
             confirmation_code: reservation.confirmationCode,
             created_at_guesty: reservation.createdAt,
             last_updated_at_guesty: reservation.lastUpdatedAt,
+            guest_name: reservation.guest?.fullName || null,
             updated_at: new Date().toISOString(),
           }));
 

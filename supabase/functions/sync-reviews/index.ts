@@ -14,6 +14,22 @@ const LOCK_STALE_MS = 90000;
 const LOCK_POLL_INTERVAL_MS = 1000;
 const LOCK_MAX_POLLS = 6;
 
+// Format Guesty channel IDs to human-readable platform names
+function formatChannelId(channelId: string | null): string {
+  if (!channelId) return 'Unknown';
+  const channelMap: Record<string, string> = {
+    'airbnb': 'Airbnb',
+    'airbnb2': 'Airbnb',
+    'vrbo': 'VRBO',
+    'homeaway': 'VRBO',
+    'homeaway2': 'VRBO',
+    'booking': 'Booking.com',
+    'bookingcom': 'Booking.com',
+    'manual': 'Direct',
+  };
+  return channelMap[channelId.toLowerCase()] || channelId;
+}
+
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -387,6 +403,27 @@ async function performSync(
       totalReviewsFiltered += (results.length - validReviews.length);
 
       if (validReviews.length > 0) {
+        // Collect reservation IDs to look up guest names
+        const reservationIds = validReviews
+          .map((r: any) => r.reservationId)
+          .filter((id: any) => id != null);
+
+        // Fetch guest names from reservations table
+        let guestNameMap = new Map<string, string>();
+        if (reservationIds.length > 0) {
+          const { data: reservations } = await supabaseClient
+            .from('reservations')
+            .select('id, guest_name')
+            .in('id', reservationIds);
+
+          if (reservations) {
+            guestNameMap = new Map(
+              reservations.map((r: any) => [r.id, r.guest_name])
+            );
+          }
+          console.log(`Fetched guest names for ${guestNameMap.size} reservations`);
+        }
+
         const reviewsToInsert = validReviews.map((review: any) => {
           const rawReview = review.rawReview || {};
           const reviewer = rawReview.reviewer || {};
@@ -398,19 +435,38 @@ async function performSync(
           } else if (rawReview.starRatingOverall) {
             rating = parseFloat(rawReview.starRatingOverall);
           }
+
+          // Get guest name from reservation lookup, fallback to reviewer info
+          const guestName = guestNameMap.get(review.reservationId) 
+            || reviewer.name 
+            || reviewer.first_name 
+            || null;
+
+          // Convert category_ratings array to object if needed
+          let categoryRatings = null;
+          if (Array.isArray(rawReview.category_ratings)) {
+            categoryRatings = rawReview.category_ratings.reduce((acc: any, cat: any) => {
+              if (cat.category && cat.rating != null) {
+                acc[cat.category] = cat.rating;
+              }
+              return acc;
+            }, {});
+          } else if (rawReview.category_ratings) {
+            categoryRatings = rawReview.category_ratings;
+          }
           
           return {
             id: review._id,
             guesty_account_id: guestyAccountId,
             listing_id: review.listingId,
             reservation_id: review.reservationId || null,
-            guest_name: reviewer.name || reviewer.first_name || null,
+            guest_name: guestName,
             rating: rating,
             review_text: rawReview.public_review || null,
             response_text: rawReview.private_feedback || null,
             review_date: review.createdAt || null,
-            source: review.source || null,
-            category_ratings: rawReview.category_ratings || null,
+            source: formatChannelId(review.channelId),
+            category_ratings: categoryRatings,
           };
         });
 

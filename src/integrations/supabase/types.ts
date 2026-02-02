@@ -1320,6 +1320,7 @@ export type Database = {
           confirmation_code: string | null
           created_at_guesty: string | null
           fare_accommodation_adjusted: number | null
+          guest_name: string | null
           guests_count: number | null
           guesty_account_id: string
           host_payout: number | null
@@ -1340,6 +1341,7 @@ export type Database = {
           confirmation_code?: string | null
           created_at_guesty?: string | null
           fare_accommodation_adjusted?: number | null
+          guest_name?: string | null
           guests_count?: number | null
           guesty_account_id: string
           host_payout?: number | null
@@ -1360,6 +1362,7 @@ export type Database = {
           confirmation_code?: string | null
           created_at_guesty?: string | null
           fare_accommodation_adjusted?: number | null
+          guest_name?: string | null
           guests_count?: number | null
           guesty_account_id?: string
           host_payout?: number | null
