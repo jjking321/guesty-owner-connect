@@ -624,6 +624,7 @@ export type Database = {
           accommodates: number | null
           active: boolean | null
           address: Json | null
+          airbnb_listing_id: string | null
           archived: boolean
           bedrooms: number | null
           created_at_guesty: string | null
@@ -644,6 +645,7 @@ export type Database = {
           accommodates?: number | null
           active?: boolean | null
           address?: Json | null
+          airbnb_listing_id?: string | null
           archived?: boolean
           bedrooms?: number | null
           created_at_guesty?: string | null
@@ -664,6 +666,7 @@ export type Database = {
           accommodates?: number | null
           active?: boolean | null
           address?: Json | null
+          airbnb_listing_id?: string | null
           archived?: boolean
           bedrooms?: number | null
           created_at_guesty?: string | null
