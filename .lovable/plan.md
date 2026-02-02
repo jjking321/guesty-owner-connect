@@ -1,167 +1,100 @@
 
 
-# Fix Nightly Sync Issues
+# Add Failure Notification to Last Auto Sync Display
 
 ## Overview
 
-The automated nightly sync is running but encountering three specific issues that need to be addressed:
+When the automated nightly sync encounters failures, users currently have no way to know unless they check the logs. This enhancement will add a visual indicator next to the "Last Auto Sync" timestamp showing if any sync operations failed, prompting users to try a manual sync.
 
-1. **Calendar sync returns 401 Unauthorized** - The `sync-bulk-calendar` function requires user authentication but the nightly orchestrator calls it without a user token
-2. **Reservations sync times out** - Large upserts exceed database statement timeout limits
-3. **Early function termination** - Functions using `EdgeRuntime.waitUntil()` terminate prematurely when called from the orchestrator
+## Current State
 
-## Issue 1: Calendar Sync 401 Error
-
-### Problem
-The `sync-bulk-calendar` function has user authentication checks that fail when called from the orchestrator:
-
-```typescript
-// Current code that fails:
-const { data: { user }, error: authError } = await userClient.auth.getUser();
-if (authError || !user) {
-  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
-}
+The Settings page shows:
+```
+Last Auto Sync: 2/2/2026, 12:50:37 PM
 ```
 
-### Solution
-Add service-role detection to bypass user auth when called from the orchestrator:
+But there's no indication that the reservations sync failed with a statement timeout.
 
-```typescript
-// Check for service role invocation (from nightly-sync)
-const isServiceRole = authHeader?.includes('service_role') || 
-  req.headers.get('x-service-role') === 'true';
+## Proposed Change
 
-if (!isServiceRole) {
-  // Only require user auth for direct user calls
-  const { data: { user }, error: authError } = await userClient.auth.getUser();
-  if (authError || !user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
-  }
-}
+Show a warning badge when failures occurred:
+```
+Last Auto Sync: 2/2/2026, 12:50:37 PM ⚠️ Sync issues - try manual
 ```
 
-Also update the orchestrator to pass a header indicating service invocation.
+## Implementation
 
-## Issue 2: Reservations Statement Timeout
+### Step 1: Add State to Track Sync Failures
 
-### Problem
-The `sync-new-reservations` function performs a single large upsert that exceeds database timeout limits:
-
-```typescript
-// Current code that times out on large datasets:
-const { error: upsertError } = await supabase
-  .from('reservations')
-  .upsert(uniqueReservations, { onConflict: 'id' });
-```
-
-### Solution
-Batch the upsert into chunks of 200 records:
+Add a new state variable to track which accounts had failures in their last automated sync:
 
 ```typescript
-// Batch upsert in chunks of 200
-const BATCH_SIZE = 200;
-let totalUpserted = 0;
-
-for (let i = 0; i < uniqueReservations.length; i += BATCH_SIZE) {
-  const batch = uniqueReservations.slice(i, i + BATCH_SIZE);
-  
-  const { error: upsertError } = await supabase
-    .from('reservations')
-    .upsert(batch, { onConflict: 'id' });
-  
-  if (upsertError) {
-    console.error(`Batch upsert error at index ${i}:`, upsertError);
-    throw upsertError;
-  }
-  
-  totalUpserted += batch.length;
-  
-  // Update progress
-  if (syncJobId) {
-    await supabase
-      .from('sync_jobs')
-      .update({
-        items_synced: totalUpserted,
-        progress_message: `Upserting reservations... (${totalUpserted}/${uniqueReservations.length})`,
-      })
-      .eq('id', syncJobId);
-  }
-  
-  // Small delay between batches to avoid overwhelming the database
-  if (i + BATCH_SIZE < uniqueReservations.length) {
-    await sleep(100);
-  }
-}
+const [autoSyncFailures, setAutoSyncFailures] = useState<Record<string, string[]>>({});
 ```
 
-## Issue 3: Function Termination (EdgeRuntime.waitUntil)
+### Step 2: Query for Failed Syncs
 
-### Problem
-The `sync-bulk-calendar` function uses `EdgeRuntime.waitUntil()` for background processing and returns immediately. When called from the orchestrator, the function terminates before the background work completes.
-
-### Solution
-This is actually already handled correctly because:
-- The orchestrator polls `sync_jobs` table for completion status
-- The `sync-bulk-calendar` function creates a sync job and updates it when done
-- The background task continues even after the initial response
-
-The 401 error is preventing the function from even starting, so once we fix Issue 1, the polling should work correctly.
-
-## Implementation Steps
-
-### Step 1: Update sync-bulk-calendar Authentication
-
-Modify `supabase/functions/sync-bulk-calendar/index.ts` to allow service-role invocation:
-
-| Change | Description |
-|--------|-------------|
-| Add service role detection | Check for service invocation header |
-| Conditional auth | Only require user auth for direct calls |
-| Keep security | Service role is trusted, user calls still validated |
-
-### Step 2: Update nightly-sync Orchestrator
-
-Modify `supabase/functions/nightly-sync/index.ts` to pass service invocation header:
+In `loadAccounts()`, after loading the accounts, query for failed sync jobs that occurred around each account's `last_automated_sync` time:
 
 ```typescript
-const { error: calendarInvokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-  body: { guestyAccountId: account.id },
-  headers: { 'x-service-role': 'true' }
-});
+// Check for failures in last automated sync
+const { data: failedSyncs } = await supabase
+  .from('sync_jobs')
+  .select('guesty_account_id, sync_type, error_message')
+  .in('guesty_account_id', accountIds)
+  .eq('status', 'failed')
+  .gte('started_at', /* last_automated_sync - 1 hour */)
+  .lte('started_at', /* last_automated_sync + 1 minute */);
 ```
 
-### Step 3: Add Batched Upsert to sync-new-reservations
+### Step 3: Update the Display
 
-Modify `supabase/functions/sync-new-reservations/index.ts` to batch database operations:
+Modify the "Last Auto Sync" display section to show a warning when failures exist:
 
-| Change | Description |
-|--------|-------------|
-| Chunk reservations | Split into batches of 200 |
-| Progress updates | Update sync_jobs between batches |
-| Small delays | 100ms between batches to prevent overload |
+```tsx
+{account.last_automated_sync && (
+  <div className="flex items-center gap-1">
+    <Clock className="h-3 w-3" />
+    <span>Last Auto Sync: {new Date(account.last_automated_sync).toLocaleString()}</span>
+    {autoSyncFailures[account.id]?.length > 0 && (
+      <Badge variant="destructive" className="ml-1 text-xs">
+        Sync issues
+      </Badge>
+    )}
+  </div>
+)}
+```
 
-## Files to Modify
+Optionally show a tooltip or expand to show which specific syncs failed.
+
+## Technical Details
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/sync-bulk-calendar/index.ts` | Add service-role bypass for auth |
-| `supabase/functions/nightly-sync/index.ts` | Add service invocation header |
-| `supabase/functions/sync-new-reservations/index.ts` | Batch upserts in chunks of 200 |
+| `src/pages/Settings.tsx` | Add failure tracking state, query sync_jobs for failures, display warning badge |
 
-## Expected Results After Fix
+### Query Logic
 
-| Sync Type | Current Status | After Fix |
-|-----------|---------------|-----------|
-| Listings | Working | Working |
-| Reservations | Timeout on large accounts | Batched, no timeout |
-| Owners | Working | Working |
-| Calendar | 401 Unauthorized | Working with service auth bypass |
+For each account with a `last_automated_sync` timestamp, find sync_jobs where:
+- `guesty_account_id` matches the account
+- `status = 'failed'`
+- `started_at` is within a window around `last_automated_sync` (e.g., from 1 hour before to 1 minute after)
 
-## Testing
+This captures all syncs that were part of the nightly run.
 
-After implementation:
-1. Manually trigger the nightly-sync function
-2. Monitor edge function logs for all four sync types
-3. Verify all syncs complete successfully
-4. Check `last_automated_sync` timestamp updates
+### UI Options
+
+1. **Simple Badge**: Just show "Sync issues" badge
+2. **Detailed Badge**: Show "1 of 4 syncs failed" 
+3. **Expandable Details**: Show which specific sync types failed with their error messages
+
+I recommend starting with option 2 (showing count) as it gives users enough information without being overwhelming.
+
+## Expected Result
+
+| Scenario | Display |
+|----------|---------|
+| All syncs succeeded | `Last Auto Sync: 2/2/2026, 12:50 PM` |
+| 1 sync failed | `Last Auto Sync: 2/2/2026, 12:50 PM` + red badge "1 sync failed" |
+| Multiple failures | `Last Auto Sync: 2/2/2026, 12:50 PM` + red badge "2 syncs failed" |
 
