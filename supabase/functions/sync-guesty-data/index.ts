@@ -619,6 +619,17 @@ Deno.serve(async (req) => {
 
         await updateSyncJob(supabase, jobId, { progress_message: 'Saving listings to database...' });
 
+  // Debug: Log first listing's integrations field to see what Guesty returns
+  if (guestyListings.length > 0) {
+    const firstListing = guestyListings[0];
+    console.log(`DEBUG: First listing integrations field:`, JSON.stringify(firstListing.integrations));
+    console.log(`DEBUG: First listing keys:`, Object.keys(firstListing));
+  }
+  
+  // Count listings with Airbnb integrations for logging
+  const listingsWithAirbnb = guestyListings.filter((l: GuestyListing) => l.integrations?.airbnb2?.externalId);
+  console.log(`DEBUG: ${listingsWithAirbnb.length} of ${guestyListings.length} listings have Airbnb integration`);
+
   const listingsToUpsert = guestyListings.map((listing: GuestyListing) => {
     // Extract thumbnail from picture or pictures array
     let thumbnail = null;
