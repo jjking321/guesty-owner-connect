@@ -46,6 +46,11 @@ interface GuestyListing {
     _id?: string;
     original?: string;
   }>;
+  integrations?: {
+    airbnb2?: {
+      externalId?: string;
+    };
+  };
 }
 
 const MAX_RETRIES = 5;
@@ -305,7 +310,7 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
     const data = await fetchGuestyData(apiToken, 'listings', {
       limit,
       skip,
-      fields: '_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures',
+      fields: '_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures integrations',
     }, 5); // 5 retries for listings
 
     const listings = data.results || [];
@@ -626,6 +631,9 @@ Deno.serve(async (req) => {
     // Store the full pictures array for higher quality images
     const pictures = listing.pictures || [];
     
+    // Extract Airbnb listing ID from integrations
+    const airbnbListingId = listing.integrations?.airbnb2?.externalId || null;
+    
     return {
       id: listing._id,
       guesty_account_id: accountId,
@@ -640,6 +648,7 @@ Deno.serve(async (req) => {
       address: listing.address,
       thumbnail: thumbnail,
       pictures: pictures,
+      airbnb_listing_id: airbnbListingId,
       updated_at: new Date().toISOString(),
     };
   });
