@@ -230,19 +230,23 @@ async function fetchGuestyOAuthToken(clientId: string, clientSecret: string): Pr
 
 async function fetchReviewsPage(
   accessToken: string,
-  listingId: string,
   limit: number,
-  skip: number
+  skip: number,
+  startDate: string,
+  endDate: string
 ) {
   const url = new URL('https://open-api.guesty.com/v1/reviews');
-  url.searchParams.append('listingId', listingId);
   url.searchParams.append('limit', limit.toString());
   url.searchParams.append('skip', skip.toString());
+  url.searchParams.append('startDate', startDate);
+  url.searchParams.append('endDate', endDate);
 
   let lastError: Error | null = null;
   
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
+      console.log(`Fetching reviews: skip=${skip}, limit=${limit}, startDate=${startDate}, endDate=${endDate}`);
+      
       const response = await fetch(url.toString(), {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -259,7 +263,8 @@ async function fetchReviewsPage(
       }
 
       if (response.status === 429) {
-        const backoffMs = 2000 * Math.pow(2, attempt);
+        const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
+        const backoffMs = Math.max(2000 * Math.pow(2, attempt), retryAfterMs || 0);
         console.log(`Rate limited (429), retrying after ${backoffMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
         await delay(backoffMs);
         continue;
@@ -288,7 +293,7 @@ async function fetchReviewsPage(
 async function performSync(
   guestyAccountId: string,
   syncJobId: string,
-  resumeFromOffset: number
+  daysSince: number
 ) {
   const supabaseClient = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
@@ -296,7 +301,7 @@ async function performSync(
   );
 
   try {
-    console.log(`Starting review sync for account: ${guestyAccountId}, resuming from offset: ${resumeFromOffset}`);
+    console.log(`Starting review sync for account: ${guestyAccountId}, fetching reviews from past ${daysSince} days`);
 
     const { data: guestyAccount, error: accountError } = await supabaseClient
       .from('guesty_accounts')
@@ -308,7 +313,7 @@ async function performSync(
       throw new Error('Guesty account not found');
     }
 
-    // Use cached token manager
+    // Get access token using cached token manager
     const accessToken = await getGuestyAccessTokenCached(
       supabaseClient,
       guestyAccountId,
@@ -316,74 +321,68 @@ async function performSync(
       guestyAccount.client_secret
     );
 
-    const { data: listings, error: listingsError } = await supabaseClient
+    // Get list of this account's listing IDs for filtering
+    const { data: accountListings, error: listingsError } = await supabaseClient
       .from('listings')
       .select('id')
-      .eq('guesty_account_id', guestyAccountId)
-      .eq('archived', false)
-      .eq('active', true);
+      .eq('guesty_account_id', guestyAccountId);
 
     if (listingsError) {
       throw new Error(`Failed to fetch listings: ${listingsError.message}`);
     }
 
-    if (!listings || listings.length === 0) {
-      console.log('No active listings found for this account');
-      await supabaseClient
-        .from('sync_jobs')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          items_synced: 0,
-          progress_message: 'No active listings to sync reviews for',
-        })
-        .eq('id', syncJobId);
-      return;
-    }
+    const accountListingIds = new Set(accountListings?.map(l => l.id) || []);
+    console.log(`Found ${accountListingIds.size} listings for this account`);
 
-    const totalListings = listings.length;
-    console.log(`Found ${totalListings} active listings to sync reviews for`);
+    // Calculate date range
+    const endDate = new Date().toISOString();
+    const startDate = new Date(Date.now() - daysSince * 24 * 60 * 60 * 1000).toISOString();
+    
+    console.log(`Fetching reviews from ${startDate} to ${endDate}`);
 
     await supabaseClient
       .from('sync_jobs')
       .update({
-        total_items: totalListings,
-        progress_message: `Starting sync for ${totalListings} listings...`,
+        progress_message: `Fetching reviews from past ${daysSince} days...`,
       })
       .eq('id', syncJobId);
 
     let totalReviewsSynced = 0;
-    let listingsProcessed = 0;
+    let totalReviewsFiltered = 0;
+    let currentOffset = 0;
+    let hasMore = true;
+    let pageNumber = 0;
 
-    for (const listing of listings) {
-      listingsProcessed++;
-      const listingId = listing.id;
+    while (hasMore) {
+      pageNumber++;
+      console.log(`Fetching page ${pageNumber} (offset: ${currentOffset})`);
+
+      const reviewsData = await fetchReviewsPage(
+        accessToken,
+        REVIEWS_BATCH_SIZE,
+        currentOffset,
+        startDate,
+        endDate
+      );
+
+      const results = reviewsData.results || [];
+      console.log(`Received ${results.length} reviews from API`);
+
+      if (results.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      // Filter to only reviews for this account's listings
+      const validReviews = results.filter((review: any) => 
+        accountListingIds.has(review.listingId)
+      );
       
-      console.log(`Processing listing ${listingsProcessed}/${totalListings}: ${listingId}`);
+      console.log(`Filtered to ${validReviews.length} reviews for this account's listings`);
+      totalReviewsFiltered += (results.length - validReviews.length);
 
-      let listingReviewsCount = 0;
-      let currentOffset = 0;
-      let hasMorePages = true;
-
-      while (hasMorePages) {
-        console.log(`Fetching reviews for listing ${listingId} (offset: ${currentOffset})`);
-
-        const reviewsData = await fetchReviewsPage(
-          accessToken,
-          listingId,
-          REVIEWS_BATCH_SIZE,
-          currentOffset
-        );
-
-        const results = reviewsData.results || [];
-        console.log(`Received ${results.length} reviews for listing ${listingId}`);
-
-        if (results.length === 0) {
-          hasMorePages = false;
-          break;
-        }
-
-        const reviewsToInsert = results.map((review: any) => ({
+      if (validReviews.length > 0) {
+        const reviewsToInsert = validReviews.map((review: any) => ({
           id: review._id || review.id,
           guesty_account_id: guestyAccountId,
           listing_id: review.listingId,
@@ -406,30 +405,27 @@ async function performSync(
           throw upsertError;
         }
 
-        listingReviewsCount += results.length;
-        totalReviewsSynced += results.length;
-        currentOffset += results.length;
-
-        if (results.length < REVIEWS_BATCH_SIZE) {
-          hasMorePages = false;
-        }
-
-        if (hasMorePages) {
-          await delay(REQUEST_DELAY_MS);
-        }
+        totalReviewsSynced += validReviews.length;
       }
 
-      console.log(`Completed listing ${listingId}: ${listingReviewsCount} reviews`);
+      currentOffset += results.length;
 
+      // Update progress
       await supabaseClient
         .from('sync_jobs')
         .update({
-          items_synced: listingsProcessed,
-          progress_message: `Syncing reviews for listing ${listingsProcessed} of ${totalListings} (${totalReviewsSynced} reviews total)`,
+          items_synced: totalReviewsSynced,
+          last_synced_offset: currentOffset,
+          progress_message: `Synced ${totalReviewsSynced} reviews (page ${pageNumber})...`,
         })
         .eq('id', syncJobId);
 
-      if (listingsProcessed < totalListings) {
+      if (results.length < REVIEWS_BATCH_SIZE) {
+        hasMore = false;
+      }
+
+      // Rate limit delay between pages
+      if (hasMore) {
         await delay(REQUEST_DELAY_MS);
       }
     }
@@ -439,8 +435,8 @@ async function performSync(
       .update({
         status: 'completed',
         completed_at: new Date().toISOString(),
-        items_synced: totalListings,
-        progress_message: `Successfully synced ${totalReviewsSynced} reviews from ${totalListings} listings`,
+        items_synced: totalReviewsSynced,
+        progress_message: `Successfully synced ${totalReviewsSynced} reviews from past ${daysSince} days`,
       })
       .eq('id', syncJobId);
 
@@ -449,7 +445,7 @@ async function performSync(
       .update({ last_reviews_sync: new Date().toISOString() })
       .eq('id', guestyAccountId);
 
-    console.log(`Review sync completed successfully: ${totalReviewsSynced} reviews synced from ${totalListings} listings`);
+    console.log(`Review sync completed: ${totalReviewsSynced} reviews synced, ${totalReviewsFiltered} filtered out (other accounts)`);
   } catch (error) {
     console.error('Review sync failed:', error);
     
@@ -495,7 +491,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { guestyAccountId } = await req.json();
+    const { guestyAccountId, daysSince = 30 } = await req.json();
 
     if (!guestyAccountId) {
       return new Response(
@@ -503,6 +499,9 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Validate daysSince parameter
+    const validDaysSince = Math.max(1, Math.min(365, Number(daysSince) || 30));
 
     const { data: existingJob } = await supabaseAdmin
       .from('sync_jobs')
@@ -515,12 +514,10 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     let syncJob;
-    let resumeFromOffset = 0;
 
     if (existingJob) {
       syncJob = existingJob;
-      resumeFromOffset = existingJob.last_synced_offset || 0;
-      console.log(`Resuming existing sync job: ${syncJob.id} from offset ${resumeFromOffset}`);
+      console.log(`Resuming existing sync job: ${syncJob.id}`);
     } else {
       const { data: newJob, error: jobError } = await supabaseAdmin
         .from('sync_jobs')
@@ -530,7 +527,7 @@ Deno.serve(async (req) => {
           status: 'running',
           items_synced: 0,
           last_synced_offset: 0,
-          progress_message: 'Starting review sync...',
+          progress_message: `Starting review sync (past ${validDaysSince} days)...`,
         })
         .select()
         .single();
@@ -545,7 +542,7 @@ Deno.serve(async (req) => {
     }
 
     EdgeRuntime.waitUntil(
-      performSync(guestyAccountId, syncJob.id, resumeFromOffset)
+      performSync(guestyAccountId, syncJob.id, validDaysSince)
     );
 
     return new Response(
@@ -553,9 +550,10 @@ Deno.serve(async (req) => {
         started: true,
         jobId: syncJob.id,
         resumed: !!existingJob,
+        daysSince: validDaysSince,
         message: existingJob 
-          ? `Resuming review sync from ${resumeFromOffset} reviews`
-          : 'Review sync started in background',
+          ? 'Resuming review sync'
+          : `Review sync started (fetching past ${validDaysSince} days)`,
       }),
       {
         status: 200,
