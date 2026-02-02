@@ -95,3 +95,6 @@ verify_jwt = false
 
 [functions.nightly-sync]
 verify_jwt = false
+
+[functions.sync-new-reviews]
+verify_jwt = true

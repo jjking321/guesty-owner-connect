@@ -309,7 +309,7 @@ async function fetchReviewsPage(
 async function performSync(
   guestyAccountId: string,
   syncJobId: string,
-  daysSince: number
+  startDate: string
 ) {
   const supabaseClient = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
@@ -317,11 +317,11 @@ async function performSync(
   );
 
   try {
-    console.log(`Starting review sync for account: ${guestyAccountId}, fetching reviews from past ${daysSince} days`);
+    console.log(`Starting incremental review sync for account: ${guestyAccountId}, from ${startDate}`);
 
     const { data: guestyAccount, error: accountError } = await supabaseClient
       .from('guesty_accounts')
-      .select('client_id, client_secret, last_reviews_sync')
+      .select('client_id, client_secret')
       .eq('id', guestyAccountId)
       .single();
 
@@ -350,16 +350,15 @@ async function performSync(
     const accountListingIds = new Set(accountListings?.map(l => l.id) || []);
     console.log(`Found ${accountListingIds.size} listings for this account`);
 
-    // Calculate date range
+    // Calculate date range - from startDate to now
     const endDate = new Date().toISOString();
-    const startDate = new Date(Date.now() - daysSince * 24 * 60 * 60 * 1000).toISOString();
     
     console.log(`Fetching reviews from ${startDate} to ${endDate}`);
 
     await supabaseClient
       .from('sync_jobs')
       .update({
-        progress_message: `Fetching reviews from past ${daysSince} days...`,
+        progress_message: `Fetching new reviews since last sync...`,
       })
       .eq('id', syncJobId);
 
@@ -383,11 +382,6 @@ async function performSync(
 
       const results = reviewsData.data || [];
       console.log(`Received ${results.length} reviews from API`);
-      
-      // Debug: log first review structure to verify field mapping
-      if (results.length > 0 && pageNumber === 1) {
-        console.log('First review structure:', JSON.stringify(results[0], null, 2));
-      }
 
       if (results.length === 0) {
         hasMore = false;
@@ -490,7 +484,7 @@ async function performSync(
         .update({
           items_synced: totalReviewsSynced,
           last_synced_offset: currentOffset,
-          progress_message: `Synced ${totalReviewsSynced} reviews (page ${pageNumber})...`,
+          progress_message: `Synced ${totalReviewsSynced} new reviews (page ${pageNumber})...`,
         })
         .eq('id', syncJobId);
 
@@ -510,7 +504,7 @@ async function performSync(
         status: 'completed',
         completed_at: new Date().toISOString(),
         items_synced: totalReviewsSynced,
-        progress_message: `Successfully synced ${totalReviewsSynced} reviews from past ${daysSince} days`,
+        progress_message: `Successfully synced ${totalReviewsSynced} new reviews`,
       })
       .eq('id', syncJobId);
 
@@ -519,7 +513,7 @@ async function performSync(
       .update({ last_reviews_sync: new Date().toISOString() })
       .eq('id', guestyAccountId);
 
-    console.log(`Review sync completed: ${totalReviewsSynced} reviews synced, ${totalReviewsFiltered} filtered out (other accounts)`);
+    console.log(`Incremental review sync completed: ${totalReviewsSynced} reviews synced, ${totalReviewsFiltered} filtered out (other accounts)`);
   } catch (error) {
     console.error('Review sync failed:', error);
     
@@ -565,7 +559,7 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const { guestyAccountId, daysSince = 30 } = await req.json();
+    const { guestyAccountId } = await req.json();
 
     if (!guestyAccountId) {
       return new Response(
@@ -574,60 +568,67 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Validate daysSince parameter (max 730 days = 2 years to match reservations)
-    const validDaysSince = Math.max(1, Math.min(730, Number(daysSince) || 30));
-
-    const { data: existingJob } = await supabaseAdmin
-      .from('sync_jobs')
-      .select('*')
+    // Get the most recent review imported_at for this account
+    const { data: latestReview, error: reviewError } = await supabaseAdmin
+      .from('reviews')
+      .select('imported_at')
       .eq('guesty_account_id', guestyAccountId)
-      .eq('sync_type', 'reviews')
-      .eq('status', 'running')
-      .order('started_at', { ascending: false })
+      .order('imported_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    let syncJob;
-
-    if (existingJob) {
-      syncJob = existingJob;
-      console.log(`Resuming existing sync job: ${syncJob.id}`);
-    } else {
-      const { data: newJob, error: jobError } = await supabaseAdmin
-        .from('sync_jobs')
-        .insert({
-          guesty_account_id: guestyAccountId,
-          sync_type: 'reviews',
-          status: 'running',
-          items_synced: 0,
-          last_synced_offset: 0,
-          progress_message: `Starting review sync (past ${validDaysSince} days)...`,
-        })
-        .select()
-        .single();
-
-      if (jobError || !newJob) {
-        console.error('Failed to create sync job:', jobError);
-        throw new Error(`Failed to create sync job: ${jobError?.message || 'Unknown error'}`);
-      }
-
-      syncJob = newJob;
-      console.log(`Created new sync job: ${syncJob.id}`);
+    if (reviewError) {
+      console.error('Error fetching latest review:', reviewError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to check existing reviews' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
+    if (!latestReview) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'No existing reviews found. Please run a full review sync from Settings first.',
+          requiresFullSync: true
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Use imported_at as the start date for incremental sync
+    const startDate = latestReview.imported_at;
+    console.log(`Starting incremental sync from: ${startDate}`);
+
+    const { data: newJob, error: jobError } = await supabaseAdmin
+      .from('sync_jobs')
+      .insert({
+        guesty_account_id: guestyAccountId,
+        sync_type: 'new_reviews',
+        status: 'running',
+        items_synced: 0,
+        last_synced_offset: 0,
+        progress_message: 'Starting incremental review sync...',
+      })
+      .select()
+      .single();
+
+    if (jobError || !newJob) {
+      console.error('Failed to create sync job:', jobError);
+      throw new Error(`Failed to create sync job: ${jobError?.message || 'Unknown error'}`);
+    }
+
+    console.log(`Created new sync job: ${newJob.id}`);
+
     EdgeRuntime.waitUntil(
-      performSync(guestyAccountId, syncJob.id, validDaysSince)
+      performSync(guestyAccountId, newJob.id, startDate)
     );
 
     return new Response(
       JSON.stringify({
         started: true,
-        jobId: syncJob.id,
-        resumed: !!existingJob,
-        daysSince: validDaysSince,
-        message: existingJob 
-          ? 'Resuming review sync'
-          : `Review sync started (fetching past ${validDaysSince} days)`,
+        jobId: newJob.id,
+        startDate,
+        message: 'Incremental review sync started',
       }),
       {
         status: 200,
@@ -635,7 +636,7 @@ Deno.serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error in sync-reviews function:', error);
+    console.error('Error in sync-new-reviews function:', error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
       {

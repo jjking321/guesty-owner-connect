@@ -1,17 +1,37 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { ReviewsSummary } from "@/components/ReviewsSummary";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw, Loader2 } from "lucide-react";
 
 export default function Reviews() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedProperty, setSelectedProperty] = useState<string>('all');
+  const [syncingReviews, setSyncingReviews] = useState(false);
+  const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
+
+  // Fetch guesty account ID on load
+  useEffect(() => {
+    const fetchAccountId = async () => {
+      const { data } = await supabase
+        .from('guesty_accounts')
+        .select('id')
+        .limit(1)
+        .single();
+      
+      if (data) {
+        setGuestyAccountId(data.id);
+      }
+    };
+    fetchAccountId();
+  }, []);
 
   // Fetch all reviews
   const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
@@ -131,6 +151,53 @@ export default function Reviews() {
     await restoreMutation.mutateAsync(reviewId);
   };
 
+  const handleSyncNewReviews = async () => {
+    if (!guestyAccountId) {
+      toast({
+        title: "No account found",
+        description: "Please connect a Guesty account in Settings first.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSyncingReviews(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-new-reviews", {
+        body: { guestyAccountId },
+      });
+
+      if (error) throw error;
+
+      if (data?.requiresFullSync) {
+        toast({
+          title: "Full sync required",
+          description: "Please run a full review sync from Settings first.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Review sync started",
+        description: "Fetching new reviews since last sync...",
+      });
+
+      // Refresh reviews after a short delay
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['reviews'] });
+      }, 3000);
+    } catch (error: any) {
+      toast({
+        title: "Sync failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingReviews(false);
+    }
+  };
+
   // Filter reviews by property
   const filteredReviews = selectedProperty === 'all' 
     ? reviews 
@@ -147,9 +214,23 @@ export default function Reviews() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">Reviews Management</h2>
-          <p className="text-muted-foreground">View and manage reviews across all properties</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-3xl font-bold tracking-tight">Reviews Management</h2>
+            <p className="text-muted-foreground">View and manage reviews across all properties</p>
+          </div>
+          <Button 
+            onClick={handleSyncNewReviews} 
+            disabled={syncingReviews || !guestyAccountId}
+            variant="outline"
+          >
+            {syncingReviews ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Sync New Reviews
+          </Button>
         </div>
 
         {/* Property Filter */}

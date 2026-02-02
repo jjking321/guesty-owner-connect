@@ -271,7 +271,7 @@ export default function Settings() {
       const incompleteJob = incompleteSyncJobs[incompleteKey];
       
       const { data, error } = await supabase.functions.invoke("sync-reviews", {
-        body: { guestyAccountId: accountId },
+        body: { guestyAccountId: accountId, daysSince: 730 },
       });
 
       if (error) throw error;
