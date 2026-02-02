@@ -1,92 +1,107 @@
 
-# Add Airbnb Listing ID to Listings
+# Fix Reviews Sync - API Response Mapping
 
-## Overview
+## Problem Identified
+The reviews sync completes but fetches 0 reviews because the code is parsing the API response incorrectly:
 
-Add support for extracting and storing the Airbnb listing ID from the Guesty API. The ID is located in the `integrations.airbnb2.externalId` field of each listing.
+1. **Response wrapper**: Code expects `reviewsData.results` but the API returns `reviewsData.data`
+2. **Field mapping**: The field names in the code don't match the actual Guesty API response structure
 
-## Implementation Steps
-
-### Step 1: Database Migration
-
-Add a new nullable column `airbnb_listing_id` to the `listings` table:
-
-```sql
-ALTER TABLE listings 
-ADD COLUMN airbnb_listing_id TEXT;
+## Working API Reference (from your other project)
 ```
+GET https://open-api.guesty.com/v1/reviews?skip={skip}&limit={limit}&startDate={fromDate}&endDate={toDate}
 
-### Step 2: Update GuestyListing Interface
-
-Add the `integrations` field to the interface:
-
-```typescript
-interface GuestyListing {
-  _id: string;
-  createdAt: string;
-  nickname: string;
-  status: string;
-  isListed: boolean;
-  active: boolean;
-  propertyType: string;
-  accommodates: number;
-  bedrooms: number;
-  address: any;
-  picture?: { thumbnail?: string; _id?: string; original?: string; };
-  pictures?: Array<{ thumbnail?: string; _id?: string; original?: string; }>;
-  integrations?: {
-    airbnb2?: {
-      externalId?: string;
-    };
-  };
+Response:
+{
+  "data": [
+    {
+      "_id": "guesty_review_id",
+      "reservationId": "res_123",
+      "listingId": "listing_456",
+      "channelId": "airbnb",
+      "source": "Airbnb",
+      "guestId": "guest_789",
+      "rawReview": {
+        "overall_rating": 3,
+        "public_review": "The place was okay but...",
+        "starRatingOverall": "3",
+        "reviewer": {
+          "first_name": "John",
+          "name": "John Doe"
+        }
+      },
+      "createdAt": "2025-01-15T10:30:00.000Z"
+    }
+  ]
 }
 ```
 
-### Step 3: Update API Fields Request
+## Changes Required
 
-Add `integrations` to the fields being fetched:
+### File: `supabase/functions/sync-reviews/index.ts`
 
-| Before | After |
-|--------|-------|
-| `_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures` | `_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures integrations` |
+**1. Fix response parsing (line 368)**
+- Change from: `const results = reviewsData.results || [];`
+- Change to: `const results = reviewsData.data || [];`
 
-### Step 4: Update Upsert Logic
+**2. Fix field mapping (lines 385-397)**
+Update the review object mapping to extract data from `rawReview`:
 
-Extract the Airbnb ID and include it in the upsert:
+```text
+Current Mapping          ->  Correct Mapping
+------------------------------------------------------
+review._id                   review._id (correct)
+review.listingId             review.listingId (correct)
+review.reservationId         review.reservationId (correct)
+review.guestName             review.rawReview?.reviewer?.name 
+                             || review.rawReview?.reviewer?.first_name
+review.rating                review.rawReview?.overall_rating 
+                             || parseFloat(review.rawReview?.starRatingOverall)
+review.review                review.rawReview?.public_review
+review.source                review.source (correct)
+review.createdAt             review.createdAt (correct)
+review.publicReply           review.rawReview?.private_feedback (if exists)
+review.categories            review.rawReview (store full object for category extraction)
+```
+
+**3. Add debug logging**
+Add a log statement to print the first review object received, so we can verify the exact structure if needed.
+
+## Technical Details
+
+The updated mapping code will look like:
 
 ```typescript
-const listingsToUpsert = guestyListings.map((listing: GuestyListing) => {
-  // ... existing thumbnail extraction ...
+const reviewsToInsert = validReviews.map((review: any) => {
+  const rawReview = review.rawReview || {};
+  const reviewer = rawReview.reviewer || {};
   
-  // Extract Airbnb listing ID from integrations
-  const airbnbListingId = listing.integrations?.airbnb2?.externalId || null;
+  // Extract rating from multiple possible fields
+  let rating = null;
+  if (typeof rawReview.overall_rating === 'number') {
+    rating = rawReview.overall_rating;
+  } else if (rawReview.starRatingOverall) {
+    rating = parseFloat(rawReview.starRatingOverall);
+  }
   
   return {
-    id: listing._id,
-    guesty_account_id: accountId,
-    // ... existing fields ...
-    airbnb_listing_id: airbnbListingId,
-    updated_at: new Date().toISOString(),
+    id: review._id,
+    guesty_account_id: guestyAccountId,
+    listing_id: review.listingId,
+    reservation_id: review.reservationId || null,
+    guest_name: reviewer.name || reviewer.first_name || null,
+    rating: rating,
+    review_text: rawReview.public_review || null,
+    response_text: rawReview.private_feedback || null,
+    review_date: review.createdAt || null,
+    source: review.source || null,
+    category_ratings: rawReview.category_ratings || null,
   };
 });
 ```
 
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| Database migration | Add `airbnb_listing_id` column to `listings` table |
-| `supabase/functions/sync-guesty-data/index.ts` | Update interface, API fields, and upsert logic |
-
-## Expected Result
-
-After syncing listings, each listing will have its Airbnb ID populated (if integrated with Airbnb) in the `airbnb_listing_id` column. This can be used for:
-- Deep linking to Airbnb listings
-- Cross-referencing with Airbnb data sources
-- Display in property details
-
-## Technical Notes
-
-- The `integrations` field may contain other channel data (VRBO, Booking.com, etc.) but we're specifically targeting `airbnb2.externalId`
-- Not all listings will have an Airbnb integration, so the field is nullable
-- The field is a simple TEXT type to handle various ID formats
+## Expected Outcome
+After this fix, running the reviews sync should:
+- Successfully parse the `data` array from the API response
+- Correctly extract guest name, rating, and review text from the `rawReview` object
+- Store reviews in the database with proper field values
