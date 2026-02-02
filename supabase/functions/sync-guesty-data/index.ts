@@ -46,11 +46,13 @@ interface GuestyListing {
     _id?: string;
     original?: string;
   }>;
-  integrations?: {
+  integrations?: Array<{
+    platform?: string;
     airbnb2?: {
+      id?: string;
       externalId?: string;
     };
-  };
+  }>;
 }
 
 const MAX_RETRIES = 5;
@@ -627,7 +629,10 @@ Deno.serve(async (req) => {
   }
   
   // Count listings with Airbnb integrations for logging
-  const listingsWithAirbnb = guestyListings.filter((l: GuestyListing) => l.integrations?.airbnb2?.externalId);
+  const listingsWithAirbnb = guestyListings.filter((l: GuestyListing) => {
+    const airbnbIntegration = l.integrations?.find((i: any) => i.platform === 'airbnb2');
+    return airbnbIntegration?.airbnb2?.id;
+  });
   console.log(`DEBUG: ${listingsWithAirbnb.length} of ${guestyListings.length} listings have Airbnb integration`);
 
   const listingsToUpsert = guestyListings.map((listing: GuestyListing) => {
@@ -642,8 +647,9 @@ Deno.serve(async (req) => {
     // Store the full pictures array for higher quality images
     const pictures = listing.pictures || [];
     
-    // Extract Airbnb listing ID from integrations
-    const airbnbListingId = listing.integrations?.airbnb2?.externalId || null;
+    // Extract Airbnb listing ID from integrations array
+    const airbnbIntegration = listing.integrations?.find((i: any) => i.platform === 'airbnb2');
+    const airbnbListingId = airbnbIntegration?.airbnb2?.id || null;
     
     return {
       id: listing._id,
