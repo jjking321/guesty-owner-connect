@@ -365,8 +365,13 @@ async function performSync(
         endDate
       );
 
-      const results = reviewsData.results || [];
+      const results = reviewsData.data || [];
       console.log(`Received ${results.length} reviews from API`);
+      
+      // Debug: log first review structure to verify field mapping
+      if (results.length > 0 && pageNumber === 1) {
+        console.log('First review structure:', JSON.stringify(results[0], null, 2));
+      }
 
       if (results.length === 0) {
         hasMore = false;
@@ -382,19 +387,32 @@ async function performSync(
       totalReviewsFiltered += (results.length - validReviews.length);
 
       if (validReviews.length > 0) {
-        const reviewsToInsert = validReviews.map((review: any) => ({
-          id: review._id || review.id,
-          guesty_account_id: guestyAccountId,
-          listing_id: review.listingId,
-          reservation_id: review.reservationId || null,
-          guest_name: review.guestName || null,
-          rating: typeof review.rating === 'number' ? review.rating : (review.rating ? parseFloat(review.rating) : null),
-          review_text: review.review || null,
-          response_text: review.publicReply || null,
-          review_date: review.createdAt || null,
-          source: review.source || null,
-          category_ratings: review.categories || null,
-        }));
+        const reviewsToInsert = validReviews.map((review: any) => {
+          const rawReview = review.rawReview || {};
+          const reviewer = rawReview.reviewer || {};
+          
+          // Extract rating from multiple possible fields
+          let rating = null;
+          if (typeof rawReview.overall_rating === 'number') {
+            rating = rawReview.overall_rating;
+          } else if (rawReview.starRatingOverall) {
+            rating = parseFloat(rawReview.starRatingOverall);
+          }
+          
+          return {
+            id: review._id,
+            guesty_account_id: guestyAccountId,
+            listing_id: review.listingId,
+            reservation_id: review.reservationId || null,
+            guest_name: reviewer.name || reviewer.first_name || null,
+            rating: rating,
+            review_text: rawReview.public_review || null,
+            response_text: rawReview.private_feedback || null,
+            review_date: review.createdAt || null,
+            source: review.source || null,
+            category_ratings: rawReview.category_ratings || null,
+          };
+        });
 
         const { error: upsertError } = await supabaseClient
           .from('reviews')
