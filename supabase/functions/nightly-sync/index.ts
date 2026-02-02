@@ -206,7 +206,8 @@ Deno.serve(async (req) => {
         // 4. Sync Calendar (this is the longest one)
         console.log(`[${account.account_name}] Starting calendar sync...`);
         const { error: calendarInvokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-          body: { guestyAccountId: account.id }
+          body: { guestyAccountId: account.id },
+          headers: { 'x-service-role': 'true' }
         });
 
         if (calendarInvokeError) {

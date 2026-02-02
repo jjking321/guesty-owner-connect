@@ -511,17 +511,27 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } }
-    });
-    const { data: { user }, error: authError } = await userClient.auth.getUser();
-    
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // Check for service role invocation (from nightly-sync orchestrator)
+    const isServiceRole = authHeader?.includes('service_role') || 
+      req.headers.get('x-service-role') === 'true';
+
+    if (!isServiceRole) {
+      // Only require user auth for direct user calls
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } }
+      });
+      const { data: { user }, error: authError } = await userClient.auth.getUser();
+      
+      if (authError || !user) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      console.log(`User authenticated: ${user.id}`);
+    } else {
+      console.log('Service role invocation detected - bypassing user auth');
     }
 
     const { guestyAccountId, guestyToken } = await req.json();

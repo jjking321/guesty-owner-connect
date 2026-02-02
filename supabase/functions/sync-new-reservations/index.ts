@@ -560,18 +560,46 @@ Deno.serve(async (req) => {
         new Map(validReservations.map(item => [item.id, item])).values()
       );
 
-      console.log(`Upserting ${uniqueReservations.length} unique reservations...`);
+      console.log(`Upserting ${uniqueReservations.length} unique reservations in batches...`);
 
-      const { error: upsertError } = await supabase
-        .from('reservations')
-        .upsert(uniqueReservations, { onConflict: 'id' });
+      // Batch upsert in chunks of 200 to prevent statement timeouts
+      const BATCH_SIZE = 200;
+      let totalUpserted = 0;
 
-      if (upsertError) {
-        console.error('Error upserting reservations:', upsertError);
-        throw upsertError;
+      for (let i = 0; i < uniqueReservations.length; i += BATCH_SIZE) {
+        const batch = uniqueReservations.slice(i, i + BATCH_SIZE);
+        
+        const { error: upsertError } = await supabase
+          .from('reservations')
+          .upsert(batch, { onConflict: 'id' });
+
+        if (upsertError) {
+          console.error(`Batch upsert error at index ${i}:`, upsertError);
+          throw upsertError;
+        }
+
+        totalUpserted += batch.length;
+
+        // Update progress between batches
+        if (syncJobId) {
+          await supabase
+            .from('sync_jobs')
+            .update({
+              items_synced: totalUpserted,
+              progress_message: `Upserting reservations... (${totalUpserted}/${uniqueReservations.length})`,
+            })
+            .eq('id', syncJobId);
+        }
+
+        // Small delay between batches to avoid overwhelming the database
+        if (i + BATCH_SIZE < uniqueReservations.length) {
+          await sleep(100);
+        }
+
+        console.log(`Batch upserted: ${totalUpserted}/${uniqueReservations.length}`);
       }
 
-      console.log('Upsert successful');
+      console.log('All batches upserted successfully');
       console.log('Nightly allocations will be handled automatically by database trigger');
       
       if (syncJobId) {
