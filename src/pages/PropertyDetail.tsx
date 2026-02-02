@@ -635,7 +635,24 @@ export default function PropertyDetail() {
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div>
-              <h2 className="text-3xl font-bold tracking-tight">{listing.nickname || "Unnamed Property"}</h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-3xl font-bold tracking-tight">{listing.nickname || "Unnamed Property"}</h2>
+                {listing.airbnb_listing_id && (
+                  <a
+                    href={`https://www.airbnb.com/rooms/${listing.airbnb_listing_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center hover:opacity-80 transition-opacity"
+                    title="View on Airbnb"
+                  >
+                    <img 
+                      src="/airbnb-icon.svg" 
+                      alt="View on Airbnb" 
+                      className="h-6 w-6"
+                    />
+                  </a>
+                )}
+              </div>
               <p className="text-muted-foreground flex items-center gap-1 mt-1">
                 <MapPin className="h-4 w-4" />
                 {getAddress(listing.address)}
