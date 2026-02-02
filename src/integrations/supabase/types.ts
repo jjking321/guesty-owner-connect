@@ -468,10 +468,12 @@ export type Database = {
       guesty_accounts: {
         Row: {
           account_name: string
+          automated_sync_enabled: boolean | null
           client_id: string
           client_secret: string
           created_at: string
           id: string
+          last_automated_sync: string | null
           last_calendar_sync: string | null
           last_listings_sync: string | null
           last_owners_sync: string | null
@@ -483,10 +485,12 @@ export type Database = {
         }
         Insert: {
           account_name: string
+          automated_sync_enabled?: boolean | null
           client_id: string
           client_secret: string
           created_at?: string
           id?: string
+          last_automated_sync?: string | null
           last_calendar_sync?: string | null
           last_listings_sync?: string | null
           last_owners_sync?: string | null
@@ -498,10 +502,12 @@ export type Database = {
         }
         Update: {
           account_name?: string
+          automated_sync_enabled?: boolean | null
           client_id?: string
           client_secret?: string
           created_at?: string
           id?: string
+          last_automated_sync?: string | null
           last_calendar_sync?: string | null
           last_listings_sync?: string | null
           last_owners_sync?: string | null

@@ -6,7 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays } from "lucide-react";
+import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { TeamManagement } from "@/components/TeamManagement";
 import { AIPromptsSettings } from "@/components/AIPromptsSettings";
@@ -44,7 +46,7 @@ export default function Settings() {
       // Only select safe fields - exclude client_id and client_secret for security
       const { data, error } = await supabase
         .from("guesty_accounts")
-        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync")
+        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -300,6 +302,32 @@ export default function Settings() {
     }
   };
 
+  const handleToggleAutomation = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ automated_sync_enabled: enabled })
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Automation enabled" : "Automation disabled",
+        description: enabled 
+          ? "This account will be synced automatically every night at 3 AM UTC."
+          : "Automated nightly syncing has been disabled for this account.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update automation setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-8">
@@ -424,33 +452,59 @@ export default function Settings() {
                                   <span>Calendars: {new Date(account.last_calendar_sync).toLocaleString()}</span>
                                 </div>
                               )}
+                              {account.last_automated_sync && (
+                                <div className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  <span>Last Auto Sync: {new Date(account.last_automated_sync).toLocaleString()}</span>
+                                </div>
+                              )}
                               {!account.last_listings_sync && !account.last_reservations_sync && !account.last_owners_sync && !account.last_reviews_sync && !account.last_calendar_sync && (
                                 <span>Never synced</span>
                               )}
                             </div>
                           </div>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="destructive" size="icon">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Account</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will permanently delete this Guesty account connection and all associated
-                                  listings and reservations. This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDeleteAccount(account.id)}>
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                id={`automation-${account.id}`}
+                                checked={account.automated_sync_enabled !== false}
+                                onCheckedChange={(checked) => handleToggleAutomation(account.id, checked)}
+                              />
+                              <Label htmlFor={`automation-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                                <div className="flex items-center gap-1">
+                                  <Zap className="h-3 w-3" />
+                                  Auto
+                                </div>
+                              </Label>
+                            </div>
+                            {account.automated_sync_enabled !== false && (
+                              <Badge variant="secondary" className="text-xs">
+                                3 AM UTC
+                              </Badge>
+                            )}
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button variant="destructive" size="icon">
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Account</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This will permanently delete this Guesty account connection and all associated
+                                    listings and reservations. This action cannot be undone.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDeleteAccount(account.id)}>
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </div>
                         </div>
                         
                         <div className="flex gap-2">
