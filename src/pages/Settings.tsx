@@ -923,21 +923,6 @@ export default function Settings() {
           </Card>
         )}
 
-        {/* Instructions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>How to Get Your Guesty API Token</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>1. Log in to your Guesty account</p>
-            <p>2. Navigate to Settings → Integration → Open API</p>
-            <p>3. Click "Create Secret" to generate Client ID and Client Secret</p>
-            <p>4. Copy both credentials and paste them above</p>
-            <p className="text-xs pt-2">
-              Note: The initial sync will import all reservations from the last 2 years by default.
-            </p>
-          </CardContent>
-        </Card>
 
         <TeamManagement />
 
