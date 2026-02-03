@@ -154,6 +154,7 @@ Deno.serve(async (req) => {
         )
       `)
       .eq('archived', false)
+      .eq('active', true)
       .eq('guesty_accounts.actionables_generation_enabled', true);
 
     if (listingsError) {
