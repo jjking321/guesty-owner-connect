@@ -456,6 +456,25 @@ async function performSync(
             }
           }
           
+          // Booking.com: check scoring object (nested structure)
+          if (rating === null && rawReview.scoring) {
+            const scoring = rawReview.scoring;
+            // Booking.com scoring can be: scoring.review_score, scoring.total, scoring.rating, or just a number
+            const scoringValue = typeof scoring === 'number' 
+              ? scoring 
+              : (scoring.review_score ?? scoring.total ?? scoring.rating ?? scoring.score ?? scoring.average);
+            
+            if (typeof scoringValue === 'number') {
+              // Normalize 10-point scale to 5-star scale
+              rating = scoringValue > 5 ? scoringValue / 2 : scoringValue;
+            } else if (typeof scoringValue === 'string') {
+              const parsed = parseFloat(scoringValue);
+              if (!isNaN(parsed)) {
+                rating = parsed > 5 ? parsed / 2 : parsed;
+              }
+            }
+          }
+          
           // Log review structure when rating is null (for debugging)
           if (rating === null) {
             console.log(`No rating found for ${formatChannelId(review.channelId)} review:`, {
@@ -463,6 +482,7 @@ async function performSync(
               channelId: review.channelId,
               rawReviewKeys: Object.keys(rawReview),
               topLevelKeys: Object.keys(review),
+              scoringValue: rawReview.scoring ? JSON.stringify(rawReview.scoring) : null,
             });
           }
 
