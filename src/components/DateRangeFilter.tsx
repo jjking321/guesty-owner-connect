@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-export type DateRangePreset = "ytd" | "last365" | "lastWeek" | "lastMonth" | "custom";
+export type DateRangePreset = "ytd" | "last365" | "last30" | "lastWeek" | "lastMonth" | "custom";
 
 export interface DateRange {
   from: Date;
@@ -37,6 +37,14 @@ export function DateRangeFilter({ value, onChange }: DateRangeFilterProps) {
       label: "Last 365 Days",
       getRange: () => ({
         from: subDays(new Date(), 364),
+        to: new Date(),
+      }),
+    },
+    {
+      value: "last30",
+      label: "Last 30 Days",
+      getRange: () => ({
+        from: subDays(new Date(), 29),
         to: new Date(),
       }),
     },
