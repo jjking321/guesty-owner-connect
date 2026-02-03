@@ -30,6 +30,56 @@ function formatChannelId(channelId: string | null): string {
   return channelMap[channelId.toLowerCase()] || channelId;
 }
 
+// Extract review text from platform-specific field locations
+function extractReviewText(rawReview: any, channelId: string): string | null {
+  if (!rawReview) return null;
+  
+  const channel = (channelId || '').toLowerCase();
+  
+  // Airbnb: use public_review directly
+  if (channel === 'airbnb' || channel === 'airbnb2') {
+    return rawReview.public_review || null;
+  }
+  
+  // Booking.com: combine positive and negative feedback
+  if (channel === 'booking' || channel === 'bookingcom') {
+    const parts: string[] = [];
+    
+    // Check various Booking.com field names
+    const positive = rawReview.positive || rawReview.positive_guest_comment 
+                     || rawReview.pros || rawReview.liked;
+    const negative = rawReview.negative || rawReview.negative_guest_comment 
+                     || rawReview.cons || rawReview.disliked;
+    
+    if (positive) parts.push(`Positive: ${positive}`);
+    if (negative) parts.push(`Negative: ${negative}`);
+    
+    // Also check for a single combined field
+    if (parts.length === 0) {
+      return rawReview.guest_comment || rawReview.comment 
+             || rawReview.text || rawReview.body || null;
+    }
+    
+    return parts.length > 0 ? parts.join('\n\n') : null;
+  }
+  
+  // VRBO/HomeAway: check body, text, guestReview fields
+  if (channel === 'vrbo' || channel === 'homeaway' || channel === 'homeaway2') {
+    const text = rawReview.body || rawReview.text || rawReview.review_body 
+                 || rawReview.guestReview || rawReview.bodyText;
+    const headline = rawReview.headline || rawReview.title;
+    
+    if (headline && text) {
+      return `${headline}\n\n${text}`;
+    }
+    return text || headline || null;
+  }
+  
+  // Fallback: try common field names
+  return rawReview.public_review || rawReview.body || rawReview.text 
+         || rawReview.comment || rawReview.review_text || null;
+}
+
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -499,6 +549,20 @@ async function performSync(
             categoryRatings = rawReview.category_ratings;
           }
           
+          // Extract review text using platform-specific logic
+          const reviewText = extractReviewText(rawReview, review.channelId);
+          
+          // Debug logging when review text is null for non-Airbnb platforms
+          if (!reviewText && Object.keys(rawReview).length > 0) {
+            const channel = (review.channelId || '').toLowerCase();
+            if (channel !== 'airbnb' && channel !== 'airbnb2') {
+              console.log(`No review text found for ${formatChannelId(review.channelId)}:`, {
+                reviewId: review._id,
+                rawReviewKeys: Object.keys(rawReview),
+              });
+            }
+          }
+
           return {
             id: review._id,
             guesty_account_id: guestyAccountId,
@@ -506,7 +570,7 @@ async function performSync(
             reservation_id: review.reservationId || null,
             guest_name: guestName,
             rating: rating,
-            review_text: rawReview.public_review || null,
+            review_text: reviewText,
             response_text: rawReview.private_feedback || null,
             review_date: review.createdAt || null,
             source: formatChannelId(review.channelId),
