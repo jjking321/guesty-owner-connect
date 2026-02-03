@@ -28,15 +28,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForForecastCompletion(
+async function waitForProgressCompletion(
   supabase: any,
   progressId: string,
+  label: string,
   timeoutMs: number = 1800000 // 30 minute default
 ): Promise<SyncResult> {
   const startTime = Date.now();
-  const pollInterval = 10000; // 10 seconds (forecasts are slower)
+  const pollInterval = 10000; // 10 seconds
 
-  console.log(`[forecasts] Waiting for completion (timeout: ${timeoutMs / 1000}s)...`);
+  console.log(`[${label}] Waiting for completion (timeout: ${timeoutMs / 1000}s)...`);
 
   while (Date.now() - startTime < timeoutMs) {
     const { data: progress, error } = await supabase
@@ -46,25 +47,25 @@ async function waitForForecastCompletion(
       .single();
 
     if (error) {
-      console.error(`[forecasts] Error polling progress:`, error);
+      console.error(`[${label}] Error polling progress:`, error);
       await sleep(pollInterval);
       continue;
     }
 
     if (progress?.status === 'completed') {
-      console.log(`[forecasts] Completed: ${progress.completed_forecasts} success, ${progress.failed_forecasts} failed`);
+      console.log(`[${label}] Completed: ${progress.completed_forecasts} success, ${progress.failed_forecasts} failed`);
       return { success: true };
     }
 
     if (progress?.status === 'failed') {
-      return { success: false, error: 'Forecast generation failed' };
+      return { success: false, error: `${label} failed` };
     }
 
-    console.log(`[forecasts] Progress: ${progress?.completed_forecasts || 0}/${progress?.total_forecasts || 0}`);
+    console.log(`[${label}] Progress: ${progress?.completed_forecasts || 0}/${progress?.total_forecasts || 0}`);
     await sleep(pollInterval);
   }
 
-  return { success: false, error: 'Forecast generation timed out' };
+  return { success: false, error: `${label} timed out` };
 }
 
 async function waitForSyncCompletion(
@@ -154,7 +155,7 @@ Deno.serve(async (req) => {
     // Get all accounts with automated sync enabled
     const { data: accounts, error: accountsError } = await supabase
       .from('guesty_accounts')
-      .select('id, account_name, airbnb_scrape_enabled, forecast_generation_enabled')
+      .select('id, account_name, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled')
       .eq('automated_sync_enabled', true);
 
     if (accountsError) {
@@ -321,7 +322,39 @@ Deno.serve(async (req) => {
       airbnbScrapeResult = { success: true, skipped: true };
     }
 
-    // 6. Regenerate All Forecasts (runs once for entire org)
+    // 6. Calculate All Booking Probabilities (runs once for entire org)
+    // Only run if at least one account has probability_calculation_enabled
+    const probabilityEnabled = accounts.some(a => a.probability_calculation_enabled !== false);
+    let probabilityResult: SyncResult | null = null;
+
+    if (probabilityEnabled) {
+      console.log(`\n--- Calculating Booking Probabilities ---`);
+      const { data: probResponse, error: probInvokeError } = await supabase.functions.invoke(
+        'calculate-all-probabilities',
+        {
+          body: {},
+          headers: { 'x-service-role': 'true' }
+        }
+      );
+
+      if (probInvokeError) {
+        console.error('Failed to invoke probability calculation:', probInvokeError);
+        probabilityResult = { success: false, error: probInvokeError.message };
+      } else if (probResponse?.progress_id) {
+        // Poll for completion with 20 min timeout
+        probabilityResult = await waitForProgressCompletion(
+          supabase,
+          probResponse.progress_id,
+          'probabilities',
+          1200000 // 20 minutes
+        );
+      }
+    } else {
+      console.log(`\n--- Skipping Probability Calculation (disabled) ---`);
+      probabilityResult = { success: true, skipped: true };
+    }
+
+    // 7. Regenerate All Forecasts (runs once for entire org)
     // Only run if at least one account has forecast_generation_enabled
     const forecastEnabled = accounts.some(a => a.forecast_generation_enabled !== false);
     let forecastResult: SyncResult | null = null;
@@ -341,9 +374,10 @@ Deno.serve(async (req) => {
         forecastResult = { success: false, error: forecastInvokeError.message };
       } else if (forecastResponse?.progress_id) {
         // Poll for completion with 30 min timeout
-        forecastResult = await waitForForecastCompletion(
+        forecastResult = await waitForProgressCompletion(
           supabase,
           forecastResponse.progress_id,
+          'forecasts',
           1800000 // 30 minutes
         );
       }
@@ -357,10 +391,13 @@ Deno.serve(async (req) => {
     console.log(`Total duration: ${duration} seconds`);
     console.log(`Accounts processed: ${results.length}`);
     if (airbnbScrapeResult) {
-      console.log(`Airbnb ratings scrape: ${airbnbScrapeResult.success ? 'completed' : 'failed'}`);
+      console.log(`Airbnb ratings scrape: ${airbnbScrapeResult.success ? 'completed' : 'failed'}${airbnbScrapeResult.skipped ? ' (skipped)' : ''}`);
+    }
+    if (probabilityResult) {
+      console.log(`Probability calculation: ${probabilityResult.success ? 'completed' : 'failed'}${probabilityResult.skipped ? ' (skipped)' : ''}`);
     }
     if (forecastResult) {
-      console.log(`Forecast generation: ${forecastResult.success ? 'completed' : 'failed'}`);
+      console.log(`Forecast generation: ${forecastResult.success ? 'completed' : 'failed'}${forecastResult.skipped ? ' (skipped)' : ''}`);
     }
 
     // Summary
@@ -376,6 +413,7 @@ Deno.serve(async (req) => {
         failedAccounts,
         results,
         airbnbRatingsScrape: airbnbScrapeResult,
+        probabilityCalculation: probabilityResult,
         forecastGeneration: forecastResult,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
