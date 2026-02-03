@@ -189,6 +189,7 @@ Deno.serve(async (req) => {
       compsetResult,
     ] = await Promise.all([
       // Calendar data for unbookable gaps AND pricing comparison
+      // Explicitly set high limit since default is 1000 and we may have 45,000+ rows
       supabase
         .from('capacity_calendar')
         .select('listing_id, date, min_nights, is_available, price')
@@ -196,7 +197,8 @@ Deno.serve(async (req) => {
         .gte('date', today)
         .lte('date', ninetyDaysLater)
         .order('listing_id')
-        .order('date'),
+        .order('date')
+        .limit(50000),
       
       // Booking probabilities
       supabase
@@ -299,13 +301,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Compset lookup - use monthly_averages which has ADR data
+    // Compset lookup - use future_monthly_averages which has 2026+ ADR data for pricing comparison
     const compsetByListing = new Map<string, Array<{ month: string; adr: number; occupancy: number }>>();
     if (compsetResult.data) {
       for (const row of compsetResult.data) {
-        const monthlyData = row.monthly_averages as Array<{ month: string; adr: number; occupancy: number }> || [];
-        if (Array.isArray(monthlyData) && monthlyData.length > 0) {
-          compsetByListing.set(row.listing_id, monthlyData);
+        // Use future_monthly_averages for 2026+ pricing comparison
+        const futureData = row.future_monthly_averages as Array<{ month: string; adr: number; occupancy: number }> || [];
+        if (Array.isArray(futureData) && futureData.length > 0) {
+          compsetByListing.set(row.listing_id, futureData);
         }
       }
     }
