@@ -1,18 +1,23 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { ExternalLink, Star } from "lucide-react";
+import { ExternalLink, Star, RefreshCw, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
 import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { Link } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 
 type SortOrder = 'low-to-high' | 'high-to-low';
 
 export function AirbnbRatingsTable() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('low-to-high');
+  const [scrapingId, setScrapingId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const { data: listings = [], isLoading } = useQuery({
     queryKey: ['airbnb-ratings'],
@@ -29,6 +34,38 @@ export function AirbnbRatingsTable() {
       return data || [];
     },
   });
+
+  const scrapeMutation = useMutation({
+    mutationFn: async (listingId: string) => {
+      const { data, error } = await supabase.functions.invoke('scrape-airbnb-rating', {
+        body: { listingId }
+      });
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Scrape failed');
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['airbnb-ratings'] });
+      toast({
+        title: "Rating updated",
+        description: data.rating ? `Rating: ${data.rating.toFixed(2)} (${data.reviewCount} reviews)` : "Scrape completed",
+      });
+      setScrapingId(null);
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Scrape failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      setScrapingId(null);
+    },
+  });
+
+  const handleScrape = (listingId: string) => {
+    setScrapingId(listingId);
+    scrapeMutation.mutate(listingId);
+  };
 
   const sortedListings = [...listings].sort((a, b) => {
     const ratingA = a.live_airbnb_rating;
@@ -92,12 +129,13 @@ export function AirbnbRatingsTable() {
                 <TableHead className="text-center">Reviews</TableHead>
                 <TableHead>Last Scraped</TableHead>
                 <TableHead className="text-center">Airbnb</TableHead>
+                <TableHead className="text-center">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortedListings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                     No listings with Airbnb IDs found
                   </TableCell>
                 </TableRow>
@@ -148,6 +186,21 @@ export function AirbnbRatingsTable() {
                       >
                         <ExternalLink className="h-4 w-4 text-muted-foreground" />
                       </a>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleScrape(listing.id)}
+                        disabled={scrapingId === listing.id}
+                        title="Refresh rating"
+                      >
+                        {scrapingId === listing.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))
