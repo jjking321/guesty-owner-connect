@@ -1,164 +1,138 @@
 
 
-# Add Forecast Regeneration to Nightly Sync
+# Reorganize Settings Page: Separate Airbnb and Forecast Cards
 
 ## Overview
 
-Integrate the `generate-all-forecasts` function into the nightly sync orchestrator to automatically regenerate revenue forecasts after all data syncs complete. This ensures forecasts are always up-to-date with the latest reservation and calendar data.
+Move the Airbnb auto-sync toggle into its own dedicated card (the existing Airbnb Ratings card) and create a new Revenue Forecasts card with description, link to Forecast Admin, and the forecast toggle.
 
 ---
 
 ## Current State
 
-The `generate-all-forecasts` function:
-- Generates forecasts for current year and next year for all active listings
-- Uses batch processing (10 listings at a time)
-- Tracks progress via `forecast_generation_progress` table
-- Uses `EdgeRuntime.waitUntil()` for background processing
-- Returns immediately with a progress ID
+The Airbnb and Forecast toggles are currently nested inside each Guesty account card (lines 676-702), appearing only when automation is enabled. This makes them hard to find and doesn't provide context about what these features do.
 
 ---
 
-## Integration Approach
+## Proposed Changes
 
-Since forecasts use their own progress tracking table (`forecast_generation_progress`) rather than `sync_jobs`, we need a custom polling function for forecast completion.
+### 1. Remove Toggles from Guesty Account Cards
+
+Remove the nested toggles for Airbnb scraping and forecast generation from inside each account card (lines 676-702).
+
+### 2. Enhance Airbnb Ratings Card
+
+Add the auto-sync toggle to the existing Airbnb Ratings card (lines 867-924):
+- Add a toggle with label "Include in nightly sync"
+- Keep the manual scrape button and progress card
+- Show toggle for first account (since it's org-wide)
+
+### 3. Create New Revenue Forecasts Card
+
+Add a new card after Airbnb Ratings with:
+- **Title**: "Revenue Forecasts" with TrendingUp icon
+- **Description**: Explains what forecasts do based on the RevPAR velocity model
+- **Auto-sync toggle**: "Include in nightly sync"
+- **Link to Forecast Admin**: Button to navigate to `/forecast-admin` for manual runs and first-time setup
+- **Info text**: Brief explanation of the model
 
 ---
 
 ## Technical Changes
 
-### 1. Modify `nightly-sync/index.ts`
+### File: `src/pages/Settings.tsx`
 
-Add a new polling function for forecast progress:
-
+**1. Add Link import:**
 ```typescript
-async function waitForForecastCompletion(
-  supabase: any,
-  progressId: string,
-  timeoutMs: number = 1800000 // 30 minute default
-): Promise<SyncResult> {
-  const startTime = Date.now();
-  const pollInterval = 10000; // 10 seconds (forecasts are slower)
-
-  console.log(`[forecasts] Waiting for completion (timeout: ${timeoutMs / 1000}s)...`);
-
-  while (Date.now() - startTime < timeoutMs) {
-    const { data: progress, error } = await supabase
-      .from('forecast_generation_progress')
-      .select('status, completed_forecasts, failed_forecasts, total_forecasts')
-      .eq('id', progressId)
-      .single();
-
-    if (error) {
-      console.error(`[forecasts] Error polling progress:`, error);
-      await sleep(pollInterval);
-      continue;
-    }
-
-    if (progress?.status === 'completed') {
-      console.log(`[forecasts] Completed: ${progress.completed_forecasts} success, ${progress.failed_forecasts} failed`);
-      return { success: true };
-    }
-
-    if (progress?.status === 'failed') {
-      return { success: false, error: 'Forecast generation failed' };
-    }
-
-    console.log(`[forecasts] Progress: ${progress?.completed_forecasts || 0}/${progress?.total_forecasts || 0}`);
-    await sleep(pollInterval);
-  }
-
-  return { success: false, error: 'Forecast generation timed out' };
-}
+import { Link } from "react-router-dom";
 ```
 
-Add forecast generation step after Airbnb scraping:
+**2. Remove nested toggles from account cards (lines 676-702):**
+Delete the conditional block that shows Airbnb and Forecast toggles when automation is enabled.
 
-```typescript
-// 6. Regenerate All Forecasts (runs once for entire org)
-console.log(`\n--- Regenerating Forecasts ---`);
-let forecastResult: SyncResult | null = null;
+**3. Update Airbnb Ratings Card (around line 867):**
+Add the toggle to the card header area.
 
-const { data: forecastResponse, error: forecastInvokeError } = await supabase.functions.invoke(
-  'generate-all-forecasts',
-  {
-    body: {},
-    headers: { 'x-service-role': 'true' }
-  }
-);
-
-if (forecastInvokeError) {
-  console.error('Failed to invoke forecast generation:', forecastInvokeError);
-  forecastResult = { success: false, error: forecastInvokeError.message };
-} else if (forecastResponse?.progress_id) {
-  // Poll for completion with 30 min timeout
-  forecastResult = await waitForForecastCompletion(
-    supabase,
-    forecastResponse.progress_id,
-    1800000 // 30 minutes
-  );
-}
-```
-
-### 2. Modify `generate-all-forecasts/index.ts`
-
-Add service-role authentication support:
-
-```typescript
-// Check for service-role bypass (for automated nightly sync)
-const isServiceRole = req.headers.get("x-service-role") === "true";
-
-let userId: string | undefined;
-
-if (!isServiceRole) {
-  const authHeader = req.headers.get('Authorization');
-  const token = authHeader?.replace('Bearer ', '');
-  const { data: userData } = await supabase.auth.getUser(token || '');
-  userId = userData?.user?.id;
-}
-// For service-role, userId remains undefined but that's fine for automated runs
-```
-
-Update the listings query to match the pattern used elsewhere:
-
-```typescript
-const { data: listings, error: listingsError } = await supabase
-  .from('listings')
-  .select('id, nickname')
-  .eq('is_listed', true)  // Match pattern from other sync functions
-  .eq('archived', false);
+**4. Add new Revenue Forecasts Card after Airbnb Ratings Card:**
+```tsx
+{/* Revenue Forecasts */}
+{firstAccountId && (
+  <Card>
+    <CardHeader>
+      <div className="flex items-center justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-primary" />
+            Revenue Forecasts
+          </CardTitle>
+          <CardDescription>
+            Automatically predict future revenue using the RevPAR velocity model
+          </CardDescription>
+        </div>
+        <div className="flex items-center gap-2">
+          <Switch
+            id="forecast-auto-sync"
+            checked={guestyAccounts[0]?.forecast_generation_enabled !== false}
+            onCheckedChange={(checked) => handleToggleForecastGeneration(guestyAccounts[0].id, checked)}
+          />
+          <Label htmlFor="forecast-auto-sync" className="text-sm cursor-pointer">
+            Include in nightly sync
+          </Label>
+        </div>
+      </div>
+    </CardHeader>
+    <CardContent className="space-y-4">
+      <div className="text-sm text-muted-foreground space-y-2">
+        <p>
+          Forecasts compare your current booking pace against last year's performance 
+          to predict monthly revenue with P10-P50-P90 confidence ranges.
+        </p>
+        <ul className="list-disc list-inside space-y-1 ml-2">
+          <li><strong>Baseline:</strong> Last year's actual monthly revenue</li>
+          <li><strong>Velocity:</strong> Current bookings vs. same day last year</li>
+          <li><strong>Projection:</strong> Baseline x Velocity (0.5x to 2.0x range)</li>
+        </ul>
+      </div>
+      
+      <div className="flex items-center gap-4">
+        <Button variant="outline" asChild>
+          <Link to="/forecast-admin">
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Forecast Admin
+          </Link>
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Run manual forecasts or first-time data preparation
+        </p>
+      </div>
+    </CardContent>
+  </Card>
+)}
 ```
 
 ---
 
-## Execution Order (Final)
+## UI Layout (After Changes)
 
-The nightly sync will now run:
-
-1. **Per Account Loop:**
-   - Sync Listings
-   - Sync New Reservations  
-   - Sync Owners
-   - Sync Calendar
-
-2. **After All Accounts:**
-   - Scrape Airbnb Ratings (~11 min)
-   - **Regenerate Forecasts (~20-25 min for 471 listings × 2 years)**
-
----
-
-## Timeout Considerations
-
-| Step | Listings | Time Estimate | Timeout |
-|------|----------|---------------|---------|
-| Listings | 471 | ~30s | 10 min |
-| Reservations | ~500 new | ~2 min | 10 min |
-| Owners | ~50 | ~10s | 10s fixed |
-| Calendar | 471 | ~8 min | 15 min |
-| Airbnb Ratings | 471 | ~11 min | 20 min |
-| **Forecasts** | **471 × 2 years** | **~25 min** | **30 min** |
-
-Total estimated nightly sync time: ~45-50 minutes
+```
+Settings Page
+├── Guesty Accounts Card
+│   └── [Account cards with sync buttons - no feature toggles]
+│
+├── Airbnb Ratings Card
+│   ├── Title + Toggle: "Include in nightly sync"
+│   ├── Last scraped info
+│   ├── Manual scrape button
+│   └── Progress card
+│
+├── Revenue Forecasts Card (NEW)
+│   ├── Title + Toggle: "Include in nightly sync"
+│   ├── Description of RevPAR velocity model
+│   └── Link to Forecast Admin page
+│
+├── Team Management
+└── AI Prompts Settings
+```
 
 ---
 
@@ -166,28 +140,5 @@ Total estimated nightly sync time: ~45-50 minutes
 
 | File | Change |
 |------|--------|
-| `supabase/functions/generate-all-forecasts/index.ts` | Add service-role auth support, update listings filter |
-| `supabase/functions/nightly-sync/index.ts` | Add `waitForForecastCompletion` function and forecast generation step |
-
----
-
-## Response Updates
-
-Add forecast result to the nightly sync response:
-
-```typescript
-return new Response(
-  JSON.stringify({
-    success: true,
-    message: `Nightly sync completed for ${successfulAccounts} account(s)`,
-    duration: `${duration}s`,
-    successfulAccounts,
-    failedAccounts,
-    results,
-    airbnbRatingsScrape: airbnbScrapeResult,
-    forecastGeneration: forecastResult,  // NEW
-  }),
-  ...
-);
-```
+| `src/pages/Settings.tsx` | Add Link import, remove nested toggles from account cards, add toggle to Airbnb card, add new Forecasts card with toggle and link |
 
