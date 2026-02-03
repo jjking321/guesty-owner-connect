@@ -1,81 +1,161 @@
 
-
-# Reorganize Settings Page: Separate Airbnb and Forecast Cards
+# Add Booking Probability Auto-Calculation to Nightly Sync
 
 ## Overview
 
-Move the Airbnb auto-sync toggle into its own dedicated card (the existing Airbnb Ratings card) and create a new Revenue Forecasts card with description, link to Forecast Admin, and the forecast toggle.
+Add automated booking probability calculations to the nightly sync process. Since revenue forecasts **depend on** booking probabilities for their probability-weighted expected value calculations, probabilities must run **before** forecasts in the sync sequence.
 
 ---
 
 ## Current State
 
-The Airbnb and Forecast toggles are currently nested inside each Guesty account card (lines 676-702), appearing only when automation is enabled. This makes them hard to find and doesn't provide context about what these features do.
+| Aspect | Status |
+|--------|--------|
+| Storage | `booking_probabilities` table with 25+ columns |
+| Current records | Only 1,810 records across ~6 listings (manual runs) |
+| UI Usage | ListingCalendar probability overlay, CalendarDateDetail, RateSimulator |
+| Backend Usage | `forecast-revenue` uses probabilities for expected value calculations |
+| Automation | **None** - only manual per-listing via UI button |
 
 ---
 
-## Proposed Changes
+## Why This Matters
 
-### 1. Remove Toggles from Guesty Account Cards
+Booking probabilities feed directly into revenue forecasts:
+- The forecast engine reads from `booking_probabilities` table
+- Uses probability scores to weight available nights' expected revenue
+- Without fresh probabilities, forecasts use stale or missing data
 
-Remove the nested toggles for Airbnb scraping and forecast generation from inside each account card (lines 676-702).
+Running probabilities nightly ensures forecasts always have current data.
 
-### 2. Enhance Airbnb Ratings Card
+---
 
-Add the auto-sync toggle to the existing Airbnb Ratings card (lines 867-924):
-- Add a toggle with label "Include in nightly sync"
-- Keep the manual scrape button and progress card
-- Show toggle for first account (since it's org-wide)
+## Execution Order (Updated)
 
-### 3. Create New Revenue Forecasts Card
+```text
+1. Per Account Loop:
+   - Sync Listings
+   - Sync New Reservations  
+   - Sync Owners
+   - Sync Calendar
 
-Add a new card after Airbnb Ratings with:
-- **Title**: "Revenue Forecasts" with TrendingUp icon
-- **Description**: Explains what forecasts do based on the RevPAR velocity model
-- **Auto-sync toggle**: "Include in nightly sync"
-- **Link to Forecast Admin**: Button to navigate to `/forecast-admin` for manual runs and first-time setup
-- **Info text**: Brief explanation of the model
+2. After All Accounts:
+   - Scrape Airbnb Ratings (~11 min)
+   - Calculate All Probabilities (~15-20 min) <-- NEW
+   - Regenerate Forecasts (~25 min)
+```
+
+Probabilities MUST run before forecasts to ensure fresh data.
 
 ---
 
 ## Technical Changes
 
-### File: `src/pages/Settings.tsx`
+### 1. Database Migration
 
-**1. Add Link import:**
-```typescript
-import { Link } from "react-router-dom";
+Add `probability_calculation_enabled` column to `guesty_accounts`:
+
+```sql
+ALTER TABLE public.guesty_accounts 
+ADD COLUMN IF NOT EXISTS probability_calculation_enabled boolean DEFAULT true;
 ```
 
-**2. Remove nested toggles from account cards (lines 676-702):**
-Delete the conditional block that shows Airbnb and Forecast toggles when automation is enabled.
+### 2. Create New Edge Function: `calculate-all-probabilities`
 
-**3. Update Airbnb Ratings Card (around line 867):**
-Add the toggle to the card header area.
+**File:** `supabase/functions/calculate-all-probabilities/index.ts`
 
-**4. Add new Revenue Forecasts Card after Airbnb Ratings Card:**
+Follows the same pattern as `generate-all-forecasts`:
+- Query all active listings (`is_listed = true`, `archived = false`)
+- Create progress tracking record in `forecast_generation_progress` (reuse same table with different status type)
+- Process in batches of 10 listings
+- Use `EdgeRuntime.waitUntil()` for background processing
+- Return immediately with progress ID
+
+**Key logic:**
+```typescript
+// Process each listing
+for (const listing of batch) {
+  await supabase.functions.invoke('calculate-booking-probabilities', {
+    body: { listingId: listing.id }
+  });
+}
+```
+
+### 3. Update `nightly-sync/index.ts`
+
+Add polling function for probability completion (similar to forecasts):
+
+```typescript
+async function waitForProbabilityCompletion(
+  supabase: any,
+  progressId: string,
+  timeoutMs: number = 1200000 // 20 minute default
+): Promise<SyncResult> {
+  // Same polling logic as waitForForecastCompletion
+}
+```
+
+Add probability calculation step **before** forecast generation:
+
+```typescript
+// 6. Calculate All Booking Probabilities
+const probabilityEnabled = accounts.some(a => a.probability_calculation_enabled !== false);
+let probabilityResult: SyncResult | null = null;
+
+if (probabilityEnabled) {
+  console.log(`\n--- Calculating Booking Probabilities ---`);
+  const { data: probResponse, error: probInvokeError } = await supabase.functions.invoke(
+    'calculate-all-probabilities',
+    { headers: { 'x-service-role': 'true' } }
+  );
+
+  if (probInvokeError) {
+    probabilityResult = { success: false, error: probInvokeError.message };
+  } else if (probResponse?.progress_id) {
+    probabilityResult = await waitForProbabilityCompletion(
+      supabase,
+      probResponse.progress_id,
+      1200000 // 20 minutes
+    );
+  }
+} else {
+  probabilityResult = { success: true, skipped: true };
+}
+
+// 7. Regenerate All Forecasts (existing code)
+// ... forecasts now run with fresh probability data
+```
+
+### 4. Update `src/pages/Settings.tsx`
+
+Add toggle for probability calculation in the Guesty account or a new card:
+
+Option A: Add to existing Guesty account card (like the other toggles)
+Option B: Create a new "Booking Probability" card with description
+
+**Recommended: Option B** - Create new card with explanation since probabilities are a distinct feature with their own logic (compset demand, price position, historical data, booking window scoring).
+
 ```tsx
-{/* Revenue Forecasts */}
+{/* Booking Probabilities */}
 {firstAccountId && (
   <Card>
     <CardHeader>
       <div className="flex items-center justify-between">
         <div>
           <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-primary" />
-            Revenue Forecasts
+            <BarChart3 className="h-5 w-5 text-primary" />
+            Booking Probabilities
           </CardTitle>
           <CardDescription>
-            Automatically predict future revenue using the RevPAR velocity model
+            AI-calculated likelihood of booking each available night
           </CardDescription>
         </div>
         <div className="flex items-center gap-2">
           <Switch
-            id="forecast-auto-sync"
-            checked={guestyAccounts[0]?.forecast_generation_enabled !== false}
-            onCheckedChange={(checked) => handleToggleForecastGeneration(guestyAccounts[0].id, checked)}
+            checked={guestyAccounts[0]?.probability_calculation_enabled !== false}
+            onCheckedChange={(checked) => handleToggleProbabilityCalculation(guestyAccounts[0].id, checked)}
           />
-          <Label htmlFor="forecast-auto-sync" className="text-sm cursor-pointer">
+          <Label className="text-sm cursor-pointer">
             Include in nightly sync
           </Label>
         </div>
@@ -84,61 +164,101 @@ Add the toggle to the card header area.
     <CardContent className="space-y-4">
       <div className="text-sm text-muted-foreground space-y-2">
         <p>
-          Forecasts compare your current booking pace against last year's performance 
-          to predict monthly revenue with P10-P50-P90 confidence ranges.
+          Probabilities combine four signals to estimate booking likelihood for each open night:
         </p>
         <ul className="list-disc list-inside space-y-1 ml-2">
-          <li><strong>Baseline:</strong> Last year's actual monthly revenue</li>
-          <li><strong>Velocity:</strong> Current bookings vs. same day last year</li>
-          <li><strong>Projection:</strong> Baseline x Velocity (0.5x to 2.0x range)</li>
+          <li><strong>Compset Demand:</strong> How many comparables are already booked</li>
+          <li><strong>Price Position:</strong> Your rate vs. available compset average</li>
+          <li><strong>Historical:</strong> Was this date booked last year?</li>
+          <li><strong>Booking Window:</strong> Days until arrival vs. typical lead time</li>
         </ul>
       </div>
-      
-      <div className="flex items-center gap-4">
-        <Button variant="outline" asChild>
-          <Link to="/forecast-admin">
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Forecast Admin
-          </Link>
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          Run manual forecasts or first-time data preparation
-        </p>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        View probabilities on any property's calendar tab
+      </p>
     </CardContent>
   </Card>
 )}
 ```
 
----
+### 5. Add config.toml entry
 
-## UI Layout (After Changes)
-
-```
-Settings Page
-├── Guesty Accounts Card
-│   └── [Account cards with sync buttons - no feature toggles]
-│
-├── Airbnb Ratings Card
-│   ├── Title + Toggle: "Include in nightly sync"
-│   ├── Last scraped info
-│   ├── Manual scrape button
-│   └── Progress card
-│
-├── Revenue Forecasts Card (NEW)
-│   ├── Title + Toggle: "Include in nightly sync"
-│   ├── Description of RevPAR velocity model
-│   └── Link to Forecast Admin page
-│
-├── Team Management
-└── AI Prompts Settings
+```toml
+[functions.calculate-all-probabilities]
+verify_jwt = false
 ```
 
 ---
 
-## Files to Modify
+## Time Estimates
 
-| File | Change |
+| Step | Listings | Time Estimate | Timeout |
+|------|----------|---------------|---------|
+| Existing steps | - | ~25 min | - |
+| **Probabilities** | **471** | **~15-20 min** | **20 min** |
+| Forecasts | 471 × 2 | ~25 min | 30 min |
+
+**Total nightly sync: ~60-70 minutes**
+
+---
+
+## Response Updates
+
+Add probability result to nightly sync response:
+
+```typescript
+return new Response(
+  JSON.stringify({
+    success: true,
+    // ...existing fields...
+    airbnbRatingsScrape: airbnbScrapeResult,
+    probabilityCalculation: probabilityResult,  // NEW
+    forecastGeneration: forecastResult,
+  }),
+  ...
+);
+```
+
+---
+
+## Files to Create/Modify
+
+| File | Action |
 |------|--------|
-| `src/pages/Settings.tsx` | Add Link import, remove nested toggles from account cards, add toggle to Airbnb card, add new Forecasts card with toggle and link |
+| `supabase/functions/calculate-all-probabilities/index.ts` | **Create** - bulk probability calculation |
+| `supabase/functions/nightly-sync/index.ts` | Modify - add probability step before forecasts |
+| `src/pages/Settings.tsx` | Modify - add new Booking Probabilities card with toggle |
+| `supabase/config.toml` | Modify - add new function config |
+| Database migration | Add `probability_calculation_enabled` column |
 
+---
+
+## Handler Function for Settings
+
+Add new handler in Settings.tsx:
+
+```typescript
+const handleToggleProbabilityCalculation = async (accountId: string, enabled: boolean) => {
+  try {
+    const { error } = await supabase
+      .from('guesty_accounts')
+      .update({ probability_calculation_enabled: enabled })
+      .eq('id', accountId);
+    
+    if (error) throw error;
+    
+    toast({
+      title: enabled ? "Probability calculation enabled" : "Probability calculation disabled",
+      description: `Nightly sync will ${enabled ? 'include' : 'skip'} booking probability updates`,
+    });
+    
+    refetchAccounts();
+  } catch (error: any) {
+    toast({
+      title: "Error",
+      description: error.message,
+      variant: "destructive",
+    });
+  }
+};
+```
