@@ -8,7 +8,9 @@ import { ReviewsSummary } from "@/components/ReviewsSummary";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { RefreshCw, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+
+const PAGE_SIZE = 100;
 
 export default function Reviews() {
   const { toast } = useToast();
@@ -16,6 +18,7 @@ export default function Reviews() {
   const [selectedProperty, setSelectedProperty] = useState<string>('all');
   const [syncingReviews, setSyncingReviews] = useState(false);
   const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Fetch guesty account ID on load
   useEffect(() => {
@@ -33,19 +36,45 @@ export default function Reviews() {
     fetchAccountId();
   }, []);
 
-  // Fetch all reviews
-  const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
-    queryKey: ['reviews', 'all'],
+  // Fetch total review count for pagination
+  const { data: totalCount = 0 } = useQuery({
+    queryKey: ['reviews', 'count', selectedProperty],
     queryFn: async () => {
-      // Fetch reviews
-      const { data: reviewsData, error: reviewsError } = await supabase
+      let query = supabase
+        .from('reviews')
+        .select('*', { count: 'exact', head: true });
+      
+      if (selectedProperty !== 'all') {
+        query = query.eq('listing_id', selectedProperty);
+      }
+
+      const { count, error } = await query;
+      if (error) throw error;
+      return count || 0;
+    },
+  });
+
+  // Fetch paginated reviews
+  const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
+    queryKey: ['reviews', 'paginated', selectedProperty, currentPage],
+    queryFn: async () => {
+      const from = (currentPage - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      let query = supabase
         .from('reviews')
         .select('*')
-        .order('review_date', { ascending: false });
+        .order('review_date', { ascending: false })
+        .range(from, to);
+      
+      if (selectedProperty !== 'all') {
+        query = query.eq('listing_id', selectedProperty);
+      }
 
+      const { data: reviewsData, error: reviewsError } = await query;
       if (reviewsError) throw reviewsError;
 
-      // Fetch listings
+      // Fetch listings for property names
       const { data: listingsData, error: listingsError } = await supabase
         .from('listings')
         .select('id, nickname');
@@ -198,12 +227,16 @@ export default function Reviews() {
     }
   };
 
-  // Filter reviews by property
-  const filteredReviews = selectedProperty === 'all' 
-    ? reviews 
-    : reviews.filter(r => r.listing_id === selectedProperty);
+  // Reset to page 1 when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedProperty]);
 
-  if (reviewsLoading) {
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const showingFrom = totalCount === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const showingTo = Math.min(currentPage * PAGE_SIZE, totalCount);
+
+  if (reviewsLoading && currentPage === 1) {
     return (
       <DashboardLayout>
         <div className="text-center py-12 text-muted-foreground">Loading reviews...</div>
@@ -256,20 +289,48 @@ export default function Reviews() {
           </CardContent>
         </Card>
 
-        {/* Reviews Summary */}
-        <ReviewsSummary reviews={filteredReviews} />
+        {/* Reviews Summary - uses full count */}
+        <ReviewsSummary reviews={reviews} />
 
         {/* Reviews Table */}
         <Card>
           <CardHeader>
-            <CardTitle>All Reviews</CardTitle>
-            <CardDescription>
-              {filteredReviews.length} reviews total
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>All Reviews</CardTitle>
+                <CardDescription>
+                  Showing {showingFrom.toLocaleString()} - {showingTo.toLocaleString()} of {totalCount.toLocaleString()} reviews
+                </CardDescription>
+              </div>
+              {/* Pagination Controls */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1 || reviewsLoading}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
+                <span className="text-sm text-muted-foreground px-2">
+                  Page {currentPage} of {totalPages || 1}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages || reviewsLoading}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             <ReviewsTable
-              reviews={filteredReviews}
+              reviews={reviews}
               onMarkAsRemoved={handleMarkAsRemoved}
               onRestore={handleRestore}
             />
