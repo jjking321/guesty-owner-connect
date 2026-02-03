@@ -1,135 +1,130 @@
 
-# Fix Booking.com Review Ratings (10-Point Scale)
 
-## Problem
+# Add Platform Logos to Reviews Page
 
-Booking.com reviews are showing 0 ratings because:
-1. Booking.com uses a 10-point scale (0-10) instead of 5 stars
-2. The sync functions only look for `overall_rating` and `starRatingOverall` fields - but Booking.com reviews likely store ratings in a different field (e.g., `score`, `average_score`, `overall_score`)
-3. All 603 Booking.com reviews have `null` ratings in the database
+## Overview
 
----
-
-## Solution Overview
-
-1. Update sync functions to extract Booking.com ratings from the correct API field
-2. Normalize the 10-point scale to 5-star (divide by 2) for consistent display
-3. Update the database function to handle null ratings gracefully
-4. Re-sync reviews to populate the missing ratings
+Replace the emoji icons (🏠, 🏨, 🏖️) with official brand logos for Airbnb, VRBO, and Booking.com on the Reviews page. This affects:
+- The "By Platform" section in the ReviewsSummaryAggregated component
+- The "By Platform" section in the ReviewsSummary component
+- The platform badge in the ReviewsTable component
 
 ---
 
 ## Changes Required
 
-### 1. Update sync-reviews to Extract Booking.com Ratings
+### 1. Create Icon Components for VRBO and Booking.com
 
-**File**: `supabase/functions/sync-reviews/index.ts`
+Follow the existing `AirbnbIcon.tsx` pattern to create consistent, themeable SVG components.
 
-Update the rating extraction logic to check additional fields that Booking.com might use:
+**New Files**:
+- `src/components/icons/VrboIcon.tsx` - VRBO logo as inline SVG
+- `src/components/icons/BookingIcon.tsx` - Booking.com logo as inline SVG
 
-```typescript
-// Extract rating from multiple possible fields
-let rating = null;
+Each component will:
+- Accept className and other SVG props for flexibility
+- Include accessibility attributes (role, aria-label)
+- Use the official brand colors (VRBO blue, Booking.com dark blue)
 
-// Airbnb/VRBO: overall_rating or starRatingOverall (1-5 scale)
-if (typeof rawReview.overall_rating === 'number') {
-  rating = rawReview.overall_rating;
-} else if (rawReview.starRatingOverall) {
-  rating = parseFloat(rawReview.starRatingOverall);
-}
+### 2. Create a Unified PlatformIcon Component
 
-// Booking.com: score or average_score (10-point scale) - normalize to 5
-if (rating === null) {
-  const bookingScore = rawReview.score ?? rawReview.average_score ?? rawReview.overall_score ?? rawReview.total_score;
-  if (typeof bookingScore === 'number') {
-    // Normalize 10-point scale to 5-star scale
-    rating = bookingScore / 2;
-  }
-}
+Create a single component that maps platform names to their respective icons.
 
-// Also check top-level score field (some channel integrations)
-if (rating === null && typeof review.score === 'number') {
-  if (review.score > 5) {
-    rating = review.score / 2; // Normalize 10-point to 5-star
-  } else {
-    rating = review.score;
-  }
-}
+**New File**: `src/components/icons/PlatformIcon.tsx`
+
+```tsx
+// Maps platform source string to the appropriate brand icon
+// Falls back to a generic icon for unknown platforms
+<PlatformIcon platform="Airbnb" className="w-6 h-6" />
+<PlatformIcon platform="VRBO" className="w-6 h-6" />
+<PlatformIcon platform="Booking.com" className="w-6 h-6" />
 ```
 
-### 2. Apply Same Fix to sync-new-reviews
+Platform matching will be case-insensitive:
+- "airbnb", "Airbnb" -> AirbnbIcon (color: #FF385C)
+- "vrbo", "VRBO" -> VrboIcon (color: #0066CC)
+- "booking", "Booking.com", "Booking.Com" -> BookingIcon (color: #003580)
+- Other platforms -> A generic Building2 icon from Lucide
 
-**File**: `supabase/functions/sync-new-reviews/index.ts`
+### 3. Update ReviewsSummaryAggregated Component
 
-Mirror the same rating extraction logic changes.
+Replace the `getPlatformIcon` function that returns emojis with the new `PlatformIcon` component.
 
-### 3. Add Debug Logging for Missing Ratings
+**File**: `src/components/ReviewsSummaryAggregated.tsx`
 
-To help identify the correct field for future API changes, add logging when no rating is found:
+```tsx
+// Before
+<span className="text-2xl">{getPlatformIcon(platform.source)}</span>
 
-```typescript
-// Log review structure when rating is null (for debugging)
-if (rating === null) {
-  console.log(`No rating found for ${formatChannelId(review.channelId)} review:`, {
-    reviewId: review._id,
-    channelId: review.channelId,
-    rawReviewKeys: Object.keys(rawReview),
-    topLevelKeys: Object.keys(review),
-  });
-}
+// After
+<PlatformIcon platform={platform.source} className="w-8 h-8" />
 ```
 
-### 4. Update SQL Function to Exclude Null Ratings from Average
+### 4. Update ReviewsSummary Component
 
-**File**: New migration
+Apply the same change to the ReviewsSummary component.
 
-The current function includes null ratings in the count but they don't affect the average. Update to be more explicit:
+**File**: `src/components/ReviewsSummary.tsx`
 
-```sql
-CREATE OR REPLACE FUNCTION public.get_review_summary_stats(
-  p_listing_id TEXT DEFAULT NULL,
-  p_start_date DATE DEFAULT NULL,
-  p_end_date DATE DEFAULT NULL
-)
--- ... existing structure ...
+```tsx
+// Before
+<span className="text-2xl">{getPlatformIcon(platform.source)}</span>
 
--- Update the rating_counts CTE to handle nulls better
-rating_counts AS (
-  SELECT
-    COUNT(*) AS total,
-    AVG(CASE WHEN rating IS NOT NULL THEN rating END) AS avg_rat,
-    COUNT(*) FILTER (WHERE rating IS NOT NULL AND ROUND(rating) = 1) AS r1,
-    COUNT(*) FILTER (WHERE rating IS NOT NULL AND ROUND(rating) = 2) AS r2,
-    COUNT(*) FILTER (WHERE rating IS NOT NULL AND ROUND(rating) = 3) AS r3,
-    COUNT(*) FILTER (WHERE rating IS NOT NULL AND ROUND(rating) = 4) AS r4,
-    COUNT(*) FILTER (WHERE rating IS NOT NULL AND ROUND(rating) = 5) AS r5,
-    COUNT(*) FILTER (WHERE rating IS NULL) AS r_null
-  FROM filtered_reviews
-),
+// After
+<PlatformIcon platform={platform.source} className="w-8 h-8" />
+```
+
+### 5. Update ReviewsTable Component (Optional Enhancement)
+
+Update the platform Badge to include the icon alongside the text.
+
+**File**: `src/components/ReviewsTable.tsx`
+
+```tsx
+// Before
+<Badge variant="outline" className="capitalize">
+  {review.source}
+</Badge>
+
+// After
+<Badge variant="outline" className="capitalize flex items-center gap-1.5">
+  <PlatformIcon platform={review.source || ''} className="w-4 h-4" />
+  {review.source}
+</Badge>
 ```
 
 ---
+
+## Files to Create
+
+| File | Description |
+|------|-------------|
+| `src/components/icons/VrboIcon.tsx` | VRBO brand logo as React SVG component |
+| `src/components/icons/BookingIcon.tsx` | Booking.com brand logo as React SVG component |
+| `src/components/icons/PlatformIcon.tsx` | Unified component mapping platform names to icons |
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/sync-reviews/index.ts` | Add Booking.com rating extraction with 10-to-5 normalization |
-| `supabase/functions/sync-new-reviews/index.ts` | Same rating extraction changes |
-| New migration | Update `get_review_summary_stats` to handle nulls explicitly |
+| `src/components/ReviewsSummaryAggregated.tsx` | Replace emoji with PlatformIcon component |
+| `src/components/ReviewsSummary.tsx` | Replace emoji with PlatformIcon component |
+| `src/components/ReviewsTable.tsx` | Add PlatformIcon to platform badge |
 
 ---
 
-## After Implementation
+## Brand Colors Reference
 
-After deploying the updated sync functions:
-1. Run a full reviews sync from Settings to re-fetch all Booking.com reviews with their ratings
-2. The ratings should now show correctly (normalized to 5-star scale)
+- **Airbnb**: #FF385C (Rausch red)
+- **VRBO**: #0066CC (Blue)
+- **Booking.com**: #003580 (Dark blue)
 
 ---
 
 ## Technical Notes
 
-- Booking.com's 10-point scale normalized: 10.0 becomes 5.0, 8.0 becomes 4.0, etc.
-- The normalization happens at sync time, so all data in the database is stored on a consistent 5-star scale
-- Existing null ratings will remain null until a re-sync is performed
+- Icons use inline SVG for best performance and theming flexibility
+- Each icon component uses `currentColor` by default but has hardcoded brand colors as the primary fill
+- The `className` prop allows size customization (w-6 h-6, w-8 h-8, etc.)
+- Case-insensitive platform matching handles variations like "VRBO", "vrbo", "Booking.Com", "Booking.com"
+
