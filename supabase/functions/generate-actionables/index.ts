@@ -24,17 +24,18 @@ interface PropertyData {
   organization_id: string;
 }
 
+// Revenue-focused priority scoring
 const CATEGORY_SCORES: Record<string, number> = {
-  'unbookable_gap': 30,
-  'low_rating': 25,
-  'low_probability': 20,
-  'forecast_miss': 20,
-  'pricing_high': 18,
-  'pricing_low': 15,
-  'recent_low_review': 15,
-  'yoy_pacing_gap': 15,
-  'high_demand_available': 12,
-  'missing_goals': 10,
+  'unbookable_gap': 35,      // Direct revenue loss, easily fixable
+  'pricing_high': 28,        // Losing bookings = revenue loss
+  'low_probability': 25,     // Revenue at risk  
+  'pricing_low': 22,         // Leaving money on table
+  'forecast_miss': 20,       // Goal tracking
+  'low_rating': 20,          // Less immediately actionable
+  'yoy_pacing_gap': 15,      // Trend indicator
+  'recent_low_review': 12,   // Informational
+  'high_demand_available': 12, // Opportunity
+  'missing_goals': 5,        // Administrative - lowest priority
 };
 
 function calculateIssueScore(issue: Partial<Issue>): number {
@@ -170,9 +171,10 @@ Deno.serve(async (req) => {
     console.log(`Processing ${listings.length} listings`);
 
     const today = new Date().toISOString().split('T')[0];
-    const thirtyDaysLater = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const sixtyDaysLater = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const ninetyDaysLater = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const thirtyDaysLater = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const currentYear = new Date().getFullYear();
     const currentMonth = new Date().getMonth() + 1;
 
@@ -185,10 +187,10 @@ Deno.serve(async (req) => {
       reviewsResult,
       compsetResult,
     ] = await Promise.all([
-      // Calendar data for unbookable gaps
+      // Calendar data for unbookable gaps AND pricing comparison
       supabase
         .from('capacity_calendar')
-        .select('listing_id, date, min_nights, is_available')
+        .select('listing_id, date, min_nights, is_available, price')
         .eq('is_available', true)
         .gte('date', today)
         .lte('date', ninetyDaysLater)
@@ -209,7 +211,7 @@ Deno.serve(async (req) => {
         .select('listing_id, year, monthly_forecasts')
         .eq('year', currentYear),
       
-      // Property goals
+      // Property goals - fetch ALL goal records for current year
       supabase
         .from('property_goals')
         .select('listing_id, year, month, goal_revenue')
@@ -224,20 +226,24 @@ Deno.serve(async (req) => {
         .lt('rating', 4)
         .eq('is_removed', false),
       
-      // Compset summaries for pricing comparison
+      // Compset summaries for pricing comparison - include monthly_averages for ADR data
       supabase
         .from('property_compset_summary')
-        .select('listing_id, future_monthly_averages'),
+        .select('listing_id, future_monthly_averages, monthly_averages'),
     ]);
 
     // Build lookup maps
-    const calendarByListing = new Map<string, Array<{ date: string; min_nights: number }>>();
+    const calendarByListing = new Map<string, Array<{ date: string; min_nights: number; price: number }>>();
     if (calendarResult.data) {
       for (const row of calendarResult.data) {
         if (!calendarByListing.has(row.listing_id)) {
           calendarByListing.set(row.listing_id, []);
         }
-        calendarByListing.get(row.listing_id)!.push({ date: row.date, min_nights: row.min_nights || 1 });
+        calendarByListing.get(row.listing_id)!.push({ 
+          date: row.date, 
+          min_nights: row.min_nights || 1,
+          price: row.price || 0
+        });
       }
     }
 
@@ -262,6 +268,7 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Goals lookup - track which months have goal RECORDS (not just positive values)
     const goalsByListing = new Map<string, Array<{ month: number; goal: number }>>();
     if (goalsResult.data) {
       for (const row of goalsResult.data) {
@@ -289,10 +296,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    const compsetByListing = new Map<string, Record<string, unknown>>();
+    // Compset lookup - use monthly_averages which has ADR data
+    const compsetByListing = new Map<string, Array<{ month: string; adr: number; occupancy: number }>>();
     if (compsetResult.data) {
       for (const row of compsetResult.data) {
-        compsetByListing.set(row.listing_id, row.future_monthly_averages as Record<string, unknown> || {});
+        const monthlyData = row.monthly_averages as Array<{ month: string; adr: number; occupancy: number }> || [];
+        if (Array.isArray(monthlyData) && monthlyData.length > 0) {
+          compsetByListing.set(row.listing_id, monthlyData);
+        }
       }
     }
 
@@ -375,8 +386,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 2. Check for low rating
-      if (listing.live_airbnb_rating !== null) {
+      // 2. Check for low rating - ONLY if rating > 0 (0 means no reviews yet)
+      if (listing.live_airbnb_rating !== null && listing.live_airbnb_rating > 0) {
         if (listing.live_airbnb_rating < 4.3) {
           const issue: Issue = {
             category: 'low_rating',
@@ -431,7 +442,7 @@ Deno.serve(async (req) => {
       
       if (forecasts && goals.length > 0) {
         for (const goal of goals) {
-          if (goal.goal <= 0) continue;
+          if (goal.goal <= 0) continue; // Only check goals with actual positive values
           
           const monthIndex = goal.month - 1;
           const monthForecast = forecasts[monthIndex.toString()] as { p50?: number } | undefined;
@@ -473,9 +484,9 @@ Deno.serve(async (req) => {
         issues.push(issue);
       }
 
-      // 6. Check for missing goals
+      // 6. Check for missing goals - check if goal RECORD exists, not just positive value
       const upcomingMonths = [currentMonth, currentMonth + 1, currentMonth + 2].filter(m => m <= 12);
-      const monthsWithGoals = new Set(goals.filter(g => g.goal > 0).map(g => g.month));
+      const monthsWithGoals = new Set(goals.map(g => g.month)); // Fixed: check record existence
       const missingGoalMonths = upcomingMonths.filter(m => !monthsWithGoals.has(m));
       
       if (missingGoalMonths.length > 0) {
@@ -494,6 +505,78 @@ Deno.serve(async (req) => {
         issue.score = calculateIssueScore(issue);
         issue.priority = getPriority(issue.score);
         issues.push(issue);
+      }
+
+      // 7. NEW: Check pricing vs compset
+      const compsetData = compsetByListing.get(listing.id);
+      if (compsetData && compsetData.length > 0 && calendar.length > 0) {
+        // Group calendar prices by month (YYYY-MM format)
+        const pricesByMonth: Record<string, { prices: number[]; dates: string[] }> = {};
+        
+        for (const day of calendar) {
+          if (day.price && day.price > 0) {
+            const month = day.date.substring(0, 7); // "2026-02"
+            if (!pricesByMonth[month]) pricesByMonth[month] = { prices: [], dates: [] };
+            pricesByMonth[month].prices.push(day.price);
+            pricesByMonth[month].dates.push(day.date);
+          }
+        }
+        
+        // Compare each month against compset ADR
+        for (const [month, data] of Object.entries(pricesByMonth)) {
+          const yourAvgRate = data.prices.reduce((a, b) => a + b, 0) / data.prices.length;
+          
+          // Find matching compset month
+          const compsetMonth = compsetData.find((m) => m.month === month);
+          
+          if (compsetMonth?.adr && compsetMonth.adr > 0) {
+            const priceDiff = (yourAvgRate - compsetMonth.adr) / compsetMonth.adr;
+            
+            if (priceDiff > 0.20) {
+              // Overpriced by 20%+ - may be losing bookings
+              const issue: Issue = {
+                category: 'pricing_high',
+                priority: 'high',
+                score: 0,
+                title: `${month} rates ${Math.round(priceDiff * 100)}% above market`,
+                description: `Your avg $${yourAvgRate.toFixed(0)}/night vs compset $${compsetMonth.adr.toFixed(0)}. ${data.prices.length} available nights may be overpriced.`,
+                revenue_impact: data.prices.length * yourAvgRate * 0.3, // Assume 30% booking loss
+                affected_dates: data.dates.slice(0, 5),
+                data_snapshot: { 
+                  your_rate: yourAvgRate, 
+                  compset_adr: compsetMonth.adr, 
+                  diff_pct: Math.round(priceDiff * 100),
+                  nights: data.prices.length 
+                },
+              };
+              issue.score = calculateIssueScore(issue);
+              issue.priority = getPriority(issue.score);
+              issues.push(issue);
+            } else if (priceDiff < -0.25) {
+              // Underpriced by 25%+ - leaving money on table
+              const missedRevenue = data.prices.length * (compsetMonth.adr - yourAvgRate);
+              const issue: Issue = {
+                category: 'pricing_low',
+                priority: 'high',
+                score: 0,
+                title: `${month} rates ${Math.abs(Math.round(priceDiff * 100))}% below market`,
+                description: `Your avg $${yourAvgRate.toFixed(0)}/night vs compset $${compsetMonth.adr.toFixed(0)}. Potential +$${missedRevenue.toFixed(0)} opportunity.`,
+                revenue_impact: missedRevenue,
+                affected_dates: data.dates.slice(0, 5),
+                data_snapshot: { 
+                  your_rate: yourAvgRate, 
+                  compset_adr: compsetMonth.adr, 
+                  diff_pct: Math.round(priceDiff * 100),
+                  nights: data.prices.length,
+                  missed_revenue: missedRevenue
+                },
+              };
+              issue.score = calculateIssueScore(issue);
+              issue.priority = getPriority(issue.score);
+              issues.push(issue);
+            }
+          }
+        }
       }
 
       // Only create actionable if there are issues
