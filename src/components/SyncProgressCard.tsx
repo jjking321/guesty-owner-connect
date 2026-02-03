@@ -20,7 +20,7 @@ interface SyncJob {
 
 interface SyncProgressCardProps {
   accountId: string;
-  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'capacity_calendar' | 'comparable_historical' | 'comparable_future_rates';
+  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'capacity_calendar' | 'comparable_historical' | 'comparable_future_rates' | 'airbnb_ratings';
   onComplete?: () => void;
 }
 
@@ -30,6 +30,7 @@ const getSyncTypeName = (type: string): string => {
     case 'comparable_historical': return 'Historical Metrics Fetch';
     case 'comparable_future_rates': return 'Future Rates Fetch';
     case 'new_reservations': return 'New Reservations Sync';
+    case 'airbnb_ratings': return 'Airbnb Ratings Scrape';
     default: return `${type.charAt(0).toUpperCase() + type.slice(1)} Sync`;
   }
 };
@@ -331,6 +332,38 @@ export function SyncProgressCard({ accountId, syncType, onComplete }: SyncProgre
                   size="sm"
                   className="h-7 text-xs"
                   onClick={handleResumeReservations}
+                  disabled={stopping}
+                >
+                  <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
+                  Resume from {syncJob.last_synced_offset.toLocaleString()}
+                </Button>
+              )}
+              
+              {/* Resume button for airbnb_ratings with progress to resume from */}
+              {isFailed && syncType === 'airbnb_ratings' && syncJob.last_synced_offset && syncJob.last_synced_offset > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={async () => {
+                    try {
+                      setStopping(true);
+                      const { error } = await supabase.functions.invoke('bulk-scrape-airbnb-ratings', {});
+                      if (error) throw error;
+                      toast({
+                        title: "Airbnb ratings scrape resumed",
+                        description: "Scraping has been resumed from where it left off",
+                      });
+                    } catch (error: any) {
+                      toast({
+                        title: "Failed to resume scrape",
+                        description: error.message,
+                        variant: "destructive",
+                      });
+                    } finally {
+                      setStopping(false);
+                    }
+                  }}
                   disabled={stopping}
                 >
                   <Loader2 className={`h-3 w-3 mr-1 ${stopping ? 'animate-spin' : ''}`} />
