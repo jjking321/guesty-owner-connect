@@ -351,6 +351,7 @@ async function performSync(
       .from('listings')
       .select('id, nickname')
       .eq('guesty_account_id', guestyAccountId)
+      .eq('is_listed', true)
       .eq('archived', false)
       .order('nickname');
 
