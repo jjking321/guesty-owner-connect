@@ -107,3 +107,6 @@ verify_jwt = true
 
 [functions.calculate-all-probabilities]
 verify_jwt = false
+
+[functions.generate-actionables]
+verify_jwt = false

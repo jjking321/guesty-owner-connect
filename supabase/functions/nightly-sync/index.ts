@@ -155,7 +155,7 @@ Deno.serve(async (req) => {
     // Get all accounts with automated sync enabled
     const { data: accounts, error: accountsError } = await supabase
       .from('guesty_accounts')
-      .select('id, account_name, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled')
+      .select('id, account_name, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled, actionables_generation_enabled')
       .eq('automated_sync_enabled', true);
 
     if (accountsError) {
@@ -386,6 +386,32 @@ Deno.serve(async (req) => {
       forecastResult = { success: true, skipped: true };
     }
 
+    // 8. Generate Actionables
+    const actionablesEnabled = accounts.some(a => a.actionables_generation_enabled !== false);
+    let actionablesResult: SyncResult | null = null;
+
+    if (actionablesEnabled) {
+      console.log(`\n--- Generating Actionables ---`);
+      const { error: actionablesInvokeError } = await supabase.functions.invoke(
+        'generate-actionables',
+        {
+          body: {},
+          headers: { 'x-service-role': 'true' }
+        }
+      );
+
+      if (actionablesInvokeError) {
+        console.error('Failed to invoke actionables generation:', actionablesInvokeError);
+        actionablesResult = { success: false, error: actionablesInvokeError.message };
+      } else {
+        actionablesResult = { success: true };
+        console.log('Actionables generation completed');
+      }
+    } else {
+      console.log(`\n--- Skipping Actionables Generation (disabled) ---`);
+      actionablesResult = { success: true, skipped: true };
+    }
+
     const duration = Math.round((Date.now() - startTime) / 1000);
     console.log(`\n=== Nightly Sync Completed ===`);
     console.log(`Total duration: ${duration} seconds`);
@@ -398,6 +424,9 @@ Deno.serve(async (req) => {
     }
     if (forecastResult) {
       console.log(`Forecast generation: ${forecastResult.success ? 'completed' : 'failed'}${forecastResult.skipped ? ' (skipped)' : ''}`);
+    }
+    if (actionablesResult) {
+      console.log(`Actionables generation: ${actionablesResult.success ? 'completed' : 'failed'}${actionablesResult.skipped ? ' (skipped)' : ''}`);
     }
 
     // Summary
@@ -415,6 +444,7 @@ Deno.serve(async (req) => {
         airbnbRatingsScrape: airbnbScrapeResult,
         probabilityCalculation: probabilityResult,
         forecastGeneration: forecastResult,
+        actionablesGeneration: actionablesResult,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

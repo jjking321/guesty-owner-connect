@@ -1,4 +1,4 @@
-import { Calendar, Settings, FolderOpen, LayoutGrid, Users, Wrench, Star, Building2, Target } from "lucide-react";
+import { Calendar, Settings, FolderOpen, LayoutGrid, Users, Wrench, Star, Building2, Target, AlertTriangle } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
   Sidebar,
@@ -14,6 +14,7 @@ import {
 import { useUserRole } from "@/hooks/useUserRole";
 
 const menuItems = [
+  { title: "Actionables", url: "/actionables", icon: AlertTriangle, roles: ['super_admin', 'admin', 'member'] },
   { title: "Portfolio View", url: "/properties/bulk-edit", icon: LayoutGrid, roles: ['super_admin', 'admin', 'member'] },
   { title: "Goals Review", url: "/goals-review", icon: Target, roles: ['super_admin', 'admin', 'member'] },
   { title: "Groups", url: "/groups", icon: FolderOpen, roles: ['super_admin', 'admin', 'member', 'owner'] },
