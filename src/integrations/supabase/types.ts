@@ -482,6 +482,7 @@ export type Database = {
           last_reservations_sync: string | null
           last_reviews_sync: string | null
           organization_id: string
+          probability_calculation_enabled: boolean | null
           updated_at: string
           user_id: string
         }
@@ -501,6 +502,7 @@ export type Database = {
           last_reservations_sync?: string | null
           last_reviews_sync?: string | null
           organization_id: string
+          probability_calculation_enabled?: boolean | null
           updated_at?: string
           user_id: string
         }
@@ -520,6 +522,7 @@ export type Database = {
           last_reservations_sync?: string | null
           last_reviews_sync?: string | null
           organization_id?: string
+          probability_calculation_enabled?: boolean | null
           updated_at?: string
           user_id?: string
         }

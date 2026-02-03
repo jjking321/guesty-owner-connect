@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle, TrendingUp, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle, TrendingUp, RefreshCw, BarChart3 } from "lucide-react";
 import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -92,7 +92,7 @@ export default function Settings() {
       // Only select safe fields - exclude client_id and client_secret for security
       const { data, error } = await supabase
         .from("guesty_accounts")
-        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled, airbnb_scrape_enabled, forecast_generation_enabled")
+        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -459,6 +459,32 @@ export default function Settings() {
         description: enabled 
           ? "Revenue forecasts will be regenerated during nightly sync."
           : "Forecast regeneration will be skipped during nightly sync.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleProbabilityCalculation = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ probability_calculation_enabled: enabled })
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Probability calculation enabled" : "Probability calculation disabled",
+        description: enabled 
+          ? "Booking probabilities will be calculated during nightly sync."
+          : "Probability calculation will be skipped during nightly sync.",
       });
 
       loadAccounts();
@@ -906,6 +932,51 @@ export default function Settings() {
                 This will scrape live Airbnb ratings for all listings with an Airbnb ID. 
                 Listings scraped within the last 24 hours will be skipped. 
                 The process runs automatically and may take several minutes for large portfolios.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Booking Probabilities */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5 text-primary" />
+                    Booking Probabilities
+                  </CardTitle>
+                  <CardDescription>
+                    AI-calculated likelihood of booking each available night
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="probability-auto-sync"
+                    checked={guestyAccounts[0]?.probability_calculation_enabled !== false}
+                    onCheckedChange={(checked) => handleToggleProbabilityCalculation(guestyAccounts[0].id, checked)}
+                  />
+                  <Label htmlFor="probability-auto-sync" className="text-sm cursor-pointer">
+                    Include in nightly sync
+                  </Label>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-sm text-muted-foreground space-y-2">
+                <p>
+                  Probabilities combine four signals to estimate booking likelihood for each open night:
+                </p>
+                <ul className="list-disc list-inside space-y-1 ml-2">
+                  <li><strong>Compset Demand:</strong> How many comparables are already booked</li>
+                  <li><strong>Price Position:</strong> Your rate vs. available compset average</li>
+                  <li><strong>Historical:</strong> Was this date booked last year?</li>
+                  <li><strong>Booking Window:</strong> Days until arrival vs. typical lead time</li>
+                </ul>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                View probabilities on any property's calendar tab
               </p>
             </CardContent>
           </Card>
