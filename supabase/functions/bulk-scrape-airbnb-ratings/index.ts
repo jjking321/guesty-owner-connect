@@ -169,14 +169,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Extract auth token for self-invocation
+    // Check for service-role bypass (for automated nightly sync)
+    const isServiceRole = req.headers.get("x-service-role") === "true";
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Authorization header required" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     // Initialize Supabase clients
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -184,50 +179,102 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-    const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } }
-    });
 
-    // Verify user and get organization
-    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    let organizationId: string;
+    let guestyAccountId: string;
+    let guestyAccounts: { id: string }[];
+
+    if (isServiceRole) {
+      // Service-role auth: get organization from first active guesty account
+      console.log("Using service-role authentication for automated run");
+      
+      const { data: account, error: accountError } = await supabaseAdmin
+        .from("guesty_accounts")
+        .select("organization_id, id")
+        .eq("automated_sync_enabled", true)
+        .limit(1)
+        .maybeSingle();
+
+      if (accountError || !account) {
+        console.error("No account with automation enabled:", accountError);
+        return new Response(
+          JSON.stringify({ error: "No account with automation enabled" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      organizationId = account.organization_id;
+      guestyAccountId = account.id;
+
+      // Get all guesty accounts for this organization
+      const { data: allAccounts, error: allAccountsError } = await supabaseAdmin
+        .from("guesty_accounts")
+        .select("id")
+        .eq("organization_id", organizationId);
+
+      if (allAccountsError || !allAccounts || allAccounts.length === 0) {
+        return new Response(
+          JSON.stringify({ error: "No Guesty accounts found" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      guestyAccounts = allAccounts;
+    } else {
+      // Standard user auth
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ error: "Authorization header required" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } }
+      });
+
+      // Verify user and get organization
+      const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
+      if (authError || !user) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Get user's organization
+      const { data: membership, error: membershipError } = await supabaseAuth
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", user.id)
+        .single();
+
+      if (membershipError || !membership) {
+        return new Response(
+          JSON.stringify({ error: "No organization found" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      organizationId = membership.organization_id;
+
+      // Get guesty accounts for this organization
+      const { data: accounts, error: accountsError } = await supabaseAdmin
+        .from("guesty_accounts")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .limit(1);
+
+      if (accountsError || !accounts || accounts.length === 0) {
+        return new Response(
+          JSON.stringify({ error: "No Guesty account found for organization" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      guestyAccountId = accounts[0].id;
+      guestyAccounts = accounts;
     }
-
-    // Get user's organization
-    const { data: membership, error: membershipError } = await supabaseAuth
-      .from("organization_members")
-      .select("organization_id")
-      .eq("user_id", user.id)
-      .single();
-
-    if (membershipError || !membership) {
-      return new Response(
-        JSON.stringify({ error: "No organization found" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const organizationId = membership.organization_id;
-
-    // Get guesty accounts for this organization (we need one for sync_jobs foreign key)
-    const { data: guestyAccounts, error: accountsError } = await supabaseAdmin
-      .from("guesty_accounts")
-      .select("id")
-      .eq("organization_id", organizationId)
-      .limit(1);
-
-    if (accountsError || !guestyAccounts || guestyAccounts.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "No Guesty account found for organization" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const guestyAccountId = guestyAccounts[0].id;
 
     // Check for existing running job or create new one
     let jobId: string;
@@ -416,16 +463,23 @@ Deno.serve(async (req) => {
           })
           .eq("id", jobId);
 
-        // Self-invoke to continue
+        // Self-invoke to continue - use appropriate auth header
+        const selfInvokeHeaders: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        
+        if (isServiceRole) {
+          selfInvokeHeaders["x-service-role"] = "true";
+        } else if (authHeader) {
+          selfInvokeHeaders["Authorization"] = authHeader;
+        }
+
         try {
           const invokeResponse = await fetch(
             `${supabaseUrl}/functions/v1/bulk-scrape-airbnb-ratings`,
             {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: authHeader,
-              },
+              headers: selfInvokeHeaders,
               body: JSON.stringify({}),
             }
           );
