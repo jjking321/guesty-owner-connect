@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
+import { subDays } from "date-fns";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { ReviewsSummary } from "@/components/ReviewsSummary";
+import { DateRangeFilter, DateRange } from "@/components/DateRangeFilter";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -19,6 +21,11 @@ export default function Reviews() {
   const [syncingReviews, setSyncingReviews] = useState(false);
   const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [dateRange, setDateRange] = useState<DateRange>({
+    from: subDays(new Date(), 29),
+    to: new Date(),
+    preset: "last30",
+  });
 
   // Fetch guesty account ID on load
   useEffect(() => {
@@ -38,14 +45,21 @@ export default function Reviews() {
 
   // Fetch total review count for pagination
   const { data: totalCount = 0 } = useQuery({
-    queryKey: ['reviews', 'count', selectedProperty],
+    queryKey: ['reviews', 'count', selectedProperty, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
     queryFn: async () => {
       let query = supabase
         .from('reviews')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact', head: true })
+        .eq('is_removed', false);
       
       if (selectedProperty !== 'all') {
         query = query.eq('listing_id', selectedProperty);
+      }
+
+      if (dateRange.from && dateRange.to) {
+        query = query
+          .gte('review_date', dateRange.from.toISOString().split('T')[0])
+          .lte('review_date', dateRange.to.toISOString().split('T')[0]);
       }
 
       const { count, error } = await query;
@@ -54,9 +68,34 @@ export default function Reviews() {
     },
   });
 
+  // Fetch summary stats for the full filtered dataset (not just current page)
+  const { data: summaryStats = [] } = useQuery({
+    queryKey: ['reviews', 'summary', selectedProperty, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
+    queryFn: async () => {
+      let query = supabase
+        .from('reviews')
+        .select('rating, source, is_removed, category_ratings')
+        .eq('is_removed', false);
+      
+      if (selectedProperty !== 'all') {
+        query = query.eq('listing_id', selectedProperty);
+      }
+
+      if (dateRange.from && dateRange.to) {
+        query = query
+          .gte('review_date', dateRange.from.toISOString().split('T')[0])
+          .lte('review_date', dateRange.to.toISOString().split('T')[0]);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   // Fetch paginated reviews
   const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
-    queryKey: ['reviews', 'paginated', selectedProperty, currentPage],
+    queryKey: ['reviews', 'paginated', selectedProperty, currentPage, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
     queryFn: async () => {
       const from = (currentPage - 1) * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -64,11 +103,18 @@ export default function Reviews() {
       let query = supabase
         .from('reviews')
         .select('*')
+        .eq('is_removed', false)
         .order('review_date', { ascending: false })
         .range(from, to);
       
       if (selectedProperty !== 'all') {
         query = query.eq('listing_id', selectedProperty);
+      }
+
+      if (dateRange.from && dateRange.to) {
+        query = query
+          .gte('review_date', dateRange.from.toISOString().split('T')[0])
+          .lte('review_date', dateRange.to.toISOString().split('T')[0]);
       }
 
       const { data: reviewsData, error: reviewsError } = await query;
@@ -230,7 +276,7 @@ export default function Reviews() {
   // Reset to page 1 when filter changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [selectedProperty]);
+  }, [selectedProperty, dateRange.from, dateRange.to]);
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
   const showingFrom = totalCount === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
@@ -266,13 +312,13 @@ export default function Reviews() {
           </Button>
         </div>
 
-        {/* Property Filter */}
+        {/* Filter */}
         <Card>
           <CardHeader>
             <CardTitle>Filter</CardTitle>
-            <CardDescription>Select a property to filter reviews</CardDescription>
+            <CardDescription>Filter reviews by property and date range</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-wrap gap-4">
             <Select value={selectedProperty} onValueChange={setSelectedProperty}>
               <SelectTrigger className="w-[300px]">
                 <SelectValue placeholder="All properties" />
@@ -286,11 +332,15 @@ export default function Reviews() {
                 ))}
               </SelectContent>
             </Select>
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
           </CardContent>
         </Card>
 
-        {/* Reviews Summary - uses full count */}
-        <ReviewsSummary reviews={reviews} />
+        {/* Reviews Summary - uses full filtered dataset */}
+        <ReviewsSummary reviews={summaryStats.map(r => ({
+          ...r,
+          category_ratings: r.category_ratings as Record<string, number> | undefined,
+        }))} />
 
         {/* Reviews Table */}
         <Card>

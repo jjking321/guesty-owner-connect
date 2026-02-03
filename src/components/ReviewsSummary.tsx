@@ -3,11 +3,11 @@ import { Star, TrendingUp, TrendingDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface Review {
-  id: string;
-  rating: number;
-  source: string;
+  id?: string;
+  rating: number | null;
+  source: string | null;
   is_removed: boolean;
-  category_ratings?: Record<string, number>;
+  category_ratings?: Record<string, number> | null;
 }
 
 interface PlatformStats {
