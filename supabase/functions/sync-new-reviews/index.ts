@@ -30,6 +30,18 @@ function formatChannelId(channelId: string | null): string {
   return channelMap[channelId.toLowerCase()] || channelId;
 }
 
+// Helper to safely extract string from potentially nested objects (VRBO uses { text: "..." })
+function extractStringValue(value: any): string | null {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    // Try common nested text field names
+    return value.text || value.value || value.body || 
+           value.content || value.message || null;
+  }
+  return null;
+}
+
 // Extract review text from platform-specific field locations
 function extractReviewText(rawReview: any, channelId: string): string | null {
   if (!rawReview) return null;
@@ -38,46 +50,58 @@ function extractReviewText(rawReview: any, channelId: string): string | null {
   
   // Airbnb: use public_review directly
   if (channel === 'airbnb' || channel === 'airbnb2') {
-    return rawReview.public_review || null;
+    return extractStringValue(rawReview.public_review);
   }
   
-  // Booking.com: combine positive and negative feedback
+  // Booking.com: content is nested under rawReview.content
   if (channel === 'booking' || channel === 'bookingcom') {
+    const content = rawReview.content || rawReview;
     const parts: string[] = [];
     
-    // Check various Booking.com field names
-    const positive = rawReview.positive || rawReview.positive_guest_comment 
-                     || rawReview.pros || rawReview.liked;
-    const negative = rawReview.negative || rawReview.negative_guest_comment 
-                     || rawReview.cons || rawReview.disliked;
+    const headline = extractStringValue(content.headline);
+    const positive = extractStringValue(content.positive) || 
+                     extractStringValue(content.pros) ||
+                     extractStringValue(content.positive_guest_comment) ||
+                     extractStringValue(content.liked);
+    const negative = extractStringValue(content.negative) || 
+                     extractStringValue(content.cons) ||
+                     extractStringValue(content.negative_guest_comment) ||
+                     extractStringValue(content.disliked);
     
+    if (headline) parts.push(headline);
     if (positive) parts.push(`Positive: ${positive}`);
     if (negative) parts.push(`Negative: ${negative}`);
     
-    // Also check for a single combined field
-    if (parts.length === 0) {
-      return rawReview.guest_comment || rawReview.comment 
-             || rawReview.text || rawReview.body || null;
-    }
+    if (parts.length > 0) return parts.join('\n\n');
     
-    return parts.length > 0 ? parts.join('\n\n') : null;
+    // Fallback to combined comment fields
+    return extractStringValue(content.guest_comment) || 
+           extractStringValue(content.comment) || 
+           extractStringValue(content.text) ||
+           extractStringValue(content.body) || null;
   }
   
-  // VRBO/HomeAway: check body, text, guestReview fields
+  // VRBO/HomeAway: fields may be objects with nested text
   if (channel === 'vrbo' || channel === 'homeaway' || channel === 'homeaway2') {
-    const text = rawReview.body || rawReview.text || rawReview.review_body 
-                 || rawReview.guestReview || rawReview.bodyText;
-    const headline = rawReview.headline || rawReview.title;
+    const headline = extractStringValue(rawReview.headline) || 
+                     extractStringValue(rawReview.title);
+    const body = extractStringValue(rawReview.body) || 
+                 extractStringValue(rawReview.text) || 
+                 extractStringValue(rawReview.reviewText) ||
+                 extractStringValue(rawReview.guestReview) ||
+                 extractStringValue(rawReview.review_body) ||
+                 extractStringValue(rawReview.bodyText);
     
-    if (headline && text) {
-      return `${headline}\n\n${text}`;
-    }
-    return text || headline || null;
+    if (headline && body) return `${headline}\n\n${body}`;
+    return body || headline || null;
   }
   
   // Fallback: try common field names
-  return rawReview.public_review || rawReview.body || rawReview.text 
-         || rawReview.comment || rawReview.review_text || null;
+  return extractStringValue(rawReview.public_review) || 
+         extractStringValue(rawReview.body) || 
+         extractStringValue(rawReview.text) || 
+         extractStringValue(rawReview.comment) || 
+         extractStringValue(rawReview.review_text) || null;
 }
 
 function delay(ms: number) {
