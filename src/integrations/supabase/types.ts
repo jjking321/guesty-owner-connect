@@ -468,6 +468,7 @@ export type Database = {
       guesty_accounts: {
         Row: {
           account_name: string
+          actionables_generation_enabled: boolean | null
           airbnb_scrape_enabled: boolean | null
           automated_sync_enabled: boolean | null
           client_id: string
@@ -488,6 +489,7 @@ export type Database = {
         }
         Insert: {
           account_name: string
+          actionables_generation_enabled?: boolean | null
           airbnb_scrape_enabled?: boolean | null
           automated_sync_enabled?: boolean | null
           client_id: string
@@ -508,6 +510,7 @@ export type Database = {
         }
         Update: {
           account_name?: string
+          actionables_generation_enabled?: boolean | null
           airbnb_scrape_enabled?: boolean | null
           automated_sync_enabled?: boolean | null
           client_id?: string
@@ -973,6 +976,88 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      property_actionables: {
+        Row: {
+          aggregate_score: number
+          ai_summary: string | null
+          created_at: string | null
+          critical_count: number
+          dismissed: boolean | null
+          dismissed_at: string | null
+          dismissed_by: string | null
+          generated_at: string | null
+          high_count: number
+          id: string
+          issues: Json
+          listing_id: string | null
+          low_count: number
+          medium_count: number
+          organization_id: string | null
+          total_issue_count: number
+          updated_at: string | null
+        }
+        Insert: {
+          aggregate_score?: number
+          ai_summary?: string | null
+          created_at?: string | null
+          critical_count?: number
+          dismissed?: boolean | null
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          generated_at?: string | null
+          high_count?: number
+          id?: string
+          issues?: Json
+          listing_id?: string | null
+          low_count?: number
+          medium_count?: number
+          organization_id?: string | null
+          total_issue_count?: number
+          updated_at?: string | null
+        }
+        Update: {
+          aggregate_score?: number
+          ai_summary?: string | null
+          created_at?: string | null
+          critical_count?: number
+          dismissed?: boolean | null
+          dismissed_at?: string | null
+          dismissed_by?: string | null
+          generated_at?: string | null
+          high_count?: number
+          id?: string
+          issues?: Json
+          listing_id?: string | null
+          low_count?: number
+          medium_count?: number
+          organization_id?: string | null
+          total_issue_count?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "property_actionables_dismissed_by_fkey"
+            columns: ["dismissed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_actionables_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "property_actionables_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       property_comparables: {
         Row: {
