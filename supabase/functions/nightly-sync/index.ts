@@ -249,10 +249,41 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 5. Scrape Airbnb Ratings (runs once for entire org, not per account)
+    console.log(`\n--- Scraping Airbnb Ratings ---`);
+    let airbnbScrapeResult: SyncResult | null = null;
+    const firstAccountId = accounts[0]?.id;
+
+    if (firstAccountId) {
+      const { error: airbnbInvokeError } = await supabase.functions.invoke(
+        'bulk-scrape-airbnb-ratings',
+        {
+          body: {},
+          headers: { 'x-service-role': 'true' }
+        }
+      );
+
+      if (airbnbInvokeError) {
+        console.error('Failed to invoke Airbnb ratings scrape:', airbnbInvokeError);
+        airbnbScrapeResult = { success: false, error: airbnbInvokeError.message };
+      } else {
+        // Poll for completion with 20 min timeout (225 listings * 3s = ~11 min)
+        airbnbScrapeResult = await waitForSyncCompletion(
+          supabase,
+          firstAccountId,
+          'airbnb_ratings',
+          1200000 // 20 minutes
+        );
+      }
+    }
+
     const duration = Math.round((Date.now() - startTime) / 1000);
     console.log(`\n=== Nightly Sync Completed ===`);
     console.log(`Total duration: ${duration} seconds`);
     console.log(`Accounts processed: ${results.length}`);
+    if (airbnbScrapeResult) {
+      console.log(`Airbnb ratings scrape: ${airbnbScrapeResult.success ? 'completed' : 'failed'}`);
+    }
 
     // Summary
     const successfulAccounts = results.filter(r => !r.error).length;
@@ -266,6 +297,7 @@ Deno.serve(async (req) => {
         successfulAccounts,
         failedAccounts,
         results,
+        airbnbRatingsScrape: airbnbScrapeResult,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
