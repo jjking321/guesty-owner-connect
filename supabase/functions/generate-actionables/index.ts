@@ -213,11 +213,13 @@ Deno.serve(async (req) => {
         .eq('year', currentYear),
       
       // Property goals - fetch ALL goal records for current year
+      // Explicitly set high limit since default is 1000 and we may have 4000+ records
       supabase
         .from('property_goals')
         .select('listing_id, year, month, goal_revenue')
         .eq('year', currentYear)
-        .gte('month', currentMonth),
+        .gte('month', currentMonth)
+        .limit(10000),
       
       // Recent low reviews
       supabase
