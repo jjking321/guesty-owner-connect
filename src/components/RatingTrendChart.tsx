@@ -51,6 +51,21 @@ export function RatingTrendChart({ data, isLoading }: RatingTrendChartProps) {
   const weightedSum = data.reduce((sum, d) => sum + d.avg_rating * d.review_count, 0);
   const overallAvg = totalReviews > 0 ? weightedSum / totalReviews : 0;
 
+  // Calculate dynamic Y-axis range based on data
+  const ratings = data.map(d => d.avg_rating);
+  const minRating = Math.min(...ratings);
+  const maxRating = Math.max(...ratings);
+
+  // Add padding and clamp to valid range (1-5)
+  const yMin = Math.max(1, Math.floor((minRating - 0.5) * 2) / 2);
+  const yMax = Math.min(5, Math.ceil((maxRating + 0.5) * 2) / 2);
+
+  // Generate tick marks at 0.5 intervals
+  const ticks: number[] = [];
+  for (let i = yMin; i <= yMax; i += 0.5) {
+    ticks.push(Number(i.toFixed(1)));
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -67,8 +82,9 @@ export function RatingTrendChart({ data, isLoading }: RatingTrendChartProps) {
                 className="text-muted-foreground"
               />
               <YAxis 
-                domain={[1, 5]} 
-                ticks={[1, 2, 3, 4, 5]}
+                domain={[yMin, yMax]} 
+                ticks={ticks}
+                tickFormatter={(value) => value.toFixed(1)}
                 tick={{ fontSize: 12 }}
                 className="text-muted-foreground"
               />
