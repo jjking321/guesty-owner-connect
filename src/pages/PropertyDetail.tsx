@@ -1226,19 +1226,25 @@ function ReviewsSection({ listingId }: { listingId: string }) {
 
   // Calculate average rating from synced reviews (excluding removed)
   const activeReviews = reviews.filter((r) => !r.is_removed && r.rating !== null);
-  const calculatedRating =
-    activeReviews.length > 0
-      ? activeReviews.reduce((sum, r) => sum + (r.rating ?? 0), 0) / activeReviews.length
+
+  // For comparison with live Airbnb rating, only use Airbnb reviews
+  const airbnbReviews = activeReviews.filter((r) => {
+    const source = (r.source || '').toLowerCase();
+    return source === 'airbnb' || source === 'airbnb2';
+  });
+  const calculatedAirbnbRating =
+    airbnbReviews.length > 0
+      ? airbnbReviews.reduce((sum, r) => sum + (r.rating ?? 0), 0) / airbnbReviews.length
       : undefined;
-  const calculatedCount = activeReviews.length;
+  const calculatedAirbnbCount = airbnbReviews.length;
 
   return (
     <div className="space-y-6">
       {/* Live Airbnb Rating Card */}
       <LiveAirbnbRating
         listingId={listingId}
-        calculatedRating={calculatedRating}
-        calculatedCount={calculatedCount}
+        calculatedRating={calculatedAirbnbRating}
+        calculatedCount={calculatedAirbnbCount}
       />
 
       <Card>

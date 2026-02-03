@@ -155,8 +155,8 @@ export function LiveAirbnbRating({
             {/* Comparison with calculated */}
             {calculatedRating !== undefined && calculatedCount !== undefined && (
               <div className="pt-2 border-t space-y-1">
-                <p className="text-sm text-muted-foreground">
-                  Calculated from synced reviews:{" "}
+              <p className="text-sm text-muted-foreground">
+                  Calculated from synced Airbnb reviews:{" "}
                   <span className="font-medium text-foreground">
                     ★ {calculatedRating.toFixed(2)}
                   </span>{" "}
