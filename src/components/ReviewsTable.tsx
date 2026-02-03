@@ -19,6 +19,7 @@ interface Review {
   is_removed: boolean;
   removed_reason?: string | null;
   category_ratings?: Record<string, number> | null;
+  property_name?: string;
 }
 
 interface ReviewsTableProps {
@@ -129,6 +130,7 @@ export function ReviewsTable({ reviews, onMarkAsRemoved, onRestore, selectedPlat
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
+              <TableHead>Property</TableHead>
               <TableHead>Guest</TableHead>
               <TableHead>Rating</TableHead>
               <TableHead>Platform</TableHead>
@@ -144,6 +146,9 @@ export function ReviewsTable({ reviews, onMarkAsRemoved, onRestore, selectedPlat
               >
                 <TableCell className="whitespace-nowrap">
                   {review.review_date ? format(new Date(review.review_date), 'MMM d, yyyy') : '—'}
+                </TableCell>
+                <TableCell className="max-w-[180px] truncate" title={review.property_name}>
+                  {review.property_name || 'Unknown'}
                 </TableCell>
                 <TableCell>{review.guest_name || 'Unknown'}</TableCell>
                 <TableCell>
