@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
     // Get all accounts with automated sync enabled
     const { data: accounts, error: accountsError } = await supabase
       .from('guesty_accounts')
-      .select('id, account_name')
+      .select('id, account_name, airbnb_scrape_enabled, forecast_generation_enabled')
       .eq('automated_sync_enabled', true);
 
     if (accountsError) {
@@ -289,11 +289,13 @@ Deno.serve(async (req) => {
     }
 
     // 5. Scrape Airbnb Ratings (runs once for entire org, not per account)
-    console.log(`\n--- Scraping Airbnb Ratings ---`);
+    // Only run if at least one account has airbnb_scrape_enabled
+    const airbnbScrapeEnabled = accounts.some(a => a.airbnb_scrape_enabled !== false);
     let airbnbScrapeResult: SyncResult | null = null;
     const firstAccountId = accounts[0]?.id;
 
-    if (firstAccountId) {
+    if (firstAccountId && airbnbScrapeEnabled) {
+      console.log(`\n--- Scraping Airbnb Ratings ---`);
       const { error: airbnbInvokeError } = await supabase.functions.invoke(
         'bulk-scrape-airbnb-ratings',
         {
@@ -314,30 +316,40 @@ Deno.serve(async (req) => {
           1200000 // 20 minutes
         );
       }
+    } else if (!airbnbScrapeEnabled) {
+      console.log(`\n--- Skipping Airbnb Ratings (disabled) ---`);
+      airbnbScrapeResult = { success: true, skipped: true };
     }
 
     // 6. Regenerate All Forecasts (runs once for entire org)
-    console.log(`\n--- Regenerating Forecasts ---`);
+    // Only run if at least one account has forecast_generation_enabled
+    const forecastEnabled = accounts.some(a => a.forecast_generation_enabled !== false);
     let forecastResult: SyncResult | null = null;
 
-    const { data: forecastResponse, error: forecastInvokeError } = await supabase.functions.invoke(
-      'generate-all-forecasts',
-      {
-        body: {},
-        headers: { 'x-service-role': 'true' }
-      }
-    );
-
-    if (forecastInvokeError) {
-      console.error('Failed to invoke forecast generation:', forecastInvokeError);
-      forecastResult = { success: false, error: forecastInvokeError.message };
-    } else if (forecastResponse?.progress_id) {
-      // Poll for completion with 30 min timeout
-      forecastResult = await waitForForecastCompletion(
-        supabase,
-        forecastResponse.progress_id,
-        1800000 // 30 minutes
+    if (forecastEnabled) {
+      console.log(`\n--- Regenerating Forecasts ---`);
+      const { data: forecastResponse, error: forecastInvokeError } = await supabase.functions.invoke(
+        'generate-all-forecasts',
+        {
+          body: {},
+          headers: { 'x-service-role': 'true' }
+        }
       );
+
+      if (forecastInvokeError) {
+        console.error('Failed to invoke forecast generation:', forecastInvokeError);
+        forecastResult = { success: false, error: forecastInvokeError.message };
+      } else if (forecastResponse?.progress_id) {
+        // Poll for completion with 30 min timeout
+        forecastResult = await waitForForecastCompletion(
+          supabase,
+          forecastResponse.progress_id,
+          1800000 // 30 minutes
+        );
+      }
+    } else {
+      console.log(`\n--- Skipping Forecast Regeneration (disabled) ---`);
+      forecastResult = { success: true, skipped: true };
     }
 
     const duration = Math.round((Date.now() - startTime) / 1000);

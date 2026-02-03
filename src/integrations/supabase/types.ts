@@ -468,10 +468,12 @@ export type Database = {
       guesty_accounts: {
         Row: {
           account_name: string
+          airbnb_scrape_enabled: boolean | null
           automated_sync_enabled: boolean | null
           client_id: string
           client_secret: string
           created_at: string
+          forecast_generation_enabled: boolean | null
           id: string
           last_automated_sync: string | null
           last_calendar_sync: string | null
@@ -485,10 +487,12 @@ export type Database = {
         }
         Insert: {
           account_name: string
+          airbnb_scrape_enabled?: boolean | null
           automated_sync_enabled?: boolean | null
           client_id: string
           client_secret: string
           created_at?: string
+          forecast_generation_enabled?: boolean | null
           id?: string
           last_automated_sync?: string | null
           last_calendar_sync?: string | null
@@ -502,10 +506,12 @@ export type Database = {
         }
         Update: {
           account_name?: string
+          airbnb_scrape_enabled?: boolean | null
           automated_sync_enabled?: boolean | null
           client_id?: string
           client_secret?: string
           created_at?: string
+          forecast_generation_enabled?: boolean | null
           id?: string
           last_automated_sync?: string | null
           last_calendar_sync?: string | null
