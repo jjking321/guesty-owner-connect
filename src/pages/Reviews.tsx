@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { ReviewsTable } from "@/components/ReviewsTable";
-import { ReviewsSummary } from "@/components/ReviewsSummary";
+import { ReviewsSummaryAggregated } from "@/components/ReviewsSummaryAggregated";
 import { DateRangeFilter, DateRange } from "@/components/DateRangeFilter";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -68,28 +68,32 @@ export default function Reviews() {
     },
   });
 
-  // Fetch summary stats for the full filtered dataset (not just current page)
-  const { data: summaryStats = [] } = useQuery({
+  // Fetch summary stats using server-side aggregation (avoids 1000 row limit)
+  const { data: summaryStats } = useQuery({
     queryKey: ['reviews', 'summary', selectedProperty, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
     queryFn: async () => {
-      let query = supabase
-        .from('reviews')
-        .select('rating, source, is_removed, category_ratings')
-        .eq('is_removed', false);
-      
-      if (selectedProperty !== 'all') {
-        query = query.eq('listing_id', selectedProperty);
-      }
+      const { data, error } = await supabase.rpc('get_review_summary_stats', {
+        p_listing_id: selectedProperty === 'all' ? null : selectedProperty,
+        p_start_date: dateRange.from ? dateRange.from.toISOString().split('T')[0] : null,
+        p_end_date: dateRange.to ? dateRange.to.toISOString().split('T')[0] : null,
+      });
 
-      if (dateRange.from && dateRange.to) {
-        query = query
-          .gte('review_date', dateRange.from.toISOString().split('T')[0])
-          .lte('review_date', dateRange.to.toISOString().split('T')[0]);
-      }
-
-      const { data, error } = await query;
       if (error) throw error;
-      return data || [];
+      
+      const row = data?.[0];
+      if (!row) return null;
+      
+      return {
+        total_reviews: row.total_reviews,
+        avg_rating: row.avg_rating,
+        rating_1_count: row.rating_1_count,
+        rating_2_count: row.rating_2_count,
+        rating_3_count: row.rating_3_count,
+        rating_4_count: row.rating_4_count,
+        rating_5_count: row.rating_5_count,
+        platform_stats: row.platform_stats as { source: string; count: number; avg_rating: number }[],
+        category_averages: row.category_averages as Record<string, number>,
+      };
     },
   });
 
@@ -336,11 +340,8 @@ export default function Reviews() {
           </CardContent>
         </Card>
 
-        {/* Reviews Summary - uses full filtered dataset */}
-        <ReviewsSummary reviews={summaryStats.map(r => ({
-          ...r,
-          category_ratings: r.category_ratings as Record<string, number> | undefined,
-        }))} />
+        {/* Reviews Summary - uses server-side aggregation */}
+        <ReviewsSummaryAggregated stats={summaryStats} />
 
         {/* Reviews Table */}
         <Card>

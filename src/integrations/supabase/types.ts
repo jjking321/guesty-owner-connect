@@ -1618,6 +1618,24 @@ export type Database = {
           past_nights: number
         }[]
       }
+      get_review_summary_stats: {
+        Args: {
+          p_end_date?: string
+          p_listing_id?: string
+          p_start_date?: string
+        }
+        Returns: {
+          avg_rating: number
+          category_averages: Json
+          platform_stats: Json
+          rating_1_count: number
+          rating_2_count: number
+          rating_3_count: number
+          rating_4_count: number
+          rating_5_count: number
+          total_reviews: number
+        }[]
+      }
       get_user_owner_id: { Args: { _user_id: string }; Returns: string }
       get_ytd_revenue_by_listing: {
         Args: { end_date: string; target_year: number }
