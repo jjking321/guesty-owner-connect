@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle, TrendingUp } from "lucide-react";
 import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +91,7 @@ export default function Settings() {
       // Only select safe fields - exclude client_id and client_secret for security
       const { data, error } = await supabase
         .from("guesty_accounts")
-        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled")
+        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled, airbnb_scrape_enabled, forecast_generation_enabled")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -418,6 +418,58 @@ export default function Settings() {
     }
   };
 
+  const handleToggleAirbnbScrape = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ airbnb_scrape_enabled: enabled })
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Airbnb scraping enabled" : "Airbnb scraping disabled",
+        description: enabled 
+          ? "Airbnb ratings will be scraped during nightly sync."
+          : "Airbnb ratings scraping will be skipped during nightly sync.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleForecastGeneration = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ forecast_generation_enabled: enabled })
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Forecast generation enabled" : "Forecast generation disabled",
+        description: enabled 
+          ? "Revenue forecasts will be regenerated during nightly sync."
+          : "Forecast regeneration will be skipped during nightly sync.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleScrapeAirbnbRatings = async () => {
     setScrapingAirbnbRatings(true);
     try {
@@ -600,24 +652,53 @@ export default function Settings() {
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2">
-                              <Switch
-                                id={`automation-${account.id}`}
-                                checked={account.automated_sync_enabled !== false}
-                                onCheckedChange={(checked) => handleToggleAutomation(account.id, checked)}
-                              />
-                              <Label htmlFor={`automation-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
-                                <div className="flex items-center gap-1">
-                                  <Zap className="h-3 w-3" />
-                                  Auto
-                                </div>
-                              </Label>
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  id={`automation-${account.id}`}
+                                  checked={account.automated_sync_enabled !== false}
+                                  onCheckedChange={(checked) => handleToggleAutomation(account.id, checked)}
+                                />
+                                <Label htmlFor={`automation-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                                  <div className="flex items-center gap-1">
+                                    <Zap className="h-3 w-3" />
+                                    Auto Sync
+                                  </div>
+                                </Label>
+                              </div>
+                              {account.automated_sync_enabled !== false && (
+                                <Badge variant="secondary" className="text-xs">
+                                  3 AM UTC
+                                </Badge>
+                              )}
                             </div>
                             {account.automated_sync_enabled !== false && (
-                              <Badge variant="secondary" className="text-xs">
-                                3 AM UTC
-                              </Badge>
+                              <div className="flex items-center gap-4 pl-1">
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    id={`airbnb-scrape-${account.id}`}
+                                    checked={account.airbnb_scrape_enabled !== false}
+                                    onCheckedChange={(checked) => handleToggleAirbnbScrape(account.id, checked)}
+                                  />
+                                  <Label htmlFor={`airbnb-scrape-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                                    Airbnb Ratings
+                                  </Label>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    id={`forecast-${account.id}`}
+                                    checked={account.forecast_generation_enabled !== false}
+                                    onCheckedChange={(checked) => handleToggleForecastGeneration(account.id, checked)}
+                                  />
+                                  <Label htmlFor={`forecast-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
+                                    <div className="flex items-center gap-1">
+                                      <TrendingUp className="h-3 w-3" />
+                                      Forecasts
+                                    </div>
+                                  </Label>
+                                </div>
+                              </div>
                             )}
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
