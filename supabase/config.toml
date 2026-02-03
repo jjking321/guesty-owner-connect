@@ -101,3 +101,6 @@ verify_jwt = true
 
 [functions.scrape-airbnb-rating]
 verify_jwt = true
+
+[functions.bulk-scrape-airbnb-ratings]
+verify_jwt = true

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle } from "lucide-react";
+import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
@@ -33,13 +34,34 @@ export default function Settings() {
   const [syncingOwners, setSyncingOwners] = useState<string | null>(null);
   const [syncingReviews, setSyncingReviews] = useState<string | null>(null);
   const [syncingCalendar, setSyncingCalendar] = useState<string | null>(null);
+  const [scrapingAirbnbRatings, setScrapingAirbnbRatings] = useState(false);
+  const [lastAirbnbScrape, setLastAirbnbScrape] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [incompleteSyncJobs, setIncompleteSyncJobs] = useState<Record<string, any>>({});
   const [autoSyncFailures, setAutoSyncFailures] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     loadAccounts();
+    loadLastAirbnbScrape();
   }, []);
+
+  const loadLastAirbnbScrape = async () => {
+    try {
+      const { data } = await supabase
+        .from("listings")
+        .select("live_rating_scraped_at")
+        .not("live_rating_scraped_at", "is", null)
+        .order("live_rating_scraped_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data?.live_rating_scraped_at) {
+        setLastAirbnbScrape(data.live_rating_scraped_at);
+      }
+    } catch (error) {
+      console.error("Error loading last Airbnb scrape:", error);
+    }
+  };
 
   const loadAccounts = async () => {
     try {
@@ -351,6 +373,34 @@ export default function Settings() {
       });
     }
   };
+
+  const handleScrapeAirbnbRatings = async () => {
+    setScrapingAirbnbRatings(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("bulk-scrape-airbnb-ratings", {});
+
+      if (error) throw error;
+
+      toast({
+        title: "Airbnb ratings scrape started",
+        description: "Watch the progress below. This will continue automatically.",
+      });
+
+      // Refresh last scrape time after a delay
+      setTimeout(() => loadLastAirbnbScrape(), 5000);
+    } catch (error: any) {
+      toast({
+        title: "Scrape failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setScrapingAirbnbRatings(false);
+    }
+  };
+
+  // Get first account ID for Airbnb ratings sync job tracking
+  const firstAccountId = guestyAccounts.length > 0 ? guestyAccounts[0].id : null;
 
   return (
     <DashboardLayout>
@@ -675,6 +725,62 @@ export default function Settings() {
             )}
           </CardContent>
         </Card>
+
+        {/* Airbnb Ratings */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <AirbnbIcon className="h-5 w-5 text-[#FF5A5F]" />
+                Airbnb Ratings
+              </CardTitle>
+              <CardDescription>
+                Scrape live ratings directly from Airbnb for all your listings
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">
+                  {lastAirbnbScrape ? (
+                    <span>Last scraped: {new Date(lastAirbnbScrape).toLocaleString()}</span>
+                  ) : (
+                    <span>Never scraped</span>
+                  )}
+                </div>
+                <Button
+                  onClick={handleScrapeAirbnbRatings}
+                  disabled={scrapingAirbnbRatings}
+                  variant="outline"
+                >
+                  {scrapingAirbnbRatings ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    <>
+                      <AirbnbIcon className="mr-2 h-4 w-4" />
+                      Scrape Airbnb Ratings
+                    </>
+                  )}
+                </Button>
+              </div>
+              
+              {/* Progress card */}
+              <SyncProgressCard 
+                accountId={firstAccountId} 
+                syncType="airbnb_ratings"
+                onComplete={() => loadLastAirbnbScrape()}
+              />
+              
+              <p className="text-xs text-muted-foreground">
+                This will scrape live Airbnb ratings for all listings with an Airbnb ID. 
+                Listings scraped within the last 24 hours will be skipped. 
+                The process runs automatically and may take several minutes for large portfolios.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Instructions */}
         <Card>
