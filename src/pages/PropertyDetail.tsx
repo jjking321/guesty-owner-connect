@@ -26,6 +26,7 @@ import { ComparablesModule } from "@/components/ComparablesModule";
 import { ListingCalendar } from "@/components/ListingCalendar";
 import { CallPrepDialog } from "@/components/CallPrepDialog";
 import { RevenueActionsDialog } from "@/components/RevenueActionsDialog";
+import { LiveAirbnbRating } from "@/components/LiveAirbnbRating";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -1223,8 +1224,23 @@ function ReviewsSection({ listingId }: { listingId: string }) {
     );
   }
 
+  // Calculate average rating from synced reviews (excluding removed)
+  const activeReviews = reviews.filter((r) => !r.is_removed && r.rating !== null);
+  const calculatedRating =
+    activeReviews.length > 0
+      ? activeReviews.reduce((sum, r) => sum + (r.rating ?? 0), 0) / activeReviews.length
+      : undefined;
+  const calculatedCount = activeReviews.length;
+
   return (
     <div className="space-y-6">
+      {/* Live Airbnb Rating Card */}
+      <LiveAirbnbRating
+        listingId={listingId}
+        calculatedRating={calculatedRating}
+        calculatedCount={calculatedCount}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>Reviews</CardTitle>
