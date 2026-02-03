@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle, TrendingUp } from "lucide-react";
+import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle, TrendingUp, RefreshCw } from "lucide-react";
 import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -673,33 +674,6 @@ export default function Settings() {
                                 </Badge>
                               )}
                             </div>
-                            {account.automated_sync_enabled !== false && (
-                              <div className="flex items-center gap-4 pl-1">
-                                <div className="flex items-center gap-2">
-                                  <Switch
-                                    id={`airbnb-scrape-${account.id}`}
-                                    checked={account.airbnb_scrape_enabled !== false}
-                                    onCheckedChange={(checked) => handleToggleAirbnbScrape(account.id, checked)}
-                                  />
-                                  <Label htmlFor={`airbnb-scrape-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
-                                    Airbnb Ratings
-                                  </Label>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Switch
-                                    id={`forecast-${account.id}`}
-                                    checked={account.forecast_generation_enabled !== false}
-                                    onCheckedChange={(checked) => handleToggleForecastGeneration(account.id, checked)}
-                                  />
-                                  <Label htmlFor={`forecast-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
-                                    <div className="flex items-center gap-1">
-                                      <TrendingUp className="h-3 w-3" />
-                                      Forecasts
-                                    </div>
-                                  </Label>
-                                </div>
-                              </div>
-                            )}
                             <AlertDialog>
                               <AlertDialogTrigger asChild>
                                 <Button variant="destructive" size="icon">
@@ -868,13 +842,27 @@ export default function Settings() {
         {firstAccountId && (
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <AirbnbIcon className="h-5 w-5 text-[#FF5A5F]" />
-                Airbnb Ratings
-              </CardTitle>
-              <CardDescription>
-                Scrape live ratings directly from Airbnb for all your listings
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <AirbnbIcon className="h-5 w-5 text-[#FF5A5F]" />
+                    Airbnb Ratings
+                  </CardTitle>
+                  <CardDescription>
+                    Scrape live ratings directly from Airbnb for all your listings
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="airbnb-auto-sync"
+                    checked={guestyAccounts[0]?.airbnb_scrape_enabled !== false}
+                    onCheckedChange={(checked) => handleToggleAirbnbScrape(guestyAccounts[0].id, checked)}
+                  />
+                  <Label htmlFor="airbnb-auto-sync" className="text-sm cursor-pointer">
+                    Include in nightly sync
+                  </Label>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
@@ -923,6 +911,59 @@ export default function Settings() {
           </Card>
         )}
 
+        {/* Revenue Forecasts */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    Revenue Forecasts
+                  </CardTitle>
+                  <CardDescription>
+                    Automatically predict future revenue using the RevPAR velocity model
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="forecast-auto-sync"
+                    checked={guestyAccounts[0]?.forecast_generation_enabled !== false}
+                    onCheckedChange={(checked) => handleToggleForecastGeneration(guestyAccounts[0].id, checked)}
+                  />
+                  <Label htmlFor="forecast-auto-sync" className="text-sm cursor-pointer">
+                    Include in nightly sync
+                  </Label>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-sm text-muted-foreground space-y-2">
+                <p>
+                  Forecasts compare your current booking pace against last year's performance 
+                  to predict monthly revenue with P10-P50-P90 confidence ranges.
+                </p>
+                <ul className="list-disc list-inside space-y-1 ml-2">
+                  <li><strong>Baseline:</strong> Last year's actual monthly revenue</li>
+                  <li><strong>Velocity:</strong> Current bookings vs. same day last year</li>
+                  <li><strong>Projection:</strong> Baseline × Velocity (0.5× to 2.0× range)</li>
+                </ul>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <Button variant="outline" asChild>
+                  <Link to="/forecast-admin">
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Forecast Admin
+                  </Link>
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Run manual forecasts or first-time data preparation
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <TeamManagement />
 
