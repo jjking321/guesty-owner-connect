@@ -1,44 +1,40 @@
 
 
-# Filter Actionables to Active Properties Only
+# Fix Goals Query Hitting 1000-Row Limit
 
-## Overview
+## Problem
 
-Add a filter to exclude inactive listings from the actionables generation. Currently, 271 inactive properties are being processed along with 536 active ones.
+The property "637 S Orlando #4" correctly has goals in the database for Feb, Mar, Apr 2026, but the actionables function is flagging it as "missing goals".
 
----
+**Root Cause**: The goals query returns 4,422 records, but Supabase's default limit is 1,000 rows. Only ~90 listings' goals are being loaded (1000 rows / ~11 months avg = ~90 listings), leaving ~400+ listings without their goals in the lookup map.
 
-## Current State
+## Current Code (Line 215-220)
 
-**Line 156** in `generate-actionables/index.ts`:
 ```typescript
-.eq('archived', false)
-.eq('guesty_accounts.actionables_generation_enabled', true);
+// Property goals - fetch ALL goal records for current year
+supabase
+  .from('property_goals')
+  .select('listing_id, year, month, goal_revenue')
+  .eq('year', currentYear)
+  .gte('month', currentMonth),
 ```
 
-This filters out archived listings but includes inactive listings (271 of them).
-
----
+This returns max 1,000 rows due to Supabase default limit.
 
 ## Fix
 
-Add `.eq('active', true)` to the listings query:
+Add explicit limit to fetch all records (goal records are bounded by listings × months, so setting a high limit is safe):
 
 ```typescript
-.eq('archived', false)
-.eq('active', true)
-.eq('guesty_accounts.actionables_generation_enabled', true);
+// Property goals - fetch ALL goal records for current year
+// Explicitly set high limit since default is 1000 and we may have 4000+ records
+supabase
+  .from('property_goals')
+  .select('listing_id, year, month, goal_revenue')
+  .eq('year', currentYear)
+  .gte('month', currentMonth)
+  .limit(10000),
 ```
-
----
-
-## Impact
-
-| Metric | Before | After |
-|--------|--------|-------|
-| Listings processed | ~807 | ~536 |
-| Inactive listings | 271 included | 0 (excluded) |
-| Processing time | Higher | ~33% faster |
 
 ---
 
@@ -46,5 +42,15 @@ Add `.eq('active', true)` to the listings query:
 
 | File | Change |
 |------|--------|
-| `supabase/functions/generate-actionables/index.ts` | Add `.eq('active', true)` filter on line 157 |
+| `supabase/functions/generate-actionables/index.ts` | Add `.limit(10000)` to goals query on line 220 |
+
+---
+
+## Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Goals loaded | ~1,000 rows (~90 listings) | ~4,422 rows (all listings) |
+| False "missing goals" | ~400+ properties | Only properties truly missing goals |
+| Properties flagged | 429 | Expected ~30-40 |
 
