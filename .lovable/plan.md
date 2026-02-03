@@ -1,82 +1,49 @@
 
 
-# Fix Query Limits and Pricing Comparison Data Source
+# Enable pg_net Extension for Cron Jobs
 
-## Problems Found
+## Problem
 
-| Issue | Root Cause | Impact |
-|-------|------------|--------|
-| Missing goals still showing | Query hits 1000-row limit, only ~90 listings loaded | 429 false positives |
-| No pricing actionables | Code uses `monthly_averages` (ends 2025-12) instead of `future_monthly_averages` (has 2026 data) | 0 pricing issues detected |
-| Calendar data missing | 44,715 rows but default 1000 limit = only 15 listings get data | Unbookable gaps and pricing comparison broken for 682 listings |
-
----
-
-## Fixes
-
-### 1. Add Limit to Calendar Query (Line 199)
-
-```typescript
-// Calendar data for unbookable gaps AND pricing comparison
-supabase
-  .from('capacity_calendar')
-  .select('listing_id, date, min_nights, is_available, price')
-  .eq('is_available', true)
-  .gte('date', today)
-  .lte('date', ninetyDaysLater)
-  .order('listing_id')
-  .order('date')
-  .limit(50000),  // Add limit to get all 44,715 rows
+The nightly sync cron jobs have been failing with:
+```
+ERROR: schema "net" does not exist
 ```
 
-### 2. Switch Pricing Comparison to Use future_monthly_averages
+The `pg_net` extension was never enabled when the cron jobs were originally created. This extension is required for `pg_cron` to make HTTP POST requests to trigger edge functions.
 
-The `monthly_averages` field has historical data ending at 2025-12, but calendar data is for 2026. Must use `future_monthly_averages` which has 2026 data.
+---
 
-**Update compset lookup (Line 302-311):**
-```typescript
-// Compset lookup - use future_monthly_averages which has 2026+ ADR data for pricing comparison
-const compsetByListing = new Map<string, Array<{ month: string; adr: number; occupancy: number }>>();
-if (compsetResult.data) {
-  for (const row of compsetResult.data) {
-    // Use future_monthly_averages for 2026+ pricing comparison
-    const futureData = row.future_monthly_averages as Array<{ month: string; adr: number; occupancy: number }> || [];
-    if (Array.isArray(futureData) && futureData.length > 0) {
-      compsetByListing.set(row.listing_id, futureData);
-    }
-  }
-}
+## Fix
+
+Run a database migration to enable the `pg_net` extension:
+
+```sql
+-- Enable pg_net extension for HTTP requests from cron jobs
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 ```
 
-### 3. Verify Goals Query Has Correct Limit
+---
 
-Confirmed already has `.limit(10000)` - this is correct.
+## Why This Happened
+
+When cron jobs were set up, only `pg_cron` was enabled. The jobs use `net.http_post()` to call edge functions, but this function comes from `pg_net` which was never added.
 
 ---
 
-## Data Validation
+## After Fix
 
-| Query | Current Rows | With Fix |
-|-------|--------------|----------|
-| Calendar (90 days) | 1,000 (15 listings) | 50,000 (all 697 listings) |
-| Goals (2026, month >= 2) | 10,000 limit | Correct, 402 listings have goals |
-| Compset future data | 32 listings have data | Use `future_monthly_averages` column |
+| Cron Job | Schedule | Status |
+|----------|----------|--------|
+| `nightly-sync` | 3:00 AM UTC | Will work |
+| `generate-all-forecasts` | 2:00 AM UTC | Will work |
 
----
-
-## Files to Modify
-
-| File | Changes |
-|------|---------|
-| `supabase/functions/generate-actionables/index.ts` | Add `.limit(50000)` to calendar query, change compset lookup to use `future_monthly_averages` |
+The next scheduled run at 3:00 AM UTC should execute successfully.
 
 ---
 
-## Expected Outcome
+## Verification
 
-**After fix:**
-- Calendar data loaded for all 697 active listings (not just 15)
-- Unbookable gap detection works for all properties
-- Pricing comparison uses 2026 compset ADR data (32 properties have data)
-- Missing goals only shows properties truly without goal records
+After enabling, you can manually trigger the nightly sync to confirm everything works:
+- Call the `nightly-sync` edge function directly
+- Or wait for the 3 AM UTC scheduled run
 
