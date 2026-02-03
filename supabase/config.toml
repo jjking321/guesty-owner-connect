@@ -98,3 +98,6 @@ verify_jwt = false
 
 [functions.sync-new-reviews]
 verify_jwt = true
+
+[functions.scrape-airbnb-rating]
+verify_jwt = true

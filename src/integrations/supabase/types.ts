@@ -633,6 +633,10 @@ export type Database = {
           imported_at: string
           is_composite: boolean | null
           is_listed: boolean | null
+          live_airbnb_rating: number | null
+          live_airbnb_review_count: number | null
+          live_rating_scrape_error: string | null
+          live_rating_scraped_at: string | null
           nickname: string | null
           owner_id: string | null
           pictures: Json | null
@@ -654,6 +658,10 @@ export type Database = {
           imported_at?: string
           is_composite?: boolean | null
           is_listed?: boolean | null
+          live_airbnb_rating?: number | null
+          live_airbnb_review_count?: number | null
+          live_rating_scrape_error?: string | null
+          live_rating_scraped_at?: string | null
           nickname?: string | null
           owner_id?: string | null
           pictures?: Json | null
@@ -675,6 +683,10 @@ export type Database = {
           imported_at?: string
           is_composite?: boolean | null
           is_listed?: boolean | null
+          live_airbnb_rating?: number | null
+          live_airbnb_review_count?: number | null
+          live_rating_scrape_error?: string | null
+          live_rating_scraped_at?: string | null
           nickname?: string | null
           owner_id?: string | null
           pictures?: Json | null
