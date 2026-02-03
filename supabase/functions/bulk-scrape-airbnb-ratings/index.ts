@@ -281,6 +281,7 @@ Deno.serve(async (req) => {
       .in("guesty_account_id", guestyAccounts.map(a => a.id))
       .not("airbnb_listing_id", "is", null)
       .eq("archived", false)
+      .eq("is_listed", true)
       .order("id");
 
     if (listingsError) {
