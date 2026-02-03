@@ -922,7 +922,7 @@ export default function Settings() {
                     Revenue Forecasts
                   </CardTitle>
                   <CardDescription>
-                    Automatically predict future revenue using the RevPAR velocity model
+                    AI-powered year-end revenue projection with probability &amp; compset data
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
@@ -940,13 +940,14 @@ export default function Settings() {
             <CardContent className="space-y-4">
               <div className="text-sm text-muted-foreground space-y-2">
                 <p>
-                  Forecasts compare your current booking pace against last year's performance 
+                  Forecasts combine your booking pace, probability analysis, and compset market data 
                   to predict monthly revenue with P10-P50-P90 confidence ranges.
                 </p>
                 <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li><strong>Baseline:</strong> Last year's actual monthly revenue</li>
-                  <li><strong>Velocity:</strong> Current bookings vs. same day last year</li>
-                  <li><strong>Projection:</strong> Baseline × Velocity (0.5× to 2.0× range)</li>
+                  <li><strong>Pace:</strong> Current bookings vs. same day last year</li>
+                  <li><strong>Probability:</strong> Lead time decay &amp; gap quality for open nights</li>
+                  <li><strong>Market Demand:</strong> Compset occupancy signals (High/Med/Low)</li>
+                  <li><strong>Capacity Ceiling:</strong> On Books + Available × Asking Rate</li>
                 </ul>
               </div>
               
