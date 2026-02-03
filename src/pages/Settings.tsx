@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, Loader2, Key, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle, TrendingUp, RefreshCw, BarChart3 } from "lucide-react";
+import { Plus, Trash2, Loader2, Home, Calendar, Users, Star, CalendarDays, Clock, Zap, AlertTriangle, TrendingUp, RefreshCw, BarChart3 } from "lucide-react";
 import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
+import { GuestyIcon } from "@/components/icons/GuestyIcon";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
@@ -539,7 +540,7 @@ export default function Settings() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <Key className="h-5 w-5 text-primary" />
+                  <GuestyIcon className="h-5 w-5" />
                   Guesty Accounts
                 </CardTitle>
                 <CardDescription>Connect and manage your Guesty API accounts</CardDescription>
@@ -606,7 +607,7 @@ export default function Settings() {
               </div>
             ) : guestyAccounts.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <Key className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                <GuestyIcon className="mx-auto h-12 w-12 mb-4 opacity-50" />
                 <p>No Guesty accounts connected yet.</p>
                 <p className="text-sm">Add your first account to get started.</p>
               </div>
