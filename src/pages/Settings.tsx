@@ -538,7 +538,10 @@ export default function Settings() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Guesty Accounts</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Key className="h-5 w-5 text-primary" />
+                  Guesty Accounts
+                </CardTitle>
                 <CardDescription>Connect and manage your Guesty API accounts</CardDescription>
               </div>
               <Button onClick={() => setShowAddForm(!showAddForm)}>
@@ -550,52 +553,50 @@ export default function Settings() {
           <CardContent className="space-y-4">
             {/* Add Account Form */}
             {showAddForm && (
-              <Card className="border-2 border-primary">
-                <CardHeader>
-                  <CardTitle className="text-lg">Add New Guesty Account</CardTitle>
-                  <CardDescription>
+              <div className="bg-muted/50 rounded-lg p-4 space-y-4">
+                <div>
+                  <h4 className="font-medium">Add New Guesty Account</h4>
+                  <p className="text-sm text-muted-foreground">
                     Enter your Guesty API credentials. You can find your API token in Guesty under Settings → API.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form onSubmit={handleAddAccount} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="account_name">Account Name</Label>
-                      <Input
-                        id="account_name"
-                        name="account_name"
-                        placeholder="My Guesty Account"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="client_id">Client ID</Label>
-                      <Input
-                        id="client_id"
-                        name="client_id"
-                        placeholder="Your Guesty Client ID"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="client_secret">Client Secret</Label>
-                      <Input
-                        id="client_secret"
-                        name="client_secret"
-                        type="password"
-                        placeholder="Your Guesty Client Secret"
-                        required
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button type="submit">Save Account</Button>
-                      <Button type="button" variant="outline" onClick={() => setShowAddForm(false)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </form>
-                </CardContent>
-              </Card>
+                  </p>
+                </div>
+                <form onSubmit={handleAddAccount} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="account_name">Account Name</Label>
+                    <Input
+                      id="account_name"
+                      name="account_name"
+                      placeholder="My Guesty Account"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="client_id">Client ID</Label>
+                    <Input
+                      id="client_id"
+                      name="client_id"
+                      placeholder="Your Guesty Client ID"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="client_secret">Client Secret</Label>
+                    <Input
+                      id="client_secret"
+                      name="client_secret"
+                      type="password"
+                      placeholder="Your Guesty Client Secret"
+                      required
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="submit">Save Account</Button>
+                    <Button type="button" variant="outline" onClick={() => setShowAddForm(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </form>
+              </div>
             )}
 
             {/* Existing Accounts */}
@@ -610,247 +611,230 @@ export default function Settings() {
                 <p className="text-sm">Add your first account to get started.</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="divide-y">
                 {guestyAccounts.map((account) => (
-                  <div key={account.id} className="space-y-3">
-                    <Card>
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="space-y-1">
-                            <p className="font-medium">{account.account_name}</p>
-                            <div className="text-xs text-muted-foreground space-y-0.5">
-                              {account.last_listings_sync && (
-                                <div className="flex items-center gap-1">
-                                  <Home className="h-3 w-3" />
-                                  <span>
-                                    Listings: {new Date(account.last_listings_sync).toLocaleString()}
-                                    {lastSyncCounts[`${account.id}-listings`] ? ` (${lastSyncCounts[`${account.id}-listings`]} items)` : ''}
-                                  </span>
-                                </div>
-                              )}
-                              {account.last_reservations_sync && (
-                                <div className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  <span>
-                                    Reservations: {new Date(account.last_reservations_sync).toLocaleString()}
-                                    {(lastSyncCounts[`${account.id}-reservations`] || lastSyncCounts[`${account.id}-new_reservations`]) ? 
-                                      ` (${lastSyncCounts[`${account.id}-reservations`] || lastSyncCounts[`${account.id}-new_reservations`]} items)` : ''}
-                                  </span>
-                                </div>
-                              )}
-                              {account.last_owners_sync && (
-                                <div className="flex items-center gap-1">
-                                  <Users className="h-3 w-3" />
-                                  <span>Owners: {new Date(account.last_owners_sync).toLocaleString()}</span>
-                                </div>
-                              )}
-                              {account.last_reviews_sync && (
-                                <div className="flex items-center gap-1">
-                                  <Star className="h-3 w-3" />
-                                  <span>
-                                    Reviews: {new Date(account.last_reviews_sync).toLocaleString()}
-                                    {lastSyncCounts[`${account.id}-reviews`] ? ` (${lastSyncCounts[`${account.id}-reviews`]} items)` : ''}
-                                  </span>
-                                </div>
-                              )}
-                              {account.last_calendar_sync && (
-                                <div className="flex items-center gap-1">
-                                  <CalendarDays className="h-3 w-3" />
-                                  <span>
-                                    Calendars: {new Date(account.last_calendar_sync).toLocaleString()}
-                                    {lastSyncCounts[`${account.id}-capacity_calendar`] ? ` (${lastSyncCounts[`${account.id}-capacity_calendar`]} listings)` : ''}
-                                  </span>
-                                </div>
-                              )}
-                              {account.last_automated_sync && (
-                                <div className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  <span>Last Auto Sync: {new Date(account.last_automated_sync).toLocaleString()}</span>
-                                  {autoSyncFailures[account.id]?.length > 0 && (
-                                    <Badge variant="destructive" className="ml-1 text-xs py-0 px-1.5 gap-1">
-                                      <AlertTriangle className="h-3 w-3" />
-                                      {autoSyncFailures[account.id].length} sync{autoSyncFailures[account.id].length > 1 ? 's' : ''} failed
-                                    </Badge>
-                                  )}
-                                </div>
-                              )}
-                              {!account.last_listings_sync && !account.last_reservations_sync && !account.last_owners_sync && !account.last_reviews_sync && !account.last_calendar_sync && (
-                                <span>Never synced</span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex flex-col gap-2">
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-2">
-                                <Switch
-                                  id={`automation-${account.id}`}
-                                  checked={account.automated_sync_enabled !== false}
-                                  onCheckedChange={(checked) => handleToggleAutomation(account.id, checked)}
-                                />
-                                <Label htmlFor={`automation-${account.id}`} className="text-xs text-muted-foreground cursor-pointer">
-                                  <div className="flex items-center gap-1">
-                                    <Zap className="h-3 w-3" />
-                                    Auto Sync
-                                  </div>
-                                </Label>
-                              </div>
-                              {account.automated_sync_enabled !== false && (
-                                <Badge variant="secondary" className="text-xs">
-                                  3 AM UTC
+                  <div key={account.id} className="py-4 first:pt-0 last:pb-0 space-y-3">
+                    {/* Account header row */}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-1.5 min-w-0 flex-1">
+                        <p className="font-semibold">{account.account_name}</p>
+                        {/* Compact sync info - horizontal layout */}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          {account.last_listings_sync && (
+                            <span className="flex items-center gap-1">
+                              <Home className="h-3 w-3" />
+                              {new Date(account.last_listings_sync).toLocaleDateString()}
+                              {lastSyncCounts[`${account.id}-listings`] && ` (${lastSyncCounts[`${account.id}-listings`]})`}
+                            </span>
+                          )}
+                          {account.last_reservations_sync && (
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {new Date(account.last_reservations_sync).toLocaleDateString()}
+                              {(lastSyncCounts[`${account.id}-reservations`] || lastSyncCounts[`${account.id}-new_reservations`]) && 
+                                ` (${lastSyncCounts[`${account.id}-reservations`] || lastSyncCounts[`${account.id}-new_reservations`]})`}
+                            </span>
+                          )}
+                          {account.last_owners_sync && (
+                            <span className="flex items-center gap-1">
+                              <Users className="h-3 w-3" />
+                              {new Date(account.last_owners_sync).toLocaleDateString()}
+                            </span>
+                          )}
+                          {account.last_reviews_sync && (
+                            <span className="flex items-center gap-1">
+                              <Star className="h-3 w-3" />
+                              {new Date(account.last_reviews_sync).toLocaleDateString()}
+                              {lastSyncCounts[`${account.id}-reviews`] && ` (${lastSyncCounts[`${account.id}-reviews`]})`}
+                            </span>
+                          )}
+                          {account.last_calendar_sync && (
+                            <span className="flex items-center gap-1">
+                              <CalendarDays className="h-3 w-3" />
+                              {new Date(account.last_calendar_sync).toLocaleDateString()}
+                              {lastSyncCounts[`${account.id}-capacity_calendar`] && ` (${lastSyncCounts[`${account.id}-capacity_calendar`]})`}
+                            </span>
+                          )}
+                          {account.last_automated_sync && (
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              Auto: {new Date(account.last_automated_sync).toLocaleDateString()}
+                              {autoSyncFailures[account.id]?.length > 0 && (
+                                <Badge variant="destructive" className="ml-1 text-xs py-0 px-1.5 gap-1">
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {autoSyncFailures[account.id].length} failed
                                 </Badge>
                               )}
-                            </div>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="destructive" size="icon">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Delete Account</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    This will permanently delete this Guesty account connection and all associated
-                                    listings and reservations. This action cannot be undone.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDeleteAccount(account.id)}>
-                                    Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
+                            </span>
+                          )}
+                          {!account.last_listings_sync && !account.last_reservations_sync && !account.last_owners_sync && !account.last_reviews_sync && !account.last_calendar_sync && (
+                            <span>Never synced</span>
+                          )}
                         </div>
-                        
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={() => handleSyncListings(account.id)}
-                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
-                            variant="outline"
-                            className="flex-1"
-                            size="sm"
-                          >
-                            {syncingListings === account.id ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (
-                              <>
-                                <Home className="mr-2 h-4 w-4" />
-                                Sync Listings
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            onClick={() => handleSyncReservations(account.id)}
-                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
-                            variant="outline"
-                            className="flex-1"
-                            size="sm"
-                          >
-                            {syncingReservations === account.id ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (() => {
-                              const incompleteKey = `${account.id}-reservations`;
-                              const incompleteJob = incompleteSyncJobs[incompleteKey];
-                              return incompleteJob ? (
-                                <>
-                                  <Calendar className="mr-2 h-4 w-4" />
-                                  Resume ({incompleteJob.items_synced || 0} synced)
-                                </>
-                              ) : (
-                                <>
-                                  <Calendar className="mr-2 h-4 w-4" />
-                                  Sync Reservations
-                                </>
-                              );
-                            })()}
-                          </Button>
-                          <Button
-                            onClick={() => handleSyncOwners(account.id)}
-                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
-                            variant="outline"
-                            className="flex-1"
-                            size="sm"
-                          >
-                            {syncingOwners === account.id ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (
-                              <>
-                                <Users className="mr-2 h-4 w-4" />
-                                Sync Owners
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            onClick={() => handleSyncReviews(account.id)}
-                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
-                            variant="outline"
-                            className="flex-1"
-                            size="sm"
-                          >
-                            {syncingReviews === account.id ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (() => {
-                              const incompleteKey = `${account.id}-reviews`;
-                              const incompleteJob = incompleteSyncJobs[incompleteKey];
-                              return incompleteJob ? (
-                                <>
-                                  <Star className="mr-2 h-4 w-4" />
-                                  Resume ({incompleteJob.items_synced || 0} synced)
-                                </>
-                              ) : (
-                                <>
-                                  <Star className="mr-2 h-4 w-4" />
-                                  Sync Reviews
-                                </>
-                              );
-                            })()}
-                          </Button>
-                          <Button
-                            onClick={() => handleSyncCalendar(account.id)}
-                            disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
-                            variant="outline"
-                            className="flex-1"
-                            size="sm"
-                          >
-                            {syncingCalendar === account.id ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Syncing...
-                              </>
-                            ) : (() => {
-                              const incompleteKey = `${account.id}-capacity_calendar`;
-                              const incompleteJob = incompleteSyncJobs[incompleteKey];
-                              return incompleteJob ? (
-                                <>
-                                  <CalendarDays className="mr-2 h-4 w-4" />
-                                  Resume ({incompleteJob.items_synced || 0} synced)
-                                </>
-                              ) : (
-                                <>
-                                  <CalendarDays className="mr-2 h-4 w-4" />
-                                  Sync Calendars
-                                </>
-                              );
-                            })()}
-                          </Button>
+                      </div>
+                      
+                      {/* Actions: Auto sync toggle + delete */}
+                      <div className="flex items-center gap-3 shrink-0">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id={`automation-${account.id}`}
+                            checked={account.automated_sync_enabled !== false}
+                            onCheckedChange={(checked) => handleToggleAutomation(account.id, checked)}
+                          />
+                          <Label htmlFor={`automation-${account.id}`} className="text-sm cursor-pointer whitespace-nowrap">
+                            Auto Sync
+                          </Label>
+                          {account.automated_sync_enabled !== false && (
+                            <Badge variant="secondary" className="text-xs">
+                              3 AM UTC
+                            </Badge>
+                          )}
                         </div>
-                      </CardContent>
-                    </Card>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete Account</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently delete this Guesty account connection and all associated
+                                listings and reservations. This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDeleteAccount(account.id)}>
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                    
+                    {/* Sync buttons row */}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        onClick={() => handleSyncListings(account.id)}
+                        disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
+                        variant="outline"
+                        size="sm"
+                      >
+                        {syncingListings === account.id ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <Home className="mr-2 h-4 w-4" />
+                            Listings
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        onClick={() => handleSyncReservations(account.id)}
+                        disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
+                        variant="outline"
+                        size="sm"
+                      >
+                        {syncingReservations === account.id ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (() => {
+                          const incompleteKey = `${account.id}-reservations`;
+                          const incompleteJob = incompleteSyncJobs[incompleteKey];
+                          return incompleteJob ? (
+                            <>
+                              <Calendar className="mr-2 h-4 w-4" />
+                              Resume ({incompleteJob.items_synced || 0})
+                            </>
+                          ) : (
+                            <>
+                              <Calendar className="mr-2 h-4 w-4" />
+                              Reservations
+                            </>
+                          );
+                        })()}
+                      </Button>
+                      <Button
+                        onClick={() => handleSyncOwners(account.id)}
+                        disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
+                        variant="outline"
+                        size="sm"
+                      >
+                        {syncingOwners === account.id ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <Users className="mr-2 h-4 w-4" />
+                            Owners
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        onClick={() => handleSyncReviews(account.id)}
+                        disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
+                        variant="outline"
+                        size="sm"
+                      >
+                        {syncingReviews === account.id ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (() => {
+                          const incompleteKey = `${account.id}-reviews`;
+                          const incompleteJob = incompleteSyncJobs[incompleteKey];
+                          return incompleteJob ? (
+                            <>
+                              <Star className="mr-2 h-4 w-4" />
+                              Resume ({incompleteJob.items_synced || 0})
+                            </>
+                          ) : (
+                            <>
+                              <Star className="mr-2 h-4 w-4" />
+                              Reviews
+                            </>
+                          );
+                        })()}
+                      </Button>
+                      <Button
+                        onClick={() => handleSyncCalendar(account.id)}
+                        disabled={syncingListings === account.id || syncingReservations === account.id || syncingOwners === account.id || syncingReviews === account.id || syncingCalendar === account.id}
+                        variant="outline"
+                        size="sm"
+                      >
+                        {syncingCalendar === account.id ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (() => {
+                          const incompleteKey = `${account.id}-capacity_calendar`;
+                          const incompleteJob = incompleteSyncJobs[incompleteKey];
+                          return incompleteJob ? (
+                            <>
+                              <CalendarDays className="mr-2 h-4 w-4" />
+                              Resume ({incompleteJob.items_synced || 0})
+                            </>
+                          ) : (
+                            <>
+                              <CalendarDays className="mr-2 h-4 w-4" />
+                              Calendars
+                            </>
+                          );
+                        })()}
+                      </Button>
+                    </div>
                     
                     {/* Real-time sync progress cards */}
                     <SyncProgressCard accountId={account.id} syncType="listings" />
