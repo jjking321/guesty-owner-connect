@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { ReviewsSummaryAggregated } from "@/components/ReviewsSummaryAggregated";
+import { RatingTrendChart } from "@/components/RatingTrendChart";
 import { DateRangeFilter, DateRange } from "@/components/DateRangeFilter";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -94,6 +95,21 @@ export default function Reviews() {
         platform_stats: row.platform_stats as { source: string; count: number; avg_rating: number }[],
         category_averages: row.category_averages as Record<string, number>,
       };
+    },
+  });
+
+  // Fetch monthly rating trend data
+  const { data: ratingTrendData = [], isLoading: trendLoading } = useQuery({
+    queryKey: ['reviews', 'trend', selectedProperty, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('get_monthly_rating_trend', {
+        p_listing_id: selectedProperty === 'all' ? null : selectedProperty,
+        p_start_date: dateRange.from ? dateRange.from.toISOString().split('T')[0] : null,
+        p_end_date: dateRange.to ? dateRange.to.toISOString().split('T')[0] : null,
+      });
+
+      if (error) throw error;
+      return (data || []) as { month: string; avg_rating: number; review_count: number }[];
     },
   });
 
@@ -342,6 +358,9 @@ export default function Reviews() {
 
         {/* Reviews Summary - uses server-side aggregation */}
         <ReviewsSummaryAggregated stats={summaryStats} />
+
+        {/* Rating Trend Chart */}
+        <RatingTrendChart data={ratingTrendData} isLoading={trendLoading} />
 
         {/* Reviews Table */}
         <Card>

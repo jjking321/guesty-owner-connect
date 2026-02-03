@@ -1608,6 +1608,18 @@ export type Database = {
         Args: { p_end_date: string; p_listing_id: string; p_start_date: string }
         Returns: number
       }
+      get_monthly_rating_trend: {
+        Args: {
+          p_end_date?: string
+          p_listing_id?: string
+          p_start_date?: string
+        }
+        Returns: {
+          avg_rating: number
+          month: string
+          review_count: number
+        }[]
+      }
       get_portfolio_night_metrics: {
         Args: { p_month?: number; p_year: number }
         Returns: {
