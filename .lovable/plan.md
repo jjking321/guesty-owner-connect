@@ -1,134 +1,140 @@
 
-
-# Extend Reviews Sync to 2 Years and Add "Sync New Reviews"
+# Add Date Filter and Fix Rating Display on Reviews Page
 
 ## Overview
 
-This plan implements two changes:
-1. Update the Settings page reviews sync to fetch 2 years of history (matching reservations)
-2. Create a new "sync-new-reviews" function for incremental sync from the Reviews page
+This plan addresses two issues:
+1. The "Overall Rating" stats only show data from the current page (100 reviews) instead of the full filtered dataset
+2. Add a date filter that defaults to the last 30 days
 
 ---
 
 ## Changes Required
 
-### 1. Update sync-reviews to Support 2-Year Lookback
+### 1. Add Date Filter with "Last 30 Days" Default
 
-**File**: `supabase/functions/sync-reviews/index.ts`
+**File**: `src/components/DateRangeFilter.tsx`
 
-Current behavior:
-- `daysSince` defaults to 30 days
-- Maximum capped at 365 days
-
-Changes:
-- Increase the max cap from 365 to 730 days (2 years)
-- When called from Settings page, pass `daysSince: 730`
+Add a new preset for "Last 30 Days" and make it available as a preset type:
 
 ```typescript
-// Line 578: Change validation cap from 365 to 730
-const validDaysSince = Math.max(1, Math.min(730, Number(daysSince) || 30));
-```
+export type DateRangePreset = "ytd" | "last365" | "lastWeek" | "lastMonth" | "last30" | "custom";
 
-### 2. Update Settings Page to Pass 730 Days
-
-**File**: `src/pages/Settings.tsx`
-
-Current call:
-```typescript
-body: { guestyAccountId: accountId }
-```
-
-Updated call:
-```typescript
-body: { guestyAccountId: accountId, daysSince: 730 }
+// Add to presets array:
+{
+  value: "last30",
+  label: "Last 30 Days",
+  getRange: () => ({
+    from: subDays(new Date(), 29),
+    to: new Date(),
+  }),
+},
 ```
 
 ---
 
-### 3. Create sync-new-reviews Edge Function
-
-**New File**: `supabase/functions/sync-new-reviews/index.ts`
-
-This function will:
-1. Find the most recent review date in the database for the account
-2. Query Guesty for reviews created/updated since that date
-3. Upsert only the new reviews
-
-Logic pattern (following sync-new-reservations):
-- Query `reviews` table for latest `imported_at` or `review_date`
-- Use that as the `startDate` for Guesty API query
-- If no existing reviews found, return error requiring initial sync first
-- Sync type: `new_reviews`
-
----
-
-### 4. Add "Sync New Reviews" Button to Reviews Page
+### 2. Add Date Filter State to Reviews Page
 
 **File**: `src/pages/Reviews.tsx`
 
-Add a sync button in the header area that:
-- Calls the `sync-new-reviews` edge function
-- Shows loading state during sync
-- Displays toast notifications for success/failure
-- Gets the guesty_account_id from the listings (or a separate query)
+Add date range state that defaults to last 30 days:
 
-UI additions:
-- "Sync New Reviews" button in the header (similar to how PropertyDetail has sync buttons)
-- Loading spinner during sync
-- Toast feedback
+```typescript
+import { subDays } from "date-fns";
+import { DateRangeFilter, DateRange } from "@/components/DateRangeFilter";
+
+const [dateRange, setDateRange] = useState<DateRange>({
+  from: subDays(new Date(), 29),
+  to: new Date(),
+  preset: "last30",
+});
+```
+
+Update the Filter card to include both property and date filters:
+
+```jsx
+<CardContent className="flex flex-wrap gap-4">
+  <Select ... /> {/* existing property filter */}
+  <DateRangeFilter value={dateRange} onChange={setDateRange} />
+</CardContent>
+```
 
 ---
 
-## Technical Details
+### 3. Apply Date Filter to Database Queries
 
-### sync-new-reviews Function Structure
+**File**: `src/pages/Reviews.tsx`
 
-```text
-sync-new-reviews/index.ts
-|
-+-- GET most recent review imported_at from reviews table
-|
-+-- IF no reviews exist -> return error "Run initial sync first"
-|
-+-- GET Guesty account credentials
-|
-+-- GET OAuth token (using cached token manager)
-|
-+-- FETCH reviews from Guesty with startDate = most recent review date
-|
-+-- FILTER to this account's listings
-|
-+-- LOOKUP guest names from reservations table
-|
-+-- UPSERT new reviews
-|
-+-- UPDATE sync_jobs progress
-```
+Update both the count query and paginated reviews query to filter by `review_date`:
 
-### Reviews Page Changes
-
-Add state and handlers:
 ```typescript
-const [syncingReviews, setSyncingReviews] = useState(false);
-const [guestyAccountId, setGuestyAccountId] = useState<string | null>(null);
+// In count query
+if (dateRange.from && dateRange.to) {
+  query = query
+    .gte('review_date', dateRange.from.toISOString().split('T')[0])
+    .lte('review_date', dateRange.to.toISOString().split('T')[0]);
+}
 
-// Fetch guesty account ID on load
-useEffect(() => {
-  // Get account from listings or guesty_accounts table
-}, []);
-
-const handleSyncNewReviews = async () => {
-  // Call sync-new-reviews function
-  // Handle success/error with toast
-};
+// Same filter for paginated reviews query
 ```
 
-Add button in header:
+Add `dateRange` to the query keys so data refreshes when dates change.
+
+---
+
+### 4. Fetch Full Summary Stats from Database
+
+**File**: `src/pages/Reviews.tsx`
+
+Create a new query to fetch aggregate review statistics for the full filtered dataset (not just current page):
+
+```typescript
+const { data: summaryStats } = useQuery({
+  queryKey: ['reviews', 'summary', selectedProperty, dateRange],
+  queryFn: async () => {
+    // Fetch all reviews matching filters (with limited columns for performance)
+    let query = supabase
+      .from('reviews')
+      .select('rating, source, is_removed, category_ratings')
+      .eq('is_removed', false);
+    
+    // Apply property filter
+    if (selectedProperty !== 'all') {
+      query = query.eq('listing_id', selectedProperty);
+    }
+    
+    // Apply date filter
+    if (dateRange.from && dateRange.to) {
+      query = query
+        .gte('review_date', dateRange.from.toISOString().split('T')[0])
+        .lte('review_date', dateRange.to.toISOString().split('T')[0]);
+    }
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+});
+```
+
+Pass this to `ReviewsSummary` instead of the paginated reviews:
+
 ```jsx
-<Button onClick={handleSyncNewReviews} disabled={syncingReviews || !guestyAccountId}>
-  {syncingReviews ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-  Sync New Reviews
-</Button>
+<ReviewsSummary reviews={summaryStats || []} />
+```
+
+---
+
+### 5. Reset Pagination on Filter Changes
+
+**File**: `src/pages/Reviews.tsx`
+
+Update the existing useEffect to reset page when date range changes:
+
+```typescript
+useEffect(() => {
+  setCurrentPage(1);
+}, [selectedProperty, dateRange.from, dateRange.to]);
 ```
 
 ---
@@ -137,16 +143,16 @@ Add button in header:
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/sync-reviews/index.ts` | Increase daysSince max from 365 to 730 |
-| `src/pages/Settings.tsx` | Pass `daysSince: 730` to sync-reviews call |
-| `supabase/functions/sync-new-reviews/index.ts` | **NEW** - Incremental review sync |
-| `src/pages/Reviews.tsx` | Add "Sync New Reviews" button and handler |
+| `src/components/DateRangeFilter.tsx` | Add "last30" preset for Last 30 Days |
+| `src/pages/Reviews.tsx` | Add date filter state, update queries with date filtering, create separate summary stats query |
 
 ---
 
 ## Expected Outcome
 
 After implementation:
-1. **Settings page**: "Sync Reviews" button fetches 2 years of review history
-2. **Reviews page**: "Sync New Reviews" button fetches only reviews since last sync (fast, incremental)
-3. Same guest name and platform formatting logic in both functions
+1. **Date filter** appears in the Filter card with presets: Year to Date, Last 365 Days, Last 30 Days, Last 7 Days, Last Month, Custom Range
+2. **Default view** shows reviews from the last 30 days
+3. **Rating distribution** shows accurate stats for the entire filtered dataset, not just the current page
+4. **All rating bars (1-5)** are visible even when counts are 0 (they already render but will now show correct totals)
+5. **Pagination** applies to the filtered date range
