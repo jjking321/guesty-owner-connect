@@ -35,10 +35,11 @@ export default function Settings() {
   const [syncingReviews, setSyncingReviews] = useState<string | null>(null);
   const [syncingCalendar, setSyncingCalendar] = useState<string | null>(null);
   const [scrapingAirbnbRatings, setScrapingAirbnbRatings] = useState(false);
-  const [lastAirbnbScrape, setLastAirbnbScrape] = useState<string | null>(null);
+  const [lastAirbnbScrape, setLastAirbnbScrape] = useState<{ date: string; count: number } | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [incompleteSyncJobs, setIncompleteSyncJobs] = useState<Record<string, any>>({});
   const [autoSyncFailures, setAutoSyncFailures] = useState<Record<string, string[]>>({});
+  const [lastSyncCounts, setLastSyncCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     loadAccounts();
@@ -47,16 +48,37 @@ export default function Settings() {
 
   const loadLastAirbnbScrape = async () => {
     try {
-      const { data } = await supabase
-        .from("listings")
-        .select("live_rating_scraped_at")
-        .not("live_rating_scraped_at", "is", null)
-        .order("live_rating_scraped_at", { ascending: false })
+      // Get the most recent completed airbnb_ratings sync job
+      const { data: job } = await supabase
+        .from("sync_jobs")
+        .select("completed_at, items_synced")
+        .eq("sync_type", "airbnb_ratings")
+        .in("status", ["completed", "completed_with_errors"])
+        .order("completed_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       
-      if (data?.live_rating_scraped_at) {
-        setLastAirbnbScrape(data.live_rating_scraped_at);
+      if (job?.completed_at) {
+        setLastAirbnbScrape({
+          date: job.completed_at,
+          count: job.items_synced || 0
+        });
+      } else {
+        // Fallback to listing data if no sync job found
+        const { data: listing, count } = await supabase
+          .from("listings")
+          .select("live_rating_scraped_at", { count: 'exact' })
+          .not("live_rating_scraped_at", "is", null)
+          .order("live_rating_scraped_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (listing?.live_rating_scraped_at) {
+          setLastAirbnbScrape({
+            date: listing.live_rating_scraped_at,
+            count: count || 0
+          });
+        }
       }
     } catch (error) {
       console.error("Error loading last Airbnb scrape:", error);
@@ -118,6 +140,28 @@ export default function Settings() {
           }
         }
         setAutoSyncFailures(failuresMap);
+
+        // Load last sync counts for each account and sync type
+        const countsMap: Record<string, number> = {};
+        for (const account of data) {
+          const syncTypes = ['listings', 'reservations', 'reviews', 'capacity_calendar', 'new_reservations'];
+          for (const syncType of syncTypes) {
+            const { data: lastJob } = await supabase
+              .from('sync_jobs')
+              .select('items_synced')
+              .eq('guesty_account_id', account.id)
+              .eq('sync_type', syncType)
+              .in('status', ['completed', 'completed_with_errors'])
+              .order('completed_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            
+            if (lastJob?.items_synced) {
+              countsMap[`${account.id}-${syncType}`] = lastJob.items_synced;
+            }
+          }
+        }
+        setLastSyncCounts(countsMap);
       }
     } catch (error: any) {
       toast({
@@ -499,13 +543,20 @@ export default function Settings() {
                               {account.last_listings_sync && (
                                 <div className="flex items-center gap-1">
                                   <Home className="h-3 w-3" />
-                                  <span>Listings: {new Date(account.last_listings_sync).toLocaleString()}</span>
+                                  <span>
+                                    Listings: {new Date(account.last_listings_sync).toLocaleString()}
+                                    {lastSyncCounts[`${account.id}-listings`] ? ` (${lastSyncCounts[`${account.id}-listings`]} items)` : ''}
+                                  </span>
                                 </div>
                               )}
                               {account.last_reservations_sync && (
                                 <div className="flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />
-                                  <span>Reservations: {new Date(account.last_reservations_sync).toLocaleString()}</span>
+                                  <span>
+                                    Reservations: {new Date(account.last_reservations_sync).toLocaleString()}
+                                    {(lastSyncCounts[`${account.id}-reservations`] || lastSyncCounts[`${account.id}-new_reservations`]) ? 
+                                      ` (${lastSyncCounts[`${account.id}-reservations`] || lastSyncCounts[`${account.id}-new_reservations`]} items)` : ''}
+                                  </span>
                                 </div>
                               )}
                               {account.last_owners_sync && (
@@ -517,13 +568,19 @@ export default function Settings() {
                               {account.last_reviews_sync && (
                                 <div className="flex items-center gap-1">
                                   <Star className="h-3 w-3" />
-                                  <span>Reviews: {new Date(account.last_reviews_sync).toLocaleString()}</span>
+                                  <span>
+                                    Reviews: {new Date(account.last_reviews_sync).toLocaleString()}
+                                    {lastSyncCounts[`${account.id}-reviews`] ? ` (${lastSyncCounts[`${account.id}-reviews`]} items)` : ''}
+                                  </span>
                                 </div>
                               )}
                               {account.last_calendar_sync && (
                                 <div className="flex items-center gap-1">
                                   <CalendarDays className="h-3 w-3" />
-                                  <span>Calendars: {new Date(account.last_calendar_sync).toLocaleString()}</span>
+                                  <span>
+                                    Calendars: {new Date(account.last_calendar_sync).toLocaleString()}
+                                    {lastSyncCounts[`${account.id}-capacity_calendar`] ? ` (${lastSyncCounts[`${account.id}-capacity_calendar`]} listings)` : ''}
+                                  </span>
                                 </div>
                               )}
                               {account.last_automated_sync && (
@@ -742,7 +799,10 @@ export default function Settings() {
               <div className="flex items-center justify-between">
                 <div className="text-sm text-muted-foreground">
                   {lastAirbnbScrape ? (
-                    <span>Last scraped: {new Date(lastAirbnbScrape).toLocaleString()}</span>
+                    <span>
+                      Last scraped: {new Date(lastAirbnbScrape.date).toLocaleString()}
+                      {lastAirbnbScrape.count > 0 ? ` (${lastAirbnbScrape.count} listings)` : ''}
+                    </span>
                   ) : (
                     <span>Never scraped</span>
                   )}
