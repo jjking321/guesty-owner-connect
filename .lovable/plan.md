@@ -1,130 +1,78 @@
 
-
-# Add Platform Logos to Reviews Page
+# Tighter Y-Axis Range for Rating Chart
 
 ## Overview
 
-Replace the emoji icons (🏠, 🏨, 🏖️) with official brand logos for Airbnb, VRBO, and Booking.com on the Reviews page. This affects:
-- The "By Platform" section in the ReviewsSummaryAggregated component
-- The "By Platform" section in the ReviewsSummary component
-- The platform badge in the ReviewsTable component
+Update the Rating Over Time chart to use a dynamic, tighter Y-axis range that focuses on the actual data values rather than showing the full 1-5 scale.
 
 ---
 
-## Changes Required
+## Current Behavior
 
-### 1. Create Icon Components for VRBO and Booking.com
+The Y-axis is currently fixed from 1 to 5 with ticks at each whole number. Since most ratings cluster around 4-5 stars, the chart appears flat and doesn't show meaningful variation.
 
-Follow the existing `AirbnbIcon.tsx` pattern to create consistent, themeable SVG components.
+## Proposed Change
 
-**New Files**:
-- `src/components/icons/VrboIcon.tsx` - VRBO logo as inline SVG
-- `src/components/icons/BookingIcon.tsx` - Booking.com logo as inline SVG
+Calculate a dynamic Y-axis range based on the actual data:
+- Find the minimum and maximum ratings in the dataset
+- Add padding (0.5) above and below to provide visual breathing room
+- Clamp the range to stay within valid rating bounds (1-5)
+- Generate appropriate tick marks for the tighter range
 
-Each component will:
-- Accept className and other SVG props for flexibility
-- Include accessibility attributes (role, aria-label)
-- Use the official brand colors (VRBO blue, Booking.com dark blue)
+---
 
-### 2. Create a Unified PlatformIcon Component
+## Implementation
 
-Create a single component that maps platform names to their respective icons.
+**File**: `src/components/RatingTrendChart.tsx`
 
-**New File**: `src/components/icons/PlatformIcon.tsx`
+```typescript
+// Calculate dynamic Y-axis range based on data
+const ratings = data.map(d => d.avg_rating);
+const minRating = Math.min(...ratings);
+const maxRating = Math.max(...ratings);
 
-```tsx
-// Maps platform source string to the appropriate brand icon
-// Falls back to a generic icon for unknown platforms
-<PlatformIcon platform="Airbnb" className="w-6 h-6" />
-<PlatformIcon platform="VRBO" className="w-6 h-6" />
-<PlatformIcon platform="Booking.com" className="w-6 h-6" />
+// Add padding and clamp to valid range (1-5)
+const yMin = Math.max(1, Math.floor((minRating - 0.5) * 2) / 2); // Round down to nearest 0.5
+const yMax = Math.min(5, Math.ceil((maxRating + 0.5) * 2) / 2);  // Round up to nearest 0.5
+
+// Generate tick marks at 0.5 intervals
+const ticks = [];
+for (let i = yMin; i <= yMax; i += 0.5) {
+  ticks.push(Number(i.toFixed(1)));
+}
 ```
 
-Platform matching will be case-insensitive:
-- "airbnb", "Airbnb" -> AirbnbIcon (color: #FF385C)
-- "vrbo", "VRBO" -> VrboIcon (color: #0066CC)
-- "booking", "Booking.com", "Booking.Com" -> BookingIcon (color: #003580)
-- Other platforms -> A generic Building2 icon from Lucide
-
-### 3. Update ReviewsSummaryAggregated Component
-
-Replace the `getPlatformIcon` function that returns emojis with the new `PlatformIcon` component.
-
-**File**: `src/components/ReviewsSummaryAggregated.tsx`
-
+The YAxis component will be updated from:
 ```tsx
-// Before
-<span className="text-2xl">{getPlatformIcon(platform.source)}</span>
-
-// After
-<PlatformIcon platform={platform.source} className="w-8 h-8" />
+<YAxis 
+  domain={[1, 5]} 
+  ticks={[1, 2, 3, 4, 5]}
+  ...
+/>
 ```
 
-### 4. Update ReviewsSummary Component
-
-Apply the same change to the ReviewsSummary component.
-
-**File**: `src/components/ReviewsSummary.tsx`
-
+To:
 ```tsx
-// Before
-<span className="text-2xl">{getPlatformIcon(platform.source)}</span>
-
-// After
-<PlatformIcon platform={platform.source} className="w-8 h-8" />
-```
-
-### 5. Update ReviewsTable Component (Optional Enhancement)
-
-Update the platform Badge to include the icon alongside the text.
-
-**File**: `src/components/ReviewsTable.tsx`
-
-```tsx
-// Before
-<Badge variant="outline" className="capitalize">
-  {review.source}
-</Badge>
-
-// After
-<Badge variant="outline" className="capitalize flex items-center gap-1.5">
-  <PlatformIcon platform={review.source || ''} className="w-4 h-4" />
-  {review.source}
-</Badge>
+<YAxis 
+  domain={[yMin, yMax]} 
+  ticks={ticks}
+  tickFormatter={(value) => value.toFixed(1)}
+  ...
+/>
 ```
 
 ---
 
-## Files to Create
+## Example
 
-| File | Description |
-|------|-------------|
-| `src/components/icons/VrboIcon.tsx` | VRBO brand logo as React SVG component |
-| `src/components/icons/BookingIcon.tsx` | Booking.com brand logo as React SVG component |
-| `src/components/icons/PlatformIcon.tsx` | Unified component mapping platform names to icons |
+If ratings range from 4.2 to 4.8:
+- Current: Y-axis shows 1-5 (data appears as a flat line near the top)
+- New: Y-axis shows 3.5-5.0 (data shows meaningful variation)
+
+---
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/components/ReviewsSummaryAggregated.tsx` | Replace emoji with PlatformIcon component |
-| `src/components/ReviewsSummary.tsx` | Replace emoji with PlatformIcon component |
-| `src/components/ReviewsTable.tsx` | Add PlatformIcon to platform badge |
-
----
-
-## Brand Colors Reference
-
-- **Airbnb**: #FF385C (Rausch red)
-- **VRBO**: #0066CC (Blue)
-- **Booking.com**: #003580 (Dark blue)
-
----
-
-## Technical Notes
-
-- Icons use inline SVG for best performance and theming flexibility
-- Each icon component uses `currentColor` by default but has hardcoded brand colors as the primary fill
-- The `className` prop allows size customization (w-6 h-6, w-8 h-8, etc.)
-- Case-insensitive platform matching handles variations like "VRBO", "vrbo", "Booking.Com", "Booking.com"
-
+| `src/components/RatingTrendChart.tsx` | Calculate dynamic Y-axis range and ticks based on actual data values |
