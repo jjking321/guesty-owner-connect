@@ -4,14 +4,17 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { ReviewsSummaryAggregated } from "@/components/ReviewsSummaryAggregated";
 import { RatingTrendChart } from "@/components/RatingTrendChart";
 import { DateRangeFilter, DateRange } from "@/components/DateRangeFilter";
+import { AirbnbRatingsTable } from "@/components/AirbnbRatingsTable";
+import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { RefreshCw, Loader2, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
 
 const PAGE_SIZE = 100;
 
@@ -332,80 +335,99 @@ export default function Reviews() {
           </Button>
         </div>
 
-        {/* Filter */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Filter</CardTitle>
-            <CardDescription>Filter reviews by property and date range</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-4">
-            <Select value={selectedProperty} onValueChange={setSelectedProperty}>
-              <SelectTrigger className="w-[300px]">
-                <SelectValue placeholder="All properties" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Properties</SelectItem>
-                {properties.map(property => (
-                  <SelectItem key={property.id} value={property.id}>
-                    {property.nickname || property.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <DateRangeFilter value={dateRange} onChange={setDateRange} />
-          </CardContent>
-        </Card>
+        <Tabs defaultValue="reviews" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="reviews" className="gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Guest Reviews
+            </TabsTrigger>
+            <TabsTrigger value="airbnb-ratings" className="gap-2">
+              <AirbnbIcon className="h-4 w-4" />
+              Airbnb Ratings
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Reviews Summary - uses server-side aggregation */}
-        <ReviewsSummaryAggregated stats={summaryStats} />
+          <TabsContent value="reviews" className="space-y-6">
+            {/* Filter */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Filter</CardTitle>
+                <CardDescription>Filter reviews by property and date range</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-4">
+                <Select value={selectedProperty} onValueChange={setSelectedProperty}>
+                  <SelectTrigger className="w-[300px]">
+                    <SelectValue placeholder="All properties" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Properties</SelectItem>
+                    {properties.map(property => (
+                      <SelectItem key={property.id} value={property.id}>
+                        {property.nickname || property.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <DateRangeFilter value={dateRange} onChange={setDateRange} />
+              </CardContent>
+            </Card>
 
-        {/* Rating Trend Chart */}
-        <RatingTrendChart data={ratingTrendData} isLoading={trendLoading} />
+            {/* Reviews Summary - uses server-side aggregation */}
+            <ReviewsSummaryAggregated stats={summaryStats} />
 
-        {/* Reviews Table */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>All Reviews</CardTitle>
-                <CardDescription>
-                  Showing {showingFrom.toLocaleString()} - {showingTo.toLocaleString()} of {totalCount.toLocaleString()} reviews
-                </CardDescription>
-              </div>
-              {/* Pagination Controls */}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1 || reviewsLoading}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Previous
-                </Button>
-                <span className="text-sm text-muted-foreground px-2">
-                  Page {currentPage} of {totalPages || 1}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage >= totalPages || reviewsLoading}
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <ReviewsTable
-              reviews={reviews}
-              onMarkAsRemoved={handleMarkAsRemoved}
-              onRestore={handleRestore}
-            />
-          </CardContent>
-        </Card>
+            {/* Rating Trend Chart */}
+            <RatingTrendChart data={ratingTrendData} isLoading={trendLoading} />
+
+            {/* Reviews Table */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>All Reviews</CardTitle>
+                    <CardDescription>
+                      Showing {showingFrom.toLocaleString()} - {showingTo.toLocaleString()} of {totalCount.toLocaleString()} reviews
+                    </CardDescription>
+                  </div>
+                  {/* Pagination Controls */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1 || reviewsLoading}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Previous
+                    </Button>
+                    <span className="text-sm text-muted-foreground px-2">
+                      Page {currentPage} of {totalPages || 1}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage >= totalPages || reviewsLoading}
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ReviewsTable
+                  reviews={reviews}
+                  onMarkAsRemoved={handleMarkAsRemoved}
+                  onRestore={handleRestore}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="airbnb-ratings">
+            <AirbnbRatingsTable />
+          </TabsContent>
+        </Tabs>
       </div>
     </DashboardLayout>
   );
