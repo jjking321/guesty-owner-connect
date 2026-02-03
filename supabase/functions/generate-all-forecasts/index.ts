@@ -16,19 +16,26 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get user ID from the request
-    const authHeader = req.headers.get('Authorization');
-    const token = authHeader?.replace('Bearer ', '');
-    const { data: userData } = await supabase.auth.getUser(token || '');
-    const userId = userData?.user?.id;
+    // Check for service-role bypass (for automated nightly sync)
+    const isServiceRole = req.headers.get("x-service-role") === "true";
+
+    let userId: string | undefined;
+
+    if (!isServiceRole) {
+      const authHeader = req.headers.get('Authorization');
+      const token = authHeader?.replace('Bearer ', '');
+      const { data: userData } = await supabase.auth.getUser(token || '');
+      userId = userData?.user?.id;
+    }
+    // For service-role, userId remains undefined but that's fine for automated runs
 
     console.log('Starting background forecast generation for all properties...');
 
-    // Get all active listings (exclude archived)
+    // Get all active listings (exclude archived, only listed properties)
     const { data: listings, error: listingsError } = await supabase
       .from('listings')
       .select('id, nickname')
-      .eq('active', true)
+      .eq('is_listed', true)
       .eq('archived', false);
 
     if (listingsError) throw listingsError;
