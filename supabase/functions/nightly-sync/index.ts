@@ -28,6 +28,45 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function waitForForecastCompletion(
+  supabase: any,
+  progressId: string,
+  timeoutMs: number = 1800000 // 30 minute default
+): Promise<SyncResult> {
+  const startTime = Date.now();
+  const pollInterval = 10000; // 10 seconds (forecasts are slower)
+
+  console.log(`[forecasts] Waiting for completion (timeout: ${timeoutMs / 1000}s)...`);
+
+  while (Date.now() - startTime < timeoutMs) {
+    const { data: progress, error } = await supabase
+      .from('forecast_generation_progress')
+      .select('status, completed_forecasts, failed_forecasts, total_forecasts')
+      .eq('id', progressId)
+      .single();
+
+    if (error) {
+      console.error(`[forecasts] Error polling progress:`, error);
+      await sleep(pollInterval);
+      continue;
+    }
+
+    if (progress?.status === 'completed') {
+      console.log(`[forecasts] Completed: ${progress.completed_forecasts} success, ${progress.failed_forecasts} failed`);
+      return { success: true };
+    }
+
+    if (progress?.status === 'failed') {
+      return { success: false, error: 'Forecast generation failed' };
+    }
+
+    console.log(`[forecasts] Progress: ${progress?.completed_forecasts || 0}/${progress?.total_forecasts || 0}`);
+    await sleep(pollInterval);
+  }
+
+  return { success: false, error: 'Forecast generation timed out' };
+}
+
 async function waitForSyncCompletion(
   supabase: any,
   accountId: string,
@@ -277,12 +316,39 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 6. Regenerate All Forecasts (runs once for entire org)
+    console.log(`\n--- Regenerating Forecasts ---`);
+    let forecastResult: SyncResult | null = null;
+
+    const { data: forecastResponse, error: forecastInvokeError } = await supabase.functions.invoke(
+      'generate-all-forecasts',
+      {
+        body: {},
+        headers: { 'x-service-role': 'true' }
+      }
+    );
+
+    if (forecastInvokeError) {
+      console.error('Failed to invoke forecast generation:', forecastInvokeError);
+      forecastResult = { success: false, error: forecastInvokeError.message };
+    } else if (forecastResponse?.progress_id) {
+      // Poll for completion with 30 min timeout
+      forecastResult = await waitForForecastCompletion(
+        supabase,
+        forecastResponse.progress_id,
+        1800000 // 30 minutes
+      );
+    }
+
     const duration = Math.round((Date.now() - startTime) / 1000);
     console.log(`\n=== Nightly Sync Completed ===`);
     console.log(`Total duration: ${duration} seconds`);
     console.log(`Accounts processed: ${results.length}`);
     if (airbnbScrapeResult) {
       console.log(`Airbnb ratings scrape: ${airbnbScrapeResult.success ? 'completed' : 'failed'}`);
+    }
+    if (forecastResult) {
+      console.log(`Forecast generation: ${forecastResult.success ? 'completed' : 'failed'}`);
     }
 
     // Summary
@@ -298,6 +364,7 @@ Deno.serve(async (req) => {
         failedAccounts,
         results,
         airbnbRatingsScrape: airbnbScrapeResult,
+        forecastGeneration: forecastResult,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
