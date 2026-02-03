@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Star, TrendingUp, TrendingDown } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Star } from "lucide-react";
+import { PlatformIcon } from "@/components/icons/PlatformIcon";
 
 interface Review {
   id?: string;
@@ -21,17 +21,6 @@ interface ReviewsSummaryProps {
   reviews: Review[];
   onPlatformClick?: (platform: string) => void;
 }
-
-const getPlatformIcon = (source: string) => {
-  const icons: Record<string, string> = {
-    'airbnb': '🏠',
-    'booking': '🏨',
-    'vrbo': '🏖️',
-    'expedia': '🌍',
-    'direct': '👤',
-  };
-  return icons[source.toLowerCase()] || '❓';
-};
 
 export function ReviewsSummary({ reviews, onPlatformClick }: ReviewsSummaryProps) {
   // Filter out removed reviews
@@ -169,7 +158,7 @@ export function ReviewsSummary({ reviews, onPlatformClick }: ReviewsSummaryProps
               onClick={() => onPlatformClick?.(platform.source)}
             >
               <div className="flex items-center gap-3 flex-1">
-                <span className="text-2xl">{getPlatformIcon(platform.source)}</span>
+                <PlatformIcon platform={platform.source} className="w-8 h-8" />
                 <div className="flex-1">
                   <p className="font-medium capitalize">{platform.source}</p>
                   <div className="flex items-center gap-2">

@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Star } from "lucide-react";
+import { PlatformIcon } from "@/components/icons/PlatformIcon";
 
 interface PlatformStat {
   source: string;
@@ -22,20 +23,6 @@ interface ReviewSummaryStats {
 interface ReviewsSummaryAggregatedProps {
   stats: ReviewSummaryStats | null;
 }
-
-const getPlatformIcon = (source: string) => {
-  const icons: Record<string, string> = {
-    'airbnb': '🏠',
-    'Airbnb': '🏠',
-    'booking': '🏨',
-    'Booking.Com': '🏨',
-    'vrbo': '🏖️',
-    'VRBO': '🏖️',
-    'expedia': '🌍',
-    'direct': '👤',
-  };
-  return icons[source] || '❓';
-};
 
 export function ReviewsSummaryAggregated({ stats }: ReviewsSummaryAggregatedProps) {
   if (!stats || stats.total_reviews === 0) {
@@ -131,7 +118,7 @@ export function ReviewsSummaryAggregated({ stats }: ReviewsSummaryAggregatedProp
                 className="flex items-center justify-between p-3 rounded-lg border"
               >
                 <div className="flex items-center gap-3 flex-1">
-                  <span className="text-2xl">{getPlatformIcon(platform.source)}</span>
+                  <PlatformIcon platform={platform.source} className="w-8 h-8" />
                   <div className="flex-1">
                     <p className="font-medium capitalize">{platform.source}</p>
                     <div className="flex items-center gap-2">

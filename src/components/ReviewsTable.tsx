@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Star, Trash2, RotateCcw, Eye } from "lucide-react";
 import { format } from "date-fns";
 import { ReviewManagementDialog } from "./ReviewManagementDialog";
+import { PlatformIcon } from "@/components/icons/PlatformIcon";
 
 interface Review {
   id: string;
@@ -154,7 +155,8 @@ export function ReviewsTable({ reviews, onMarkAsRemoved, onRestore, selectedPlat
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant="outline" className="capitalize">
+                  <Badge variant="outline" className="capitalize flex items-center gap-1.5 w-fit">
+                    <PlatformIcon platform={review.source || ''} className="w-4 h-4" />
                     {review.source}
                   </Badge>
                 </TableCell>
