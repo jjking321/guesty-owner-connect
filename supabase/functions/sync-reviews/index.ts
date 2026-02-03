@@ -429,11 +429,41 @@ async function performSync(
           const reviewer = rawReview.reviewer || {};
           
           // Extract rating from multiple possible fields
-          let rating = null;
+          let rating: number | null = null;
+          
+          // Airbnb/VRBO: overall_rating or starRatingOverall (1-5 scale)
           if (typeof rawReview.overall_rating === 'number') {
             rating = rawReview.overall_rating;
           } else if (rawReview.starRatingOverall) {
             rating = parseFloat(rawReview.starRatingOverall);
+          }
+          
+          // Booking.com: score or average_score (10-point scale) - normalize to 5
+          if (rating === null) {
+            const bookingScore = rawReview.score ?? rawReview.average_score ?? rawReview.overall_score ?? rawReview.total_score;
+            if (typeof bookingScore === 'number') {
+              // Normalize 10-point scale to 5-star scale
+              rating = bookingScore / 2;
+            }
+          }
+          
+          // Also check top-level score field (some channel integrations)
+          if (rating === null && typeof review.score === 'number') {
+            if (review.score > 5) {
+              rating = review.score / 2; // Normalize 10-point to 5-star
+            } else {
+              rating = review.score;
+            }
+          }
+          
+          // Log review structure when rating is null (for debugging)
+          if (rating === null) {
+            console.log(`No rating found for ${formatChannelId(review.channelId)} review:`, {
+              reviewId: review._id,
+              channelId: review.channelId,
+              rawReviewKeys: Object.keys(rawReview),
+              topLevelKeys: Object.keys(review),
+            });
           }
 
           // Get guest name from reservation lookup, fallback to reviewer info
