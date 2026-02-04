@@ -1,49 +1,75 @@
 
+# Fix Calendar Sync Self-Invocation Bug
 
-# Enable pg_net Extension for Cron Jobs
+## Problem Summary
 
-## Problem
-
-The nightly sync cron jobs have been failing with:
-```
-ERROR: schema "net" does not exist
-```
-
-The `pg_net` extension was never enabled when the cron jobs were originally created. This extension is required for `pg_cron` to make HTTP POST requests to trigger edge functions.
+The nightly sync successfully triggers, but gets stuck at the calendar sync step because `sync-bulk-calendar` cannot continue past its first batch of 50 listings. The self-invocation call fails with **401 Unauthorized**.
 
 ---
 
-## Fix
+## Root Cause
 
-Run a database migration to enable the `pg_net` extension:
-
-```sql
--- Enable pg_net extension for HTTP requests from cron jobs
-CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+In `sync-bulk-calendar`, lines 455-458:
+```typescript
+const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
+  headers: { Authorization: `Bearer ${authToken}` },
+  body: { guestyAccountId, guestyToken: accessToken },
+});
 ```
 
----
-
-## Why This Happened
-
-When cron jobs were set up, only `pg_cron` was enabled. The jobs use `net.http_post()` to call edge functions, but this function comes from `pg_net` which was never added.
+When you provide a `headers` object to `supabase.functions.invoke()`, it **replaces** the default headers instead of merging with them. This causes:
+- The `apikey` header (required by Supabase gateway) to be missing
+- The request fails with 401 even though Authorization is present
 
 ---
 
-## After Fix
+## Solution
 
-| Cron Job | Schedule | Status |
-|----------|----------|--------|
-| `nightly-sync` | 3:00 AM UTC | Will work |
-| `generate-all-forecasts` | 2:00 AM UTC | Will work |
+### 1. Fix Self-Invocation (Primary Fix)
+**File:** `supabase/functions/sync-bulk-calendar/index.ts`
 
-The next scheduled run at 3:00 AM UTC should execute successfully.
+Change the self-invocation to **not override headers**. Instead:
+- Pass the `x-service-role: true` header marker only
+- Omit the Authorization header (the service role client already has the service key attached)
+- The function should detect service-role calls via the `x-service-role` header
+
+```typescript
+// Before (broken)
+const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
+  headers: { Authorization: `Bearer ${authToken}` },
+  body: { guestyAccountId, guestyToken: accessToken },
+});
+
+// After (fixed)
+const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
+  headers: { 'x-service-role': 'true' },
+  body: { guestyAccountId, guestyToken: accessToken },
+});
+```
+
+### 2. Strengthen Service-Role Detection
+The check at lines 515-517 relies on `x-service-role` header which is the correct approach. No changes needed here since the fix above ensures that header is always passed.
+
+### 3. Resume the Stuck Job
+After deploying the fix, I'll manually invoke the calendar sync for the stuck `renjoy guesty` account to resume from offset 100 and complete the remaining 105 listings.
 
 ---
 
-## Verification
+## Technical Details
 
-After enabling, you can manually trigger the nightly sync to confirm everything works:
-- Call the `nightly-sync` edge function directly
-- Or wait for the 3 AM UTC scheduled run
+| Step | Action |
+|------|--------|
+| 1 | Update self-invocation to pass `x-service-role: true` instead of `Authorization` header |
+| 2 | Deploy the updated edge function |
+| 3 | Resume stuck calendar job for renjoy account |
+| 4 | Verify completion by checking sync_jobs status |
 
+---
+
+## Expected Outcome
+
+- Calendar sync will process all 205 listings for renjoy
+- `last_automated_sync` will update for renjoy account  
+- Nightly sync will proceed to process Beachside VR
+- Portfolio-wide steps (forecasts, actionables) will run
+- Tonight's 3 AM UTC run will complete successfully
