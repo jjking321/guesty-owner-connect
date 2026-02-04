@@ -452,8 +452,9 @@ async function performSync(
         console.log(`Batch of ${BATCH_SIZE} complete at listing ${i + 1}. Self-invoking for continuation...`);
 
         // Pass the cached token to avoid new OAuth request
+        // Use x-service-role header instead of Authorization to avoid header override issue
         const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-          headers: { Authorization: `Bearer ${authToken}` },
+          headers: { 'x-service-role': 'true' },
           body: { guestyAccountId, guestyToken: accessToken },
         });
 
