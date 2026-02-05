@@ -11,6 +11,7 @@ import { RatingTrendChart } from "@/components/RatingTrendChart";
 import { DateRangeFilter, DateRange } from "@/components/DateRangeFilter";
 import { AirbnbRatingsTable } from "@/components/AirbnbRatingsTable";
 import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -280,11 +281,7 @@ export default function Reviews() {
         title: "Review sync started",
         description: "Fetching new reviews since last sync...",
       });
-
-      // Refresh reviews after a short delay
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ['reviews'] });
-      }, 3000);
+      // SyncProgressCard handles data refresh via onComplete callback
     } catch (error: any) {
       toast({
         title: "Sync failed",
@@ -334,6 +331,15 @@ export default function Reviews() {
             Sync New Reviews
           </Button>
         </div>
+
+        {/* Live sync progress tracking */}
+        {guestyAccountId && (
+          <SyncProgressCard
+            accountId={guestyAccountId}
+            syncType="new_reviews"
+            onComplete={() => queryClient.invalidateQueries({ queryKey: ['reviews'] })}
+          />
+        )}
 
         <Tabs defaultValue="reviews" className="space-y-6">
           <TabsList>
