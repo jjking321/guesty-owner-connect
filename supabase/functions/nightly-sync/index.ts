@@ -152,6 +152,14 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
+    // Use a dedicated invoker client for service-role/batch calls.
+    // IMPORTANT: passing `headers` to functions.invoke can override defaults (apikey/authorization).
+    const supabaseInvoke = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { global: { headers: { 'x-service-role': 'true' } } }
+    );
+
     // Get all accounts with automated sync enabled
     const { data: accounts, error: accountsError } = await supabase
       .from('guesty_accounts')
@@ -245,9 +253,8 @@ Deno.serve(async (req) => {
 
         // 4. Sync Calendar (this is the longest one)
         console.log(`[${account.account_name}] Starting calendar sync...`);
-        const { error: calendarInvokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-          body: { guestyAccountId: account.id },
-          headers: { 'x-service-role': 'true' }
+        const { error: calendarInvokeError } = await supabaseInvoke.functions.invoke('sync-bulk-calendar', {
+          body: { guestyAccountId: account.id }
         });
 
         if (calendarInvokeError) {
@@ -297,11 +304,10 @@ Deno.serve(async (req) => {
 
     if (firstAccountId && airbnbScrapeEnabled) {
       console.log(`\n--- Scraping Airbnb Ratings ---`);
-      const { error: airbnbInvokeError } = await supabase.functions.invoke(
+      const { error: airbnbInvokeError } = await supabaseInvoke.functions.invoke(
         'bulk-scrape-airbnb-ratings',
         {
           body: {},
-          headers: { 'x-service-role': 'true' }
         }
       );
 
@@ -329,11 +335,10 @@ Deno.serve(async (req) => {
 
     if (probabilityEnabled) {
       console.log(`\n--- Calculating Booking Probabilities ---`);
-      const { data: probResponse, error: probInvokeError } = await supabase.functions.invoke(
+      const { data: probResponse, error: probInvokeError } = await supabaseInvoke.functions.invoke(
         'calculate-all-probabilities',
         {
           body: {},
-          headers: { 'x-service-role': 'true' }
         }
       );
 
@@ -361,11 +366,10 @@ Deno.serve(async (req) => {
 
     if (forecastEnabled) {
       console.log(`\n--- Regenerating Forecasts ---`);
-      const { data: forecastResponse, error: forecastInvokeError } = await supabase.functions.invoke(
+      const { data: forecastResponse, error: forecastInvokeError } = await supabaseInvoke.functions.invoke(
         'generate-all-forecasts',
         {
           body: {},
-          headers: { 'x-service-role': 'true' }
         }
       );
 
@@ -392,11 +396,10 @@ Deno.serve(async (req) => {
 
     if (actionablesEnabled) {
       console.log(`\n--- Generating Actionables ---`);
-      const { error: actionablesInvokeError } = await supabase.functions.invoke(
+      const { error: actionablesInvokeError } = await supabaseInvoke.functions.invoke(
         'generate-actionables',
         {
           body: {},
-          headers: { 'x-service-role': 'true' }
         }
       );
 

@@ -452,9 +452,15 @@ async function performSync(
         console.log(`Batch of ${BATCH_SIZE} complete at listing ${i + 1}. Self-invoking for continuation...`);
 
         // Pass the cached token to avoid new OAuth request
-        // Use x-service-role header instead of Authorization to avoid header override issue
-        const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-          headers: { 'x-service-role': 'true' },
+        // IMPORTANT: do not pass `headers` to functions.invoke (it replaces default headers and can drop apikey/authorization)
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+        const invokeClient = createClient(supabaseUrl, supabaseServiceKey, {
+          global: { headers: { 'x-service-role': 'true' } },
+        });
+
+        const { error: invokeError } = await invokeClient.functions.invoke('sync-bulk-calendar', {
           body: { guestyAccountId, guestyToken: accessToken },
         });
 
@@ -551,7 +557,7 @@ Deno.serve(async (req) => {
 
     console.log(`Bulk calendar sync requested for account: ${guestyAccountId}`);
 
-    const { data: existingJob } = await supabase
+    const { data: runningJob } = await supabase
       .from('sync_jobs')
       .select('*')
       .eq('guesty_account_id', guestyAccountId)
@@ -559,37 +565,73 @@ Deno.serve(async (req) => {
       .eq('status', 'running')
       .order('started_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     let syncJobId: string;
     let resumeFromOffset = 0;
     let isResuming = false;
 
-    if (existingJob) {
-      syncJobId = existingJob.id;
-      resumeFromOffset = (existingJob.last_synced_offset || 0) + 1;
+    if (runningJob) {
+      syncJobId = runningJob.id;
+      resumeFromOffset = (runningJob.last_synced_offset || 0) + 1;
       isResuming = true;
-      console.log(`Resuming existing job ${syncJobId} from offset ${resumeFromOffset}`);
+      console.log(`Resuming running job ${syncJobId} from offset ${resumeFromOffset}`);
     } else {
-      const { data: newJob, error: jobError } = await supabase
+      // If user clicked “Resume”, the latest job is typically FAILED with last_synced_offset > 0.
+      const { data: failedJob } = await supabase
         .from('sync_jobs')
-        .insert({
-          guesty_account_id: guestyAccountId,
-          sync_type: 'capacity_calendar',
-          status: 'running',
-          started_at: new Date().toISOString(),
-          items_synced: 0,
-          progress_message: 'Initializing calendar sync...',
-        })
-        .select()
-        .single();
+        .select('*')
+        .eq('guesty_account_id', guestyAccountId)
+        .eq('sync_type', 'capacity_calendar')
+        .eq('status', 'failed')
+        .gt('last_synced_offset', 0)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (jobError || !newJob) {
-        throw new Error('Failed to create sync job');
+      if (failedJob) {
+        syncJobId = failedJob.id;
+        resumeFromOffset = (failedJob.last_synced_offset || 0) + 1;
+        isResuming = true;
+
+        const now = new Date().toISOString();
+        const { error: reviveError } = await supabase
+          .from('sync_jobs')
+          .update({
+            status: 'running',
+            started_at: now,
+            completed_at: null,
+            error_message: null,
+            progress_message: `Resuming from ${resumeFromOffset}...`,
+          })
+          .eq('id', syncJobId);
+
+        if (reviveError) {
+          throw new Error(`Failed to resume previous job: ${reviveError.message}`);
+        }
+
+        console.log(`Resuming failed job ${syncJobId} from offset ${resumeFromOffset}`);
+      } else {
+        const { data: newJob, error: jobError } = await supabase
+          .from('sync_jobs')
+          .insert({
+            guesty_account_id: guestyAccountId,
+            sync_type: 'capacity_calendar',
+            status: 'running',
+            started_at: new Date().toISOString(),
+            items_synced: 0,
+            progress_message: 'Initializing calendar sync...',
+          })
+          .select()
+          .single();
+
+        if (jobError || !newJob) {
+          throw new Error('Failed to create sync job');
+        }
+
+        syncJobId = newJob.id;
+        console.log(`Created new sync job: ${syncJobId}`);
       }
-      
-      syncJobId = newJob.id;
-      console.log(`Created new sync job: ${syncJobId}`);
     }
 
     EdgeRuntime.waitUntil(performSync(supabase, guestyAccountId, syncJobId, resumeFromOffset, authToken, guestyToken));
