@@ -1,63 +1,62 @@
 
-# Fix Calendar Sync Self-Invocation - Part 2
+# Plan: Add Live Progress Tracking to Sync Reviews
 
-## Problem Found
+## Overview
+Add a real-time progress bar to the Reviews page that shows the status of the "Sync New Reviews" operation, matching the pattern used elsewhere in the app (like calendar sync and comparable data fetching).
 
-The previous fix was incomplete. The `sync-bulk-calendar` function has **two** authorization gates:
+## Current State
+- The `sync-new-reviews` edge function **already tracks progress** in the `sync_jobs` table with:
+  - `sync_type: 'new_reviews'`
+  - `items_synced` count
+  - `progress_message` updates
+  - Status transitions (`running` → `completed`/`failed`)
+- The `SyncProgressCard` component exists and supports this sync type
+- The Reviews page only shows a button spinner, with no persistent progress visibility
 
-1. **Line 502-508**: Hard requirement for `Authorization` header to exist
-2. **Line 517-518**: Service-role bypass check
+## Changes Required
 
-When we changed self-invocation to pass only `x-service-role: true`, requests fail at gate #1 before reaching gate #2.
+### 1. Update Reviews Page (`src/pages/Reviews.tsx`)
 
----
-
-## Current State (Feb 5, 3:00 AM Run)
-
-| Account | Listings | Reservations | Calendar | Airbnb Scrape |
-|---------|----------|--------------|----------|---------------|
-| Renjoy | ❌ OAuth rate limit | ❌ OAuth rate limit | ❌ OAuth rate limit | ❌ Never reached |
-| Beachside VR | ✅ 465 synced | ✅ 484 synced | 🔄 Stuck at 50/271 | ❌ Never reached |
-
----
-
-## Fix Required
-
-**File:** `supabase/functions/sync-bulk-calendar/index.ts`
-
-Move the `x-service-role` check **before** the Authorization requirement:
-
+**Add import:**
 ```typescript
-// Check for service role invocation FIRST
-const isServiceRole = req.headers.get('x-service-role') === 'true';
-
-if (!isServiceRole) {
-  // Only require Authorization for non-service-role calls
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) {
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized' }),
-      { status: 401, ... }
-    );
-  }
-  // ... rest of user auth logic
-}
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 ```
 
----
+**Add the SyncProgressCard component** below the header/action row, conditional on having a `guestyAccountId`:
+
+```typescript
+{guestyAccountId && (
+  <SyncProgressCard
+    accountId={guestyAccountId}
+    syncType="new_reviews"
+    onComplete={() => queryClient.invalidateQueries({ queryKey: ['reviews'] })}
+  />
+)}
+```
+
+**Remove the setTimeout refresh** in `handleSyncNewReviews` since the `SyncProgressCard` will handle data refresh via `onComplete`.
 
 ## Technical Details
 
-| Line Range | Current Behavior | New Behavior |
-|------------|-----------------|--------------|
-| 502-508 | Requires Authorization header always | Only requires for non-service-role |
-| 517-518 | Checks service role after auth requirement | Check service role first |
+### How Progress Tracking Works
+1. When user clicks "Sync New Reviews", the edge function creates a `sync_jobs` record
+2. `SyncProgressCard` subscribes to real-time Postgres changes on `sync_jobs`
+3. As the edge function syncs pages of reviews, it updates `items_synced` and `progress_message`
+4. The component displays a progress bar and live status messages
+5. On completion/failure, the card shows final status and auto-dismisses after 30 seconds
+6. The `onComplete` callback refreshes the reviews data
 
----
+### User Experience
+- Progress card appears when sync starts
+- Shows: "Synced 45 new reviews (page 2)..."
+- Displays item count badge (e.g., "45")
+- Dismiss button available after completion
+- Failed syncs show error message
 
-## Expected Outcome
+## Visual Placement
+The progress card will appear between the page header and the tabs, making it visible regardless of which tab (Guest Reviews or Airbnb Ratings) is active.
 
-- Self-invocations with `x-service-role: true` bypass auth completely
-- Calendar sync batches can continue without authorization failures
-- Tonight's nightly sync will complete for both accounts
-- Portfolio-wide steps (Airbnb scrape, forecasts, actionables) will finally run
+## Files Modified
+| File | Change |
+|------|--------|
+| `src/pages/Reviews.tsx` | Add `SyncProgressCard` import and component, remove `setTimeout` refresh |
