@@ -499,26 +499,32 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const authToken = authHeader.replace('Bearer ', '');
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Check for service role invocation (from nightly-sync orchestrator)
-    const isServiceRole = authHeader?.includes('service_role') || 
-      req.headers.get('x-service-role') === 'true';
+    // Check for service role invocation FIRST (from nightly-sync or self-invocation)
+    const isServiceRole = req.headers.get('x-service-role') === 'true';
 
-    if (!isServiceRole) {
-      // Only require user auth for direct user calls
+    const authHeader = req.headers.get('Authorization');
+    let authToken = '';
+
+    if (isServiceRole) {
+      console.log('Service role invocation detected - bypassing user auth');
+      // For service role, we don't need an auth token since we use service role key
+      authToken = 'service-role';
+    } else {
+      // Only require Authorization header for non-service-role calls
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      authToken = authHeader.replace('Bearer ', '');
+
+      // Validate user auth for direct user calls
       const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
       const userClient = createClient(supabaseUrl, anonKey, {
         global: { headers: { Authorization: authHeader } }
@@ -532,8 +538,6 @@ Deno.serve(async (req) => {
         );
       }
       console.log(`User authenticated: ${user.id}`);
-    } else {
-      console.log('Service role invocation detected - bypassing user auth');
     }
 
     const { guestyAccountId, guestyToken } = await req.json();
