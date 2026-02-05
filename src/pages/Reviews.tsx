@@ -48,6 +48,28 @@ export default function Reviews() {
     fetchAccountId();
   }, []);
 
+  // Fetch last sync time
+  const { data: lastSyncTime } = useQuery({
+    queryKey: ['reviews', 'lastSync', guestyAccountId],
+    queryFn: async () => {
+      if (!guestyAccountId) return null;
+      
+      const { data, error } = await supabase
+        .from('sync_jobs')
+        .select('completed_at')
+        .eq('guesty_account_id', guestyAccountId)
+        .in('sync_type', ['reviews', 'new_reviews'])
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (error || !data?.completed_at) return null;
+      return new Date(data.completed_at).toLocaleString();
+    },
+    enabled: !!guestyAccountId,
+  });
+
   // Fetch total review count for pagination
   const { data: totalCount = 0 } = useQuery({
     queryKey: ['reviews', 'count', selectedProperty, dateRange.from?.toISOString(), dateRange.to?.toISOString()],
@@ -316,7 +338,12 @@ export default function Reviews() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-3xl font-bold tracking-tight">Reviews Management</h2>
-            <p className="text-muted-foreground">View and manage reviews across all properties</p>
+            <p className="text-muted-foreground">
+              View and manage reviews across all properties
+              {lastSyncTime && (
+                <span className="ml-2 text-xs">• Last synced: {lastSyncTime}</span>
+              )}
+            </p>
           </div>
           <Button 
             onClick={handleSyncNewReviews} 
