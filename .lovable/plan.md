@@ -1,75 +1,63 @@
 
-# Fix Calendar Sync Self-Invocation Bug
+# Fix Calendar Sync Self-Invocation - Part 2
 
-## Problem Summary
+## Problem Found
 
-The nightly sync successfully triggers, but gets stuck at the calendar sync step because `sync-bulk-calendar` cannot continue past its first batch of 50 listings. The self-invocation call fails with **401 Unauthorized**.
+The previous fix was incomplete. The `sync-bulk-calendar` function has **two** authorization gates:
 
----
+1. **Line 502-508**: Hard requirement for `Authorization` header to exist
+2. **Line 517-518**: Service-role bypass check
 
-## Root Cause
-
-In `sync-bulk-calendar`, lines 455-458:
-```typescript
-const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-  headers: { Authorization: `Bearer ${authToken}` },
-  body: { guestyAccountId, guestyToken: accessToken },
-});
-```
-
-When you provide a `headers` object to `supabase.functions.invoke()`, it **replaces** the default headers instead of merging with them. This causes:
-- The `apikey` header (required by Supabase gateway) to be missing
-- The request fails with 401 even though Authorization is present
+When we changed self-invocation to pass only `x-service-role: true`, requests fail at gate #1 before reaching gate #2.
 
 ---
 
-## Solution
+## Current State (Feb 5, 3:00 AM Run)
 
-### 1. Fix Self-Invocation (Primary Fix)
+| Account | Listings | Reservations | Calendar | Airbnb Scrape |
+|---------|----------|--------------|----------|---------------|
+| Renjoy | ❌ OAuth rate limit | ❌ OAuth rate limit | ❌ OAuth rate limit | ❌ Never reached |
+| Beachside VR | ✅ 465 synced | ✅ 484 synced | 🔄 Stuck at 50/271 | ❌ Never reached |
+
+---
+
+## Fix Required
+
 **File:** `supabase/functions/sync-bulk-calendar/index.ts`
 
-Change the self-invocation to **not override headers**. Instead:
-- Pass the `x-service-role: true` header marker only
-- Omit the Authorization header (the service role client already has the service key attached)
-- The function should detect service-role calls via the `x-service-role` header
+Move the `x-service-role` check **before** the Authorization requirement:
 
 ```typescript
-// Before (broken)
-const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-  headers: { Authorization: `Bearer ${authToken}` },
-  body: { guestyAccountId, guestyToken: accessToken },
-});
+// Check for service role invocation FIRST
+const isServiceRole = req.headers.get('x-service-role') === 'true';
 
-// After (fixed)
-const { error: invokeError } = await supabase.functions.invoke('sync-bulk-calendar', {
-  headers: { 'x-service-role': 'true' },
-  body: { guestyAccountId, guestyToken: accessToken },
-});
+if (!isServiceRole) {
+  // Only require Authorization for non-service-role calls
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized' }),
+      { status: 401, ... }
+    );
+  }
+  // ... rest of user auth logic
+}
 ```
-
-### 2. Strengthen Service-Role Detection
-The check at lines 515-517 relies on `x-service-role` header which is the correct approach. No changes needed here since the fix above ensures that header is always passed.
-
-### 3. Resume the Stuck Job
-After deploying the fix, I'll manually invoke the calendar sync for the stuck `renjoy guesty` account to resume from offset 100 and complete the remaining 105 listings.
 
 ---
 
 ## Technical Details
 
-| Step | Action |
-|------|--------|
-| 1 | Update self-invocation to pass `x-service-role: true` instead of `Authorization` header |
-| 2 | Deploy the updated edge function |
-| 3 | Resume stuck calendar job for renjoy account |
-| 4 | Verify completion by checking sync_jobs status |
+| Line Range | Current Behavior | New Behavior |
+|------------|-----------------|--------------|
+| 502-508 | Requires Authorization header always | Only requires for non-service-role |
+| 517-518 | Checks service role after auth requirement | Check service role first |
 
 ---
 
 ## Expected Outcome
 
-- Calendar sync will process all 205 listings for renjoy
-- `last_automated_sync` will update for renjoy account  
-- Nightly sync will proceed to process Beachside VR
-- Portfolio-wide steps (forecasts, actionables) will run
-- Tonight's 3 AM UTC run will complete successfully
+- Self-invocations with `x-service-role: true` bypass auth completely
+- Calendar sync batches can continue without authorization failures
+- Tonight's nightly sync will complete for both accounts
+- Portfolio-wide steps (Airbnb scrape, forecasts, actionables) will finally run
