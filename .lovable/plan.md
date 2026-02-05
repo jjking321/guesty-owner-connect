@@ -1,62 +1,74 @@
 
-# Plan: Add Live Progress Tracking to Sync Reviews
+# Plan: Add "Last Synced" Indicator to Reviews Page
 
 ## Overview
-Add a real-time progress bar to the Reviews page that shows the status of the "Sync New Reviews" operation, matching the pattern used elsewhere in the app (like calendar sync and comparable data fetching).
+Add a "Last synced" text indicator below the page title showing when reviews were last synchronized, matching the pattern used on other pages like the ListingCalendar component.
 
 ## Current State
-- The `sync-new-reviews` edge function **already tracks progress** in the `sync_jobs` table with:
-  - `sync_type: 'new_reviews'`
-  - `items_synced` count
-  - `progress_message` updates
-  - Status transitions (`running` → `completed`/`failed`)
-- The `SyncProgressCard` component exists and supports this sync type
-- The Reviews page only shows a button spinner, with no persistent progress visibility
+- The Reviews page header shows "Reviews Management" title and description
+- No indication of when reviews were last synced
+- The `sync_jobs` table tracks completed sync operations with timestamps
 
-## Changes Required
+## Implementation
 
-### 1. Update Reviews Page (`src/pages/Reviews.tsx`)
+### 1. Add Query for Last Sync Time
 
-**Add import:**
-```typescript
-import { SyncProgressCard } from "@/components/SyncProgressCard";
-```
-
-**Add the SyncProgressCard component** below the header/action row, conditional on having a `guestyAccountId`:
+Add a new useQuery hook to fetch the most recent completed sync job for either `reviews` or `new_reviews` types:
 
 ```typescript
-{guestyAccountId && (
-  <SyncProgressCard
-    accountId={guestyAccountId}
-    syncType="new_reviews"
-    onComplete={() => queryClient.invalidateQueries({ queryKey: ['reviews'] })}
-  />
-)}
+const { data: lastSyncTime } = useQuery({
+  queryKey: ['reviews', 'lastSync', guestyAccountId],
+  queryFn: async () => {
+    if (!guestyAccountId) return null;
+    
+    const { data, error } = await supabase
+      .from('sync_jobs')
+      .select('completed_at')
+      .eq('guesty_account_id', guestyAccountId)
+      .in('sync_type', ['reviews', 'new_reviews'])
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (error || !data) return null;
+    return new Date(data.completed_at).toLocaleString();
+  },
+  enabled: !!guestyAccountId,
+});
 ```
 
-**Remove the setTimeout refresh** in `handleSyncNewReviews` since the `SyncProgressCard` will handle data refresh via `onComplete`.
+### 2. Update Header Description
 
-## Technical Details
+Update the description text below the title to include the last sync time:
 
-### How Progress Tracking Works
-1. When user clicks "Sync New Reviews", the edge function creates a `sync_jobs` record
-2. `SyncProgressCard` subscribes to real-time Postgres changes on `sync_jobs`
-3. As the edge function syncs pages of reviews, it updates `items_synced` and `progress_message`
-4. The component displays a progress bar and live status messages
-5. On completion/failure, the card shows final status and auto-dismisses after 30 seconds
-6. The `onComplete` callback refreshes the reviews data
+**Before:**
+```tsx
+<p className="text-muted-foreground">View and manage reviews across all properties</p>
+```
 
-### User Experience
-- Progress card appears when sync starts
-- Shows: "Synced 45 new reviews (page 2)..."
-- Displays item count badge (e.g., "45")
-- Dismiss button available after completion
-- Failed syncs show error message
+**After:**
+```tsx
+<p className="text-muted-foreground">
+  View and manage reviews across all properties
+  {lastSyncTime && (
+    <span className="ml-2 text-xs">• Last synced: {lastSyncTime}</span>
+  )}
+</p>
+```
 
-## Visual Placement
-The progress card will appear between the page header and the tabs, making it visible regardless of which tab (Guest Reviews or Airbnb Ratings) is active.
+### 3. Invalidate on Sync Complete
+
+The existing `SyncProgressCard` already calls `queryClient.invalidateQueries({ queryKey: ['reviews'] })` on completion, which will refresh the last sync time automatically.
+
+## Visual Result
+The header will display:
+```
+Reviews Management
+View and manage reviews across all properties • Last synced: 2/5/2026, 9:14:17 PM
+```
 
 ## Files Modified
 | File | Change |
 |------|--------|
-| `src/pages/Reviews.tsx` | Add `SyncProgressCard` import and component, remove `setTimeout` refresh |
+| `src/pages/Reviews.tsx` | Add lastSyncTime query and display in header description |
