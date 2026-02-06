@@ -1642,6 +1642,8 @@ export type Database = {
           category_ratings: Json | null
           dispute_analyzed_at: string | null
           dispute_case_file: Json | null
+          dispute_conversation_analyzed_at: string | null
+          dispute_conversation_redflags: Json | null
           dispute_conversation_summary: string | null
           dispute_has_pressure: boolean | null
           dispute_has_refund_demands: boolean | null
@@ -1676,6 +1678,8 @@ export type Database = {
           category_ratings?: Json | null
           dispute_analyzed_at?: string | null
           dispute_case_file?: Json | null
+          dispute_conversation_analyzed_at?: string | null
+          dispute_conversation_redflags?: Json | null
           dispute_conversation_summary?: string | null
           dispute_has_pressure?: boolean | null
           dispute_has_refund_demands?: boolean | null
@@ -1710,6 +1714,8 @@ export type Database = {
           category_ratings?: Json | null
           dispute_analyzed_at?: string | null
           dispute_case_file?: Json | null
+          dispute_conversation_analyzed_at?: string | null
+          dispute_conversation_redflags?: Json | null
           dispute_conversation_summary?: string | null
           dispute_has_pressure?: boolean | null
           dispute_has_refund_demands?: boolean | null

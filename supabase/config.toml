@@ -116,3 +116,6 @@ verify_jwt = true
 
 [functions.analyze-review-dispute]
 verify_jwt = true
+
+[functions.analyze-conversation-redflags]
+verify_jwt = true
