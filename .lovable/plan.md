@@ -1,59 +1,108 @@
 
-# Fix: Guest Name/Date Cut Off in Dispute Detail Sheet
+
+# Fix: All Sheet Sections Text Overflow/Clipping
 
 ## Problem
 
-In the Dispute Detail Sheet header, the guest name and date line (e.g., "Nick Boroughf • 1/27/2026") is being cut off. This happens because:
-1. The close button (X) is positioned at `right-4 top-4`, overlapping the header area
-2. The `SheetDescription` has no width constraint or text overflow handling
-3. Longer guest names collide with the close button
+Multiple sections in the DisputeDetailSheet are having text overflow issues where content extends past the visible area:
 
-Meanwhile, shorter names like "Soner Keser" fit fine.
+1. **Conversation History** - Message bubbles with URLs/long text extend past bounds
+2. **Conversation Red Flags** - Overall assessment and red flag cards clip at the right edge  
+3. **Dispute Case File** - Textarea content and descriptions are cut off
+
+## Root Cause
+
+The ScrollArea component wraps content in a viewport that doesn't constrain child widths properly. While `pr-10` was added to the inner div, individual elements inside nested containers (like the conversation ScrollArea, red flag cards, textareas, etc.) don't inherit proper width constraints and can overflow their parents.
 
 ## Solution
 
-Add right padding to the `SheetHeader` in the DisputeDetailSheet to make room for the close button, and add text overflow handling to prevent clipping.
+Apply `overflow-hidden` to the main content container to enforce width boundaries, and add `break-words` and width constraints to specific problematic elements:
+
+1. Add `overflow-hidden` to the main content container to clip any overflow
+2. Add `w-full` and `overflow-hidden` to nested containers that need width constraints
+3. Ensure textareas and paragraphs have proper `break-words` handling
 
 ## Changes Required
 
 **File:** `src/components/dispute/DisputeDetailSheet.tsx`
 
-### 1. Add padding to SheetHeader (line 356)
+### 1. Add overflow-hidden to main content div (line 371)
 
 ```typescript
 // Before:
-<SheetHeader>
+<div className="space-y-6 py-4 pr-10">
 
 // After:
-<SheetHeader className="pr-8">
+<div className="space-y-6 py-4 pr-10 overflow-hidden">
 ```
 
-This adds 32px of right padding to keep the header content clear of the close button.
-
-### 2. Add truncate class to SheetDescription content (line 365-367)
-
-Wrap the description text to ensure it truncates gracefully if still too long:
+### 2. Fix nested conversation ScrollArea container (line 573)
 
 ```typescript
 // Before:
-<SheetDescription>
-  {review.guest_name || 'Unknown Guest'} • {review.review_date ? new Date(review.review_date).toLocaleDateString() : 'Unknown date'}
-</SheetDescription>
+<div className="space-y-3 pr-4">
 
 // After:
-<SheetDescription className="truncate">
-  {review.guest_name || 'Unknown Guest'} • {review.review_date ? new Date(review.review_date).toLocaleDateString() : 'Unknown date'}
-</SheetDescription>
+<div className="space-y-3 pr-4 overflow-hidden">
+```
+
+### 3. Fix overall assessment paragraph (line 717)
+
+```typescript
+// Before:
+<p className="text-sm bg-muted/50 p-3 rounded-lg">
+
+// After:
+<p className="text-sm bg-muted/50 p-3 rounded-lg break-words">
+```
+
+### 4. Fix red flag card container (lines 727-735)
+
+```typescript
+// Before:
+<div
+  key={idx}
+  className={cn(
+    "p-3 rounded-lg border-l-4 relative",
+
+// After:
+<div
+  key={idx}
+  className={cn(
+    "p-3 rounded-lg border-l-4 relative overflow-hidden",
+```
+
+### 5. Fix dialog conversation container (line 614)
+
+```typescript
+// Before:
+<div className="space-y-4">
+
+// After:
+<div className="space-y-4 overflow-hidden">
+```
+
+### 6. Fix message content in dialog (line 633)
+
+```typescript
+// Before:
+<p className="whitespace-pre-wrap">{msg.content}</p>
+
+// After:
+<p className="whitespace-pre-wrap break-words">{msg.content}</p>
 ```
 
 ## Visual Result
 
-- The guest name and date will have proper clearance from the close button
-- If the combined text is still too long, it will truncate with an ellipsis rather than being abruptly cut off
-- All guest names will display consistently without overlapping the X button
+- All message bubbles will properly wrap long URLs and text
+- Overall assessment text will stay within bounds
+- Red flag quotes and context will not extend past cards
+- Dispute description textarea content will be properly contained
+- No horizontal overflow in any section
 
-## File to Modify
+## Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/components/dispute/DisputeDetailSheet.tsx` | Add `pr-8` to SheetHeader (line 356), add `truncate` class to SheetDescription (line 365) |
+| `src/components/dispute/DisputeDetailSheet.tsx` | Add overflow-hidden and break-words classes to 6 locations |
+
