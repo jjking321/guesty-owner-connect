@@ -366,8 +366,8 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
           </SheetDescription>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-120px)] pr-4">
-          <div className="space-y-6 py-4">
+        <ScrollArea className="h-[calc(100vh-120px)] pr-6">
+          <div className="space-y-6 py-4 pr-2 overflow-hidden">
             {/* Review Header */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1">
@@ -502,7 +502,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                   {review.dispute_conversation_summary && (
                     <div>
                       <Label className="text-xs text-muted-foreground">Conversation Summary</Label>
-                      <p className="mt-1 text-sm">
+                      <p className="mt-1 text-sm break-words">
                         {review.dispute_conversation_summary}
                       </p>
                     </div>
@@ -576,7 +576,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                             {msg.timestamp ? new Date(msg.timestamp).toLocaleDateString() : ''}
                           </span>
                         </div>
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                       </div>
                     ))}
                   </div>
