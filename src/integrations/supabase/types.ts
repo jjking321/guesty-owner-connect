@@ -1665,6 +1665,7 @@ export type Database = {
           imported_at: string
           is_removed: boolean
           listing_id: string
+          private_note: string | null
           rating: number | null
           removed_at: string | null
           removed_by: string | null
@@ -1703,6 +1704,7 @@ export type Database = {
           imported_at?: string
           is_removed?: boolean
           listing_id: string
+          private_note?: string | null
           rating?: number | null
           removed_at?: string | null
           removed_by?: string | null
@@ -1741,6 +1743,7 @@ export type Database = {
           imported_at?: string
           is_removed?: boolean
           listing_id?: string
+          private_note?: string | null
           rating?: number | null
           removed_at?: string | null
           removed_by?: string | null
