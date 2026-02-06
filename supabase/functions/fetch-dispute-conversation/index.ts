@@ -344,10 +344,10 @@ Deno.serve(async (req) => {
       operator: '$eq',
       value: targetReservationId
     }]);
-    const conversationsUrl = `https://open-api.guesty.com/v1/communication/conversations?filters=${encodeURIComponent(filters)}`;
+    const conversationsUrl = `https://open-api.guesty.com/v1/communication/conversations?filters=${encodeURIComponent(filters)}&limit=1`;
     const conversationsData = await fetchWithRetry(conversationsUrl, accessToken, 'conversations');
 
-    const conversations = conversationsData.results || conversationsData.data || [];
+    const conversations = conversationsData?.data?.conversations || [];
     console.log(`Found ${conversations.length} conversations for reservation`);
 
     if (conversations.length === 0) {
@@ -371,29 +371,29 @@ Deno.serve(async (req) => {
 
     // Step 2: Fetch messages for the conversation
     const conversationId = conversations[0]._id || conversations[0].id;
-    const postsUrl = `https://open-api.guesty.com/v1/communication/conversations/${conversationId}/posts`;
+    const postsUrl = `https://open-api.guesty.com/v1/communication/conversations/${conversationId}/posts?limit=100`;
     const postsData = await fetchWithRetry(postsUrl, accessToken, 'messages');
 
-    const posts = postsData.results || postsData.data || postsData || [];
-    console.log(`Found ${Array.isArray(posts) ? posts.length : 0} messages`);
+    const posts = postsData?.data?.posts || [];
+    console.log(`Found ${posts.length} messages`);
 
     // Parse and format messages
-    const messages = (Array.isArray(posts) ? posts : []).map((post: any) => {
-      const sender = post.sender || {};
-      const isGuest = sender.type === 'guest' || sender.role === 'guest';
-      const isHost = sender.type === 'host' || sender.role === 'host' || sender.type === 'user';
+    const messages = posts.map((post: any) => {
+      const isGuest = post.sender?.type === 'guest' || post.sentBy === 'guest';
+      const text = post.body || post.message || post.content || '';
       
       return {
         id: post._id || post.id,
-        timestamp: post.createdAt || post.created_at || post.sentAt,
-        sender: isGuest ? 'guest' : (isHost ? 'host' : 'system'),
-        senderName: sender.name || sender.fullName || (isGuest ? 'Guest' : 'Host'),
-        content: post.body || post.text || post.message || '',
+        timestamp: post.createdAt || post.sentAt || new Date().toISOString(),
+        sender: isGuest ? 'guest' : 'host',
+        senderName: post.sender?.name || post.sender?.fullName || (isGuest ? 'Guest' : 'Host'),
+        content: text,
         source: post.source || 'unknown',
       };
-    }).sort((a: any, b: any) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+    }).filter((m: any) => m.content.trim().length > 0)
+      .sort((a: any, b: any) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
 
     // Update review with messages
     await supabase
