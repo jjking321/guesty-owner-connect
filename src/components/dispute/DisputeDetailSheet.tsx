@@ -99,6 +99,7 @@ interface DisputeReview {
   dispute_redflags_excluded?: number[] | null;
   property_name?: string;
   reservation_id?: string | null;
+  private_note?: string | null;
 }
 
 interface DisputeDetailSheetProps {
@@ -393,6 +394,18 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                 {review.review_text || 'No review text available'}
               </p>
             </div>
+
+            {/* Private Note */}
+            {review.private_note && (
+              <div>
+                <Label className="text-sm font-medium">Private Feedback</Label>
+                <div className="mt-1 p-3 bg-muted/50 rounded-lg border border-border">
+                  <p className="text-sm whitespace-pre-wrap text-muted-foreground italic">
+                    {review.private_note}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Category Ratings */}
             {review.category_ratings && Object.keys(review.category_ratings).length > 0 && (

@@ -35,6 +35,7 @@ interface DisputeReview {
   dispute_has_pressure: boolean | null;
   dispute_has_refund_demands: boolean | null;
   dispute_notes: string | null;
+  private_note?: string | null;
   property_name?: string;
   reservation_id?: string | null;
 }
