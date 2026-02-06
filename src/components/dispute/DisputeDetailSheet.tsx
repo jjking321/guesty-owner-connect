@@ -367,8 +367,8 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
           </SheetDescription>
         </SheetHeader>
 
-        <ScrollArea className="h-[calc(100vh-120px)] pr-6">
-          <div className="space-y-6 py-4 pr-2 overflow-hidden">
+        <ScrollArea className="h-[calc(100vh-120px)]">
+          <div className="space-y-6 py-4 pr-6">
             {/* Review Header */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1">
@@ -439,7 +439,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
 
             {/* AI Analysis Section */}
             <div>
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-3 gap-2">
                 <Label className="text-sm font-medium flex items-center gap-2">
                   <Sparkles className="h-4 w-4" />
                   AI Dispute Analysis
