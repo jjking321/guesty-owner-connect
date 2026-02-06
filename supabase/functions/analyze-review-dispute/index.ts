@@ -118,23 +118,26 @@ Deno.serve(async (req) => {
       .update({ dispute_status: 'analyzing' })
       .eq('id', reviewId);
 
-    // Fetch review with all related data
+    // Fetch review
     const { data: review, error: reviewError } = await supabase
       .from('reviews')
-      .select(`
-        *,
-        listings:listing_id (
-          id,
-          nickname,
-          address,
-          guesty_account_id
-        )
-      `)
+      .select('*')
       .eq('id', reviewId)
       .single();
 
     if (reviewError || !review) {
       throw new Error(`Review not found: ${reviewError?.message}`);
+    }
+
+    // Fetch listing separately (no FK relationship in schema)
+    let listing = null;
+    if (review.listing_id) {
+      const { data: listingData } = await supabase
+        .from('listings')
+        .select('id, nickname, address, guesty_account_id')
+        .eq('id', review.listing_id)
+        .single();
+      listing = listingData;
     }
 
     // Get organization ID from guesty account
@@ -194,8 +197,7 @@ Deno.serve(async (req) => {
       reservation = resData;
     }
 
-    // Build context for AI
-    const listing = review.listings as any;
+    // Use the separately fetched listing
     const address = listing?.address 
       ? [listing.address.city, listing.address.state].filter(Boolean).join(', ')
       : 'Unknown location';
