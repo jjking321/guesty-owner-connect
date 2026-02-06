@@ -1,16 +1,17 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Loader2, Sparkles, RefreshCw } from "lucide-react";
+import { Loader2, Sparkles, RefreshCw, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { DisputeCard } from "./DisputeCard";
 import { DisputeDetailSheet } from "./DisputeDetailSheet";
 import { cn } from "@/lib/utils";
+import { StripeDateRangePicker, DateRange } from "@/components/StripeDateRangePicker";
+import { Input } from "@/components/ui/input";
 
 interface DisputeReview {
   id: string;
@@ -56,6 +57,21 @@ export function DisputePipelineBoard() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [analyzingBatch, setAnalyzingBatch] = useState(false);
+  
+  // New filter state
+  const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
+  const [ratingFilter, setRatingFilter] = useState<string>('all');
+  const [scoreFilter, setScoreFilter] = useState<string>('all');
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchInput);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Fetch properties for filter
   const { data: properties = [] } = useQuery({
@@ -109,7 +125,7 @@ export function DisputePipelineBoard() {
 
   // Fetch all dispute reviews
   const { data: reviews = [], isLoading, refetch } = useQuery({
-    queryKey: ['dispute-reviews', selectedProperty],
+    queryKey: ['dispute-reviews', selectedProperty, dateRange.from?.toISOString(), dateRange.to?.toISOString(), ratingFilter, scoreFilter, searchQuery],
     queryFn: async () => {
       let query = supabase
         .from('reviews')
@@ -120,8 +136,38 @@ export function DisputePipelineBoard() {
         .not('dispute_status', 'is', null)
         .order('review_date', { ascending: false });
 
+      // Property filter
       if (selectedProperty !== 'all') {
         query = query.eq('listing_id', selectedProperty);
+      }
+
+      // Date range filter
+      if (dateRange.from) {
+        query = query.gte('review_date', dateRange.from.toISOString().split('T')[0]);
+      }
+      if (dateRange.to) {
+        query = query.lte('review_date', dateRange.to.toISOString().split('T')[0]);
+      }
+
+      // Rating filter (within 1-3 stars already filtered by lt rating 4)
+      if (ratingFilter !== 'all') {
+        query = query.eq('rating', parseInt(ratingFilter));
+      }
+
+      // Score filter
+      if (scoreFilter === 'high') {
+        query = query.gte('dispute_likelihood_score', 70);
+      } else if (scoreFilter === 'medium') {
+        query = query.gte('dispute_likelihood_score', 30).lt('dispute_likelihood_score', 70);
+      } else if (scoreFilter === 'low') {
+        query = query.lt('dispute_likelihood_score', 30).not('dispute_likelihood_score', 'is', null);
+      } else if (scoreFilter === 'unanalyzed') {
+        query = query.is('dispute_likelihood_score', null);
+      }
+
+      // Search filter
+      if (searchQuery.trim()) {
+        query = query.or(`guest_name.ilike.%${searchQuery}%,review_text.ilike.%${searchQuery}%`);
       }
 
       const { data, error } = await query;
@@ -129,6 +175,10 @@ export function DisputePipelineBoard() {
 
       // Get property names
       const listingIds = [...new Set(data?.map(r => r.listing_id) || [])];
+      if (listingIds.length === 0) {
+        return [];
+      }
+      
       const { data: listings } = await supabase
         .from('listings')
         .select('id, nickname')
@@ -268,11 +318,12 @@ export function DisputePipelineBoard() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div className="flex items-center gap-4">
+      {/* Filters */}
+      <div className="space-y-3">
+        {/* Row 1: Filter dropdowns */}
+        <div className="flex flex-wrap items-center gap-3">
           <Select value={selectedProperty} onValueChange={setSelectedProperty}>
-            <SelectTrigger className="w-[250px]">
+            <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="All properties" />
             </SelectTrigger>
             <SelectContent>
@@ -285,35 +336,79 @@ export function DisputePipelineBoard() {
             </SelectContent>
           </Select>
 
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Badge variant="outline">{totalCount} disputes</Badge>
-            {highPriorityCount > 0 && (
-              <Badge variant="destructive">{highPriorityCount} high priority</Badge>
-            )}
-          </div>
+          <StripeDateRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            className="w-[200px]"
+          />
+
+          <Select value={ratingFilter} onValueChange={setRatingFilter}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="All Ratings" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Ratings</SelectItem>
+              <SelectItem value="3">3 Stars</SelectItem>
+              <SelectItem value="2">2 Stars</SelectItem>
+              <SelectItem value="1">1 Star</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={scoreFilter} onValueChange={setScoreFilter}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="All Scores" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Scores</SelectItem>
+              <SelectItem value="high">High (70%+)</SelectItem>
+              <SelectItem value="medium">Medium (30-69%)</SelectItem>
+              <SelectItem value="low">Low (&lt;30%)</SelectItem>
+              <SelectItem value="unanalyzed">Not Analyzed</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => refetch()}
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Button 
-            size="sm"
-            onClick={handleAnalyzeBatch}
-            disabled={analyzingBatch || (reviewsByColumn['triage']?.length || 0) === 0}
-          >
-            {analyzingBatch ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <Sparkles className="h-4 w-4 mr-2" />
-            )}
-            Analyze Triage ({reviewsByColumn['triage']?.length || 0})
-          </Button>
+        {/* Row 2: Search and actions */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="relative flex-1 min-w-[200px] max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search guest name or review text..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Badge variant="outline">{totalCount} disputes</Badge>
+              {highPriorityCount > 0 && (
+                <Badge variant="destructive">{highPriorityCount} high priority</Badge>
+              )}
+            </div>
+
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => refetch()}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Refresh
+            </Button>
+            <Button 
+              size="sm"
+              onClick={handleAnalyzeBatch}
+              disabled={analyzingBatch || (reviewsByColumn['triage']?.length || 0) === 0}
+            >
+              {analyzingBatch ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-2" />
+              )}
+              Analyze Triage ({reviewsByColumn['triage']?.length || 0})
+            </Button>
+          </div>
         </div>
       </div>
 
