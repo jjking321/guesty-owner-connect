@@ -21,6 +21,43 @@ OBJECTIVE: Analyze whether this review can be disputed and removed based on Airb
 
 5. **Content Policy Violation** - Discriminatory content, private info disclosure, profanity, or harassment. Signs include: personal attacks, racist/sexist language, sharing host's personal information, threats.
 
+## Official Airbnb Policy Text (Quote Directly When Applicable)
+
+### Extortion/Coercion Policy
+Per Airbnb's Reviews Policy: "Members of the Airbnb community may not coerce, intimidate, extort, threaten, incentivize or manipulate another person in an attempt to influence a review, like promising compensation in exchange for a positive review or threatening consequences in the event of a negative review."
+
+Also: "Reviews may not be provided or withheld in exchange for something of value—like a discount, refund, reciprocal review, or promise not to take negative action against the reviewer."
+
+### Retaliation Policy  
+Per Airbnb's Reviews Policy: "Guests should not write biased or inauthentic reviews as a form of retaliation against a host who enforces a policy or rule."
+
+### Relevance Policy
+Per Airbnb's Reviews Policy: "Reviews must provide relevant information about the reviewer's experience with the host, guest, stay, or experience that would help other community members make informed booking and hosting decisions."
+
+Also: "If a guest never arrived for their stay or experience, or had to cancel due to circumstances unrelated to that stay or experience, their review may be removed."
+
+### Third-Party/Authenticity Policy
+Per Airbnb's Reviews Policy: "Reviews may only be provided in connection with a genuine stay or experience. For example, hosts are not allowed to accept a fake reservation in exchange for a positive review, use a second account to leave themselves a review, or coordinate with others to manipulate the review system."
+
+### Content Policy
+Per Airbnb's Content Policy: Reviews may not contain "content that endorses or promotes illegal or harmful activity, or that is sexually explicit, violent, graphic, threatening, or harassing" or "content that includes another person's private information, including content that is sufficient to identify a listing's location."
+
+## Case Building Instructions
+When building your dispute case:
+1. Identify which specific policy was violated
+2. Quote the exact policy language in your case description
+3. Show how the guest's actions/review directly violates the quoted policy
+4. Cite specific evidence (conversation quotes, timeline, behavior patterns)
+
+## Proven Removal Scenarios
+Based on property manager success cases:
+- Guest did not enter/stay in unit = review should be removed
+- Guest booked for someone else and wrote review = removable (third-party)
+- Guest threatened bad review after declined refund request = highly likely removal
+- Bad review filed after damage claim = strong grounds for removal (retaliation)
+- Review contains profanity, names, addresses, or links = will be removed (content policy)
+- Complaints about weather, construction, or neighborhood = irrelevant, can be removed
+
 ## Analysis Guidelines
 
 - Look for ANY evidence that could fit these categories
@@ -279,7 +316,12 @@ Please analyze this review and determine if it can be disputed for removal.
                   },
                   caseDescription: {
                     type: "string",
-                    description: "Detailed dispute description to submit to Airbnb (2-4 paragraphs, persuasive, citing specific evidence)"
+                    description: "Detailed dispute description to submit to Airbnb (2-4 paragraphs, persuasive, citing specific evidence and quoting official Airbnb policy)"
+                  },
+                  policyCitations: {
+                    type: "array",
+                    items: { type: "string" },
+                    description: "Exact Airbnb policy quotes that support the dispute case (e.g., 'Per Airbnb Reviews Policy: Guests should not write biased or inauthentic reviews as a form of retaliation...')"
                   },
                   conversationSummary: {
                     type: "string",
@@ -298,7 +340,7 @@ Please analyze this review and determine if it can be disputed for removal.
                     description: "Whether guest demanded refunds in the conversation"
                   }
                 },
-                required: ["likelihoodScore", "violationCategory", "categoryReason", "caseDescription", "conversationSummary", "hasThreats", "hasPressure", "hasRefundDemands"],
+                required: ["likelihoodScore", "violationCategory", "categoryReason", "caseDescription", "policyCitations", "conversationSummary", "hasThreats", "hasPressure", "hasRefundDemands"],
                 additionalProperties: false
               }
             }
@@ -365,6 +407,7 @@ Please analyze this review and determine if it can be disputed for removal.
       description: analysis.caseDescription,
       violation_category: analysis.violationCategory,
       likelihood_score: analysis.likelihoodScore,
+      policy_citations: analysis.policyCitations || [],
       generated_at: new Date().toISOString(),
     };
 

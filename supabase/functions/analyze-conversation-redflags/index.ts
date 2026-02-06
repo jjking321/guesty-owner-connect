@@ -8,7 +8,23 @@ const corsHeaders = {
 
 const systemPrompt = `Role: You are a Senior Policy Compliance Auditor specializing in Airbnb's Terms of Service. Your goal is to conduct a forensic analysis of guest communications to identify any specific violations of Airbnb's Content Policy that warrant a review removal.
 
-Task: Analyze the message_history and review_text to identify evidentiary support for removal. You are looking for high-confidence matches in the following categories:
+## Official Airbnb Policy Framework
+
+When identifying violations, match evidence to these official policy statements:
+
+EXTORTION: Per Airbnb's Reviews Policy: "Members of the Airbnb community may not coerce, intimidate, extort, threaten, incentivize or manipulate another person in an attempt to influence a review, like promising compensation in exchange for a positive review or threatening consequences in the event of a negative review."
+
+Also: "Reviews may not be provided or withheld in exchange for something of value—like a discount, refund, reciprocal review, or promise not to take negative action against the reviewer."
+
+RETALIATION: Per Airbnb's Reviews Policy: "Guests should not write biased or inauthentic reviews as a form of retaliation against a host who enforces a policy or rule."
+
+THIRD-PARTY: Per Airbnb's Reviews Policy: "Reviews may only be provided in connection with a genuine stay or experience."
+
+IRRELEVANT: Per Airbnb's Reviews Policy: "Reviews must provide relevant information about the reviewer's experience with the host, guest, stay, or experience that would help other community members make informed booking and hosting decisions." Also: "If a guest never arrived for their stay or experience, or had to cancel due to circumstances unrelated to that stay or experience, their review may be removed."
+
+CONTENT POLICY: Per Airbnb's Content Policy: Reviews may not contain "content that endorses or promotes illegal or harmful activity, or that is sexually explicit, violent, graphic, threatening, or harassing" or "content that includes another person's private information."
+
+## Analysis Categories
 
 1. Policy-Violating Financial Inducement (Extortion): Identify any instance where a guest mentions a financial outcome (refunds, discounts, extra services) in connection with their feedback or review status. Document these as potential violations of the Extortion Policy.
 
@@ -17,6 +33,8 @@ Task: Analyze the message_history and review_text to identify evidentiary suppor
 3. Inauthentic/Irrelevant (Third-Party): Identify if the guest indicates they were not the primary person experiencing the stay (e.g., booking for others). Flag references to issues outside the host's control (e.g., local infrastructure, weather).
 
 4. Evidence Extraction: Extract and quote the exact snippets from the message history that provide the strongest evidence for these violations. These quotes will be used to provide factual documentation to Airbnb Support agents.
+
+For each red flag identified, cite which specific Airbnb policy clause it violates.
 
 Be thorough but only flag genuine policy violations with supporting evidence. If there are no clear violations, report that honestly.`;
 
@@ -118,7 +136,7 @@ Analyze this conversation for any red flags that could support a dispute claim.`
                       properties: {
                         category: {
                           type: "string",
-                          enum: ["Extortion", "Retaliatory", "Third-Party", "Irrelevant"],
+                          enum: ["Extortion", "Retaliatory", "Third-Party", "Irrelevant", "Content Policy"],
                           description: "The category of policy violation"
                         },
                         severity: {
@@ -130,9 +148,13 @@ Analyze this conversation for any red flags that could support a dispute claim.`
                           type: "string",
                           description: "Exact quote from the conversation that serves as evidence"
                         },
+                        policyViolated: {
+                          type: "string",
+                          description: "The specific Airbnb policy text that this evidence violates (e.g., 'Per Airbnb Reviews Policy: Guests should not write biased or inauthentic reviews as a form of retaliation...')"
+                        },
                         context: {
                           type: "string",
-                          description: "Brief explanation of why this is a red flag and how it violates policy"
+                          description: "Brief explanation of why this is a red flag and how it violates the cited policy"
                         },
                         sender: {
                           type: "string",
@@ -144,7 +166,7 @@ Analyze this conversation for any red flags that could support a dispute claim.`
                           description: "When the message was sent (if available)"
                         }
                       },
-                      required: ["category", "severity", "quote", "context", "sender"]
+                      required: ["category", "severity", "quote", "policyViolated", "context", "sender"]
                     }
                   },
                   overallAssessment: {
