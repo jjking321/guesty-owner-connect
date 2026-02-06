@@ -12,10 +12,11 @@ import { DateRangeFilter, DateRange } from "@/components/DateRangeFilter";
 import { AirbnbRatingsTable } from "@/components/AirbnbRatingsTable";
 import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
+import { DisputePipelineBoard } from "@/components/dispute/DisputePipelineBoard";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
+import { RefreshCw, Loader2, ChevronLeft, ChevronRight, MessageSquare, Gavel } from "lucide-react";
 
 const PAGE_SIZE = 100;
 
@@ -378,6 +379,10 @@ export default function Reviews() {
               <AirbnbIcon className="h-4 w-4" />
               Airbnb Ratings
             </TabsTrigger>
+            <TabsTrigger value="airbnb-disputes" className="gap-2">
+              <Gavel className="h-4 w-4" />
+              Airbnb Disputes
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="reviews" className="space-y-6">
@@ -459,6 +464,10 @@ export default function Reviews() {
 
           <TabsContent value="airbnb-ratings">
             <AirbnbRatingsTable />
+          </TabsContent>
+
+          <TabsContent value="airbnb-disputes">
+            <DisputePipelineBoard />
           </TabsContent>
         </Tabs>
       </div>
