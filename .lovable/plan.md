@@ -1,163 +1,80 @@
 
 
-# Plan: Add Advanced Filters and Search to Dispute Pipeline Board
+# Fix: Dispute Detail Sheet Sidebar Content Cutoff
 
-## Overview
+## Problem
 
-Enhance the Dispute Pipeline Board with additional filtering capabilities: date range filter, rating/likelihood score filter, and text search. These filters will apply at the database level before grouping reviews into Kanban columns.
+The review dispute detail sheet (side panel) is cutting off content on the right side. Text in sections like "Conversation Summary" and message content is being truncated before reaching the edge of the panel.
 
-## Current State
+## Root Causes
 
-The DisputePipelineBoard currently has:
-- Property filter (database-level) ✅
-- Refresh and Analyze Triage buttons ✅
-- Badge counts for total disputes and high priority ✅
+| Issue | Location | Description |
+|-------|----------|-------------|
+| CSS class conflict | `sheet.tsx` line 40-41 | The `sheetVariants` includes `sm:max-w-sm` which may override the custom `sm:max-w-2xl` |
+| Missing overflow control | `DisputeDetailSheet.tsx` line 369 | ScrollArea's inner content needs explicit overflow handling |
+| Word wrapping | Various text elements | Long text content may not be breaking properly |
 
-Missing:
-- Date range filter
-- Rating/Score filter
-- Text search
+## Solution
 
-## Changes Required
+### 1. Update SheetContent to remove conflicting max-width
 
-### 1. Add New Filter State
+**File:** `src/components/ui/sheet.tsx`
 
-| Filter | Type | Description |
-|--------|------|-------------|
-| `dateRange` | `{ from: Date \| undefined, to: Date \| undefined }` | Filter by review_date |
-| `ratingFilter` | `string` | "all", "1", "2", "3", or "low" (already < 4 for disputes, so these are refinements within 1-3 stars) |
-| `scoreFilter` | `string` | "all", "high" (>=70%), "medium" (30-69%), "low" (<30%), "unanalyzed" |
-| `searchInput` | `string` | Raw input value |
-| `searchQuery` | `string` | Debounced value for querying |
-
-### 2. Update Filter UI
-
-Reorganize the header to include a more comprehensive filter bar:
-
-```text
-Row 1: [Property ▼] [Date Range ▼] [Rating ▼] [Score ▼]
-Row 2: [🔍 Search guest name or review text...              ] | Badges | Buttons
-```
-
-### 3. Apply Filters to Database Query
-
-Update the main reviews query to include all filters:
+Change the `sheetVariants` for the `right` side to not include `sm:max-w-sm`, allowing custom className overrides to work:
 
 ```typescript
-let query = supabase
-  .from('reviews')
-  .select('*')
-  .eq('is_removed', false)
-  .ilike('source', '%airbnb%')
-  .lt('rating', 4)
-  .not('dispute_status', 'is', null)
-  .order('review_date', { ascending: false });
+// Before:
+right: "inset-y-0 right-0 h-full w-3/4  border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
 
-// Property filter
-if (selectedProperty !== 'all') {
-  query = query.eq('listing_id', selectedProperty);
-}
-
-// Date range filter
-if (dateRange.from) {
-  query = query.gte('review_date', dateRange.from.toISOString());
-}
-if (dateRange.to) {
-  query = query.lte('review_date', dateRange.to.toISOString());
-}
-
-// Rating filter (within the 1-3 stars already filtered)
-if (ratingFilter !== 'all') {
-  query = query.eq('rating', parseInt(ratingFilter));
-}
-
-// Score filter
-if (scoreFilter === 'high') {
-  query = query.gte('dispute_likelihood_score', 70);
-} else if (scoreFilter === 'medium') {
-  query = query.gte('dispute_likelihood_score', 30).lt('dispute_likelihood_score', 70);
-} else if (scoreFilter === 'low') {
-  query = query.lt('dispute_likelihood_score', 30).not('dispute_likelihood_score', 'is', null);
-} else if (scoreFilter === 'unanalyzed') {
-  query = query.is('dispute_likelihood_score', null);
-}
-
-// Search filter
-if (searchQuery.trim()) {
-  query = query.or(`guest_name.ilike.%${searchQuery}%,review_text.ilike.%${searchQuery}%`);
-}
+// After:
+right: "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
 ```
 
-### 4. Add Debounced Search
+This allows the `DisputeDetailSheet` to properly override with `sm:max-w-2xl`.
+
+### 2. Add overflow handling to ScrollArea content
+
+**File:** `src/components/dispute/DisputeDetailSheet.tsx`
+
+Add `overflow-hidden` to the content container and ensure text breaks properly:
 
 ```typescript
-const [searchInput, setSearchInput] = useState('');
-const [searchQuery, setSearchQuery] = useState('');
-
-useEffect(() => {
-  const timer = setTimeout(() => {
-    setSearchQuery(searchInput);
-  }, 400);
-  return () => clearTimeout(timer);
-}, [searchInput]);
+// Line 369-370:
+<ScrollArea className="h-[calc(100vh-120px)] pr-6">
+  <div className="space-y-6 py-4 pr-2">
 ```
 
-### 5. Update Query Keys
+Changes:
+- Increase `pr-4` to `pr-6` on ScrollArea to give more room for the scrollbar
+- Add `pr-2` to inner div for additional content padding
 
-Include all filter values in the query key for proper cache invalidation:
+### 3. Fix text overflow on long content sections
+
+Add `break-words` and `overflow-wrap` to text-heavy sections:
 
 ```typescript
-queryKey: ['dispute-reviews', selectedProperty, 
-           dateRange.from?.toISOString(), dateRange.to?.toISOString(),
-           ratingFilter, scoreFilter, searchQuery]
+// Conversation summary (around line 501-510)
+<p className="text-sm text-muted-foreground break-words">
+  {review.dispute_conversation_summary}
+</p>
+
+// Message content in conversation history
+<p className="text-sm break-words">
+  {message.body || message.text}
+</p>
 ```
-
-## UI Layout
-
-```text
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│ [Property ▼]  [Date Range ▼]  [Rating ▼]  [Likelihood ▼]                       │
-│                                                                                 │
-│ [🔍 Search guest name or review text...                    ]                   │
-│                                                                                 │
-│ [12 disputes] [3 high priority]                    [Refresh] [Analyze Triage] │
-└─────────────────────────────────────────────────────────────────────────────────┘
-│ Triage │ Analyzing │ Not Eligible │ Submit Claim │ Submitted │ Pending │ Resolved │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Filter Options
-
-### Rating Filter
-| Value | Label | Query |
-|-------|-------|-------|
-| `all` | All Ratings | No additional filter (already < 4) |
-| `3` | 3 Stars | `.eq('rating', 3)` |
-| `2` | 2 Stars | `.eq('rating', 2)` |
-| `1` | 1 Star | `.eq('rating', 1)` |
-
-### Likelihood Score Filter
-| Value | Label | Query |
-|-------|-------|-------|
-| `all` | All Scores | No filter |
-| `high` | High (70%+) | `.gte('dispute_likelihood_score', 70)` |
-| `medium` | Medium (30-69%) | `.gte(..., 30).lt(..., 70)` |
-| `low` | Low (<30%) | `.lt(..., 30).not(..., 'is', null)` |
-| `unanalyzed` | Not Analyzed | `.is('dispute_likelihood_score', null)` |
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/components/dispute/DisputePipelineBoard.tsx` | Add filter state, UI components, update query |
+| `src/components/ui/sheet.tsx` | Remove `sm:max-w-sm` from right variant to allow override |
+| `src/components/dispute/DisputeDetailSheet.tsx` | Increase ScrollArea padding, add `break-words` to text elements |
 
-## Technical Considerations
+## Summary
 
-1. **Imports**: Add `Search` icon from lucide-react, import `StripeDateRangePicker` and `Input` components
-
-2. **Date Range Initialization**: Default to "All time" (undefined/undefined) to show all disputes
-
-3. **Layout**: Use a responsive grid layout for filters that wraps on smaller screens
-
-4. **Performance**: The debounced search prevents excessive queries while typing
+The fix involves:
+1. Removing the conflicting `sm:max-w-sm` from the sheet component's right variant
+2. Adding proper padding to accommodate the scrollbar
+3. Ensuring long text content wraps properly with `break-words`
 
