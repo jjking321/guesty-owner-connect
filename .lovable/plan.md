@@ -1,72 +1,77 @@
 
-# Fix: "No Reviews to Process" Despite 46 Visible in Triage
+# Add Sort Options to Dispute Pipeline Board
 
-## Problem
-When clicking "Analyze Triage" button, the edge function returns "No reviews in triage to process" even though 46 reviews are visible in the triage column.
+## Overview
+Add a dropdown to sort reviews within each Kanban column by either **Review Date** or **Removal Likelihood Score** (default).
 
-## Root Cause
-There's a date mismatch between what the frontend shows and what the backend processes:
+## Changes
 
-| Component | Date Filter | Result |
-|-----------|------------|--------|
-| Kanban board query | **None** | Shows all 46 triage reviews |
-| Edge function | `review_date >= (today - 30 days)` | Filters out **all** reviews |
+### File: `src/components/dispute/DisputePipelineBoard.tsx`
 
-Your most recent triage review is from **January 6, 2026** - exactly 31 days ago, so everything gets excluded.
-
-## Solution
-Remove the date filter from the edge function entirely. If a review is visible in the triage column and the user wants to analyze it, we should process it regardless of age. The frontend already determines what's relevant by showing it.
-
-## Changes Required
-
-**File:** `supabase/functions/batch-analyze-disputes/index.ts`
-
-### Remove the maxAgeDays filter (Lines 30-39)
-
+**1. Add sort state (after line 69)**
 ```typescript
-// Before:
-const { limit = 10, skipWithoutReservation = false, maxAgeDays = 7 } = await req.json()...
-
-// Calculate cutoff date for recent reviews only
-const cutoffDate = new Date();
-cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays);
-
-let query = supabase
-  .from('reviews')
-  .select('id, guest_name, reservation_id, listing_id, review_date')
-  .eq('dispute_status', 'triage')
-  .gte('review_date', cutoffDate.toISOString())  // <-- This excludes everything
-  ...
-
-// After:
-const { limit = 10, skipWithoutReservation = false } = await req.json()...
-
-let query = supabase
-  .from('reviews')
-  .select('id, guest_name, reservation_id, listing_id, review_date')
-  .eq('dispute_status', 'triage')
-  // No date filter - analyze any review in triage
-  ...
+const [sortBy, setSortBy] = useState<string>('likelihood');
 ```
 
-**File:** `src/components/dispute/DisputePipelineBoard.tsx`
+**2. Add sort dropdown to filters row (after the Score filter, line 388)**
 
-### Remove maxAgeDays from the function call (Line 283)
-
+Add a new Select component for sorting:
 ```typescript
-// Before:
-body: { 
-  limit: Math.min(triageReviews.length, 20),
-  maxAgeDays: 30,
-}
-
-// After:
-body: { 
-  limit: Math.min(triageReviews.length, 20),
-}
+<Select value={sortBy} onValueChange={setSortBy}>
+  <SelectTrigger className="w-[180px]">
+    <SelectValue placeholder="Sort by..." />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="likelihood">Likelihood (High→Low)</SelectItem>
+    <SelectItem value="date">Date (Newest First)</SelectItem>
+  </SelectContent>
+</Select>
 ```
 
-## Why This Approach
-- If a review is in triage and visible to the user, they should be able to analyze it
-- Old reviews might still be eligible for dispute (Airbnb allows disputes within certain timeframes)
-- The UI already filters what's shown via the date range picker if the user wants to narrow down
+**3. Update the grouping logic to apply sorting (lines 211-214)**
+
+Replace the simple grouping with a sorted grouping:
+```typescript
+const reviewsByColumn = COLUMNS.reduce((acc, col) => {
+  const columnReviews = reviews.filter(r => r.dispute_status === col.id);
+  
+  // Sort reviews within each column
+  columnReviews.sort((a, b) => {
+    if (sortBy === 'likelihood') {
+      // Sort by likelihood score descending (nulls last)
+      const scoreA = a.dispute_likelihood_score ?? -1;
+      const scoreB = b.dispute_likelihood_score ?? -1;
+      return scoreB - scoreA;
+    } else {
+      // Sort by date descending
+      const dateA = a.review_date ? new Date(a.review_date).getTime() : 0;
+      const dateB = b.review_date ? new Date(b.review_date).getTime() : 0;
+      return dateB - dateA;
+    }
+  });
+  
+  acc[col.id] = columnReviews;
+  return acc;
+}, {} as Record<string, DisputeReview[]>);
+```
+
+**4. Add ArrowUpDown icon import (line 7)**
+```typescript
+import { Loader2, Sparkles, RefreshCw, Search, ArrowUpDown } from "lucide-react";
+```
+
+## Summary of Changes
+
+| Location | Change |
+|----------|--------|
+| Line 69 | Add `sortBy` state with default `'likelihood'` |
+| Line 7 | Import `ArrowUpDown` icon |
+| Line 388 | Add sort dropdown after score filter |
+| Lines 211-214 | Update grouping to sort within columns based on selected option |
+
+## Behavior
+
+- **Default**: Reviews sorted by Removal Likelihood (highest first)
+- **Date option**: Reviews sorted by Review Date (newest first)
+- Reviews with no likelihood score appear at the bottom when sorting by likelihood
+- Sorting applies within each column independently
