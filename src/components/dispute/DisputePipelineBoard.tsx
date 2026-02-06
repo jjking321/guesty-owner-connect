@@ -280,7 +280,6 @@ export function DisputePipelineBoard() {
       const { data, error } = await supabase.functions.invoke('batch-analyze-disputes', {
         body: { 
           limit: Math.min(triageReviews.length, 20), // Process up to 20 at a time
-          maxAgeDays: 30,
         },
       });
 
