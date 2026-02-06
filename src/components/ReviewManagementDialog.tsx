@@ -12,6 +12,7 @@ interface Review {
   rating: number;
   review_text?: string;
   response_text?: string;
+  private_note?: string | null;
   review_date: string;
   source: string;
   is_removed: boolean;
@@ -142,6 +143,16 @@ export function ReviewManagementDialog({
               <p className="text-sm font-medium mb-2">Host Response</p>
               <div className="p-4 bg-accent/10 rounded-lg border border-accent">
                 <p className="text-sm whitespace-pre-wrap">{review.response_text}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Private Note (Internal Feedback) */}
+          {review.private_note && (
+            <div>
+              <p className="text-sm font-medium mb-2">Private Feedback</p>
+              <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                <p className="text-sm whitespace-pre-wrap text-muted-foreground italic">{review.private_note}</p>
               </div>
             </div>
           )}
