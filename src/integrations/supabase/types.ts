@@ -724,6 +724,51 @@ export type Database = {
           },
         ]
       }
+      nightly_sync_runs: {
+        Row: {
+          account_ids: string[]
+          account_states: Json
+          completed_at: string | null
+          created_at: string
+          current_step: string
+          error_message: string | null
+          id: string
+          invocation_count: number
+          started_at: string
+          status: string
+          step_results: Json
+          updated_at: string
+        }
+        Insert: {
+          account_ids?: string[]
+          account_states?: Json
+          completed_at?: string | null
+          created_at?: string
+          current_step?: string
+          error_message?: string | null
+          id?: string
+          invocation_count?: number
+          started_at?: string
+          status?: string
+          step_results?: Json
+          updated_at?: string
+        }
+        Update: {
+          account_ids?: string[]
+          account_states?: Json
+          completed_at?: string | null
+          created_at?: string
+          current_step?: string
+          error_message?: string | null
+          id?: string
+          invocation_count?: number
+          started_at?: string
+          status?: string
+          step_results?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
       organization_invitations: {
         Row: {
           accepted_at: string | null
