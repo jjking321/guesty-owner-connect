@@ -1,46 +1,83 @@
 
 
-# Plan: Backend Data Migration for Review Private Notes
+# Plan: Real-Time UI Updates After AI Analysis
 
-## Overview
+## Problem
 
-Create a SQL migration to move the incorrectly mapped `response_text` data (which currently contains `private_feedback`) to the new `private_note` column for all existing reviews.
+When AI analysis completes, the UI doesn't immediately show the updated results. The current flow:
+1. Analysis completes → `onUpdate()` called → `queryClient.invalidateQueries()` runs
+2. Immediately tries to find updated review in `reviews` array  
+3. But `reviews` still has stale data (query re-fetch is async)
+4. User sees old data until they manually refresh or close/reopen the sheet
 
-## Current State
+## Solution
 
-| Column | Currently Contains | Should Contain |
-|--------|-------------------|----------------|
-| `response_text` | Host's private feedback | Host's public response to review |
-| `private_note` | NULL (new column) | Host's private feedback |
+Use React Query's refetch with await to ensure we get fresh data before updating the selected review state.
 
-## Migration SQL
+## Implementation
 
-```sql
--- Move private_feedback data from response_text to private_note
--- Then clear response_text since we don't have actual host responses
+### File: `src/components/dispute/DisputePipelineBoard.tsx`
 
-UPDATE reviews
-SET 
-  private_note = response_text,
-  response_text = NULL,
-  updated_at = NOW()
-WHERE response_text IS NOT NULL;
+#### 1. Modify onUpdate to use async refetch
+
+Change the `onUpdate` callback to await the refetch before updating `selectedReview`:
+
+```typescript
+onUpdate={async () => {
+  // Wait for the query to refetch with fresh data
+  const { data: freshReviews } = await refetch();
+  
+  // Now update selectedReview with the fresh data
+  if (selectedReview && freshReviews) {
+    const updated = freshReviews.find(r => r.id === selectedReview.id);
+    if (updated) {
+      setSelectedReview(updated);
+    }
+  }
+}}
 ```
 
-## What This Does
+#### 2. Alternative: Use useEffect to sync selectedReview
 
-1. Copies current `response_text` values to `private_note`
-2. Sets `response_text` to NULL (since we don't have actual host public responses without re-syncing)
-3. Updates the `updated_at` timestamp
+Add a `useEffect` that automatically syncs `selectedReview` when the `reviews` data changes:
 
-## Result
+```typescript
+// Sync selectedReview when reviews data updates
+useEffect(() => {
+  if (selectedReview && reviews.length > 0) {
+    const updated = reviews.find(r => r.id === selectedReview.id);
+    if (updated && JSON.stringify(updated) !== JSON.stringify(selectedReview)) {
+      setSelectedReview(updated);
+    }
+  }
+}, [reviews]);
+```
 
-After migration:
-- `private_note` will contain the private feedback that was incorrectly in `response_text`
-- `response_text` will be NULL (future syncs will populate it correctly with host public responses)
-- No full review re-sync required
+This approach is more robust because:
+- Works regardless of how the data is updated
+- Automatically syncs whenever the query refetches
+- No need to change the `onUpdate` callback logic
 
-## Note
+#### 3. Simplify onUpdate callback
 
-If you want to populate the actual public host responses (`response_text`), you would still need to run a review sync. But the private feedback will be correctly placed immediately.
+With the useEffect handling sync, simplify onUpdate:
+
+```typescript
+onUpdate={() => {
+  queryClient.invalidateQueries({ queryKey: ['dispute-reviews'] });
+}}
+```
+
+## Technical Details
+
+| Current Flow | New Flow |
+|--------------|----------|
+| onUpdate → invalidate → find in stale data | onUpdate → invalidate → useEffect detects change → update selectedReview |
+| UI shows stale data | UI shows fresh data immediately |
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/components/dispute/DisputePipelineBoard.tsx` | Add useEffect to sync selectedReview when reviews data changes |
 
