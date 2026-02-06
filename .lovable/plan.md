@@ -1,178 +1,232 @@
 
 
-# Plan: Integrate Official Airbnb Policy Documentation into Dispute Analysis
+# Plan: Add Conversation Red Flags Prompt Management
 
 ## Overview
 
-Enhance both dispute analysis edge functions (`analyze-review-dispute` and `analyze-conversation-redflags`) to include Airbnb's official policy language from the PDF document. This allows the AI to cite exact policy wording when building dispute cases, making them more compelling to Airbnb Support.
+Add a new tab in the AI Prompts Settings UI for managing the "Conversation Red Flags" analysis prompt, and update the `analyze-conversation-redflags` edge function to fetch and use the custom prompt from the database.
 
-## Key Policy Text Extracted
+## Current State
 
-### Reviews Should Be Unbiased (Extortion/Retaliation)
+The `AIPromptsSettings.tsx` component already manages 3 prompts:
+- Call Prep (`call_prep`)
+- Revenue Actions (`revenue_actions`)
+- Review Disputes (`review_dispute_analysis`)
 
-> "Members of the Airbnb community may not coerce, intimidate, extort, threaten, incentivize or manipulate another person in an attempt to influence a review, like promising compensation in exchange for a positive review or threatening consequences in the event of a negative review."
-
-> "Reviews may not be provided or withheld in exchange for something of value—like a discount, refund, reciprocal review, or promise not to take negative action against the reviewer. They also may not be used as an attempt to mislead or deceive Airbnb or another person. For example, guests should not write biased or inauthentic reviews as a form of retaliation against a host who enforces a policy or rule."
-
-### Reviews Should Be Relevant
-
-> "Reviews must provide relevant information about the reviewer's experience with the host, guest, stay, or experience that would help other community members make informed booking and hosting decisions."
-
-> "If a guest never arrived for their stay or experience, or had to cancel due to circumstances unrelated to that stay or experience, their review may be removed."
-
-### Third-Party/Inauthentic Reviews
-
-> "Reviews may only be provided in connection with a genuine stay or experience. For example, hosts are not allowed to accept a fake reservation in exchange for a positive review, use a second account to leave themselves a review, or coordinate with others to manipulate the review system."
-
-### Content Policy Violations
-
-> "Content that endorses or promotes illegal or harmful activity, or that is sexually explicit, violent, graphic, threatening, or harassing"
-
-> "Content that includes another person's private information, including content that is sufficient to identify a listing's location"
-
-### Anecdotal Success Criteria
-
-From the document's property manager guidance:
-- Guest did not enter/stay in unit = review should be removed
-- Guest booked for someone else and wrote review = removable
-- Guest threatened bad review after declined refund request = highly likely removal
-- Bad review filed after damage claim = grounds for removal
-- Review contains profanity, names, addresses, or links = will be removed
-- Complaints about weather, construction, or neighborhood = irrelevant, can be removed
+The `analyze-conversation-redflags` edge function currently uses a hardcoded `systemPrompt` constant and does not fetch organization-specific prompts from the database.
 
 ## Changes Required
 
-### File 1: `supabase/functions/analyze-review-dispute/index.ts`
+### File 1: `src/components/AIPromptsSettings.tsx`
 
-**Update the DEFAULT_SYSTEM_PROMPT** to include quotable policy text:
+#### 1. Add Default Prompt Constant (After line 175)
 
-Add a new section after the Airbnb's 5 Dispute Categories:
-
-```typescript
-## Official Airbnb Policy Text (Quote Directly When Applicable)
-
-### Extortion/Coercion Policy
-Per Airbnb's Reviews Policy: "Members of the Airbnb community may not coerce, intimidate, extort, threaten, incentivize or manipulate another person in an attempt to influence a review, like promising compensation in exchange for a positive review or threatening consequences in the event of a negative review."
-
-Also: "Reviews may not be provided or withheld in exchange for something of value—like a discount, refund, reciprocal review, or promise not to take negative action against the reviewer."
-
-### Retaliation Policy  
-Per Airbnb's Reviews Policy: "Guests should not write biased or inauthentic reviews as a form of retaliation against a host who enforces a policy or rule."
-
-### Relevance Policy
-Per Airbnb's Reviews Policy: "Reviews must provide relevant information about the reviewer's experience with the host, guest, stay, or experience."
-
-Also: "If a guest never arrived for their stay or experience, or had to cancel due to circumstances unrelated to that stay or experience, their review may be removed."
-
-### Third-Party/Authenticity Policy
-Per Airbnb's Reviews Policy: "Reviews may only be provided in connection with a genuine stay or experience."
-
-### Content Policy
-Per Airbnb's Content Policy: Reviews may not contain "content that is sexually explicit, violent, graphic, threatening, or harassing" or "content that includes another person's private information."
-
-## Case Building Instructions
-When building your dispute case:
-1. Identify which specific policy was violated
-2. Quote the exact policy language in your case description
-3. Show how the guest's actions/review directly violates the quoted policy
-4. Cite specific evidence (conversation quotes, timeline, behavior patterns)
-```
-
-**Update the tool schema** to include a new field for policy citations:
+Add `DEFAULT_CONVERSATION_REDFLAGS_PROMPT` with the current prompt from the edge function:
 
 ```typescript
-policyCitations: {
-  type: "array",
-  items: { type: "string" },
-  description: "Exact Airbnb policy quotes that support the dispute case"
-}
-```
+const DEFAULT_CONVERSATION_REDFLAGS_PROMPT = `Role: You are a Senior Policy Compliance Auditor specializing in Airbnb's Terms of Service. Your goal is to conduct a forensic analysis of guest communications to identify any specific violations of Airbnb's Content Policy that warrant a review removal.
 
-### File 2: `supabase/functions/analyze-conversation-redflags/index.ts`
-
-**Update the systemPrompt** to include policy references:
-
-```typescript
 ## Official Airbnb Policy Framework
 
 When identifying violations, match evidence to these official policy statements:
 
-EXTORTION: "Members may not coerce, intimidate, extort, threaten, incentivize or manipulate another person in an attempt to influence a review."
+EXTORTION: Per Airbnb's Reviews Policy: "Members of the Airbnb community may not coerce, intimidate, extort, threaten, incentivize or manipulate another person in an attempt to influence a review..."
 
-RETALIATION: "Guests should not write biased or inauthentic reviews as a form of retaliation against a host who enforces a policy or rule."
+[... full prompt text ...]
 
-THIRD-PARTY: "Reviews may only be provided in connection with a genuine stay or experience."
-
-IRRELEVANT: "Reviews must provide relevant information about the reviewer's experience."
-
-For each red flag, cite which specific policy clause it violates.
+Be thorough but only flag genuine policy violations with supporting evidence. If there are no clear violations, report that honestly.`;
 ```
 
-**Update the tool schema** to include policy reference:
+#### 2. Add State Variables (After line 197)
 
 ```typescript
-policyViolated: {
-  type: "string",
-  description: "The specific Airbnb policy text that this evidence violates"
+const [conversationRedFlagsConfig, setConversationRedFlagsConfig] = useState<PromptConfig | null>(null);
+const [conversationRedFlagsPrompt, setConversationRedFlagsPrompt] = useState(DEFAULT_CONVERSATION_REDFLAGS_PROMPT);
+```
+
+#### 3. Update loadPromptConfigs (Line 216)
+
+Add `'conversation_redflags_analysis'` to the `prompt_key` filter:
+
+```typescript
+.in('prompt_key', ['call_prep', 'revenue_actions', 'review_dispute_analysis', 'conversation_redflags_analysis']);
+```
+
+And add handling for the new prompt in the data processing:
+
+```typescript
+const conversationRedFlags = data.find(p => p.prompt_key === 'conversation_redflags_analysis');
+if (conversationRedFlags) {
+  setConversationRedFlagsConfig(conversationRedFlags);
+  setConversationRedFlagsPrompt(conversationRedFlags.system_prompt);
 }
 ```
 
-## Implementation Details
+#### 4. Update handleSave Function (Line 252)
 
-### Updated System Prompt Structure for analyze-review-dispute
+Extend to handle the new prompt type:
 
-```
-1. Role and Objective
-2. Airbnb's 5 Dispute Categories (existing)
-3. Official Airbnb Policy Text (NEW - quotable policies)
-4. Analysis Guidelines (existing)
-5. Case Building Instructions (NEW - how to cite policies)
-6. Conversation Red Flags (existing)
-7. Scoring Guidelines (existing)
-8. Using Pre-Analyzed Evidence (existing)
-```
-
-### Updated Tool Schema for analyze-review-dispute
-
-Add `policyCitations` field:
-- Type: Array of strings
-- Contains exact policy quotes used in the case
-- These will be stored in the case file for easy copy/paste
-
-### Updated Case File Storage
-
-Extend the `caseFile` object to include:
 ```typescript
-const caseFile = {
-  category_reason: analysis.categoryReason,
-  description: analysis.caseDescription,
-  violation_category: analysis.violationCategory,
-  likelihood_score: analysis.likelihoodScore,
-  policy_citations: analysis.policyCitations, // NEW
-  generated_at: new Date().toISOString(),
-};
+const handleSave = async (promptKey: 'call_prep' | 'revenue_actions' | 'review_dispute_analysis' | 'conversation_redflags_analysis') => {
+  // Add conversation red flags handling
+  const isConversationRedFlags = promptKey === 'conversation_redflags_analysis';
+  // Update config/prompt selection logic
+  // ...
+}
+```
+
+#### 5. Update handleReset Function (Line 313)
+
+Add reset case:
+
+```typescript
+} else if (promptKey === 'conversation_redflags_analysis') {
+  setConversationRedFlagsPrompt(DEFAULT_CONVERSATION_REDFLAGS_PROMPT);
+}
+```
+
+#### 6. Add New Tab Trigger (Line 365)
+
+```tsx
+<TabsTrigger value="conversation_redflags">Conversation Red Flags</TabsTrigger>
+```
+
+#### 7. Add New TabsContent (After line 486, before closing Tabs)
+
+```tsx
+<TabsContent value="conversation_redflags" className="space-y-4">
+  <div className="space-y-3">
+    <div className="flex items-center justify-between">
+      <Label htmlFor="conversation-redflags-prompt" className="text-base font-medium">
+        Conversation Red Flags Analysis Prompt
+      </Label>
+      <Button variant="outline" size="sm" onClick={() => handleReset('conversation_redflags_analysis')}>
+        <RotateCcw className="mr-2 h-4 w-4" />
+        Reset to Default
+      </Button>
+    </div>
+    <p className="text-sm text-muted-foreground">
+      This prompt instructs the AI how to analyze guest-host conversation history for policy violations.
+      It receives the message history and review text to identify extortion, retaliation, and other red flags.
+    </p>
+    <Textarea
+      id="conversation-redflags-prompt"
+      value={conversationRedFlagsPrompt}
+      onChange={(e) => setConversationRedFlagsPrompt(e.target.value)}
+      className="min-h-[400px] font-mono text-sm"
+      placeholder="Enter the system prompt for the AI..."
+    />
+  </div>
+  <div className="flex justify-end">
+    <Button onClick={() => handleSave('conversation_redflags_analysis')} disabled={saving}>
+      {saving ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Saving...
+        </>
+      ) : (
+        <>
+          <Save className="mr-2 h-4 w-4" />
+          Save Changes
+        </>
+      )}
+    </Button>
+  </div>
+</TabsContent>
+```
+
+### File 2: `supabase/functions/analyze-conversation-redflags/index.ts`
+
+#### 1. Rename Hardcoded Prompt (Line 9)
+
+Change `const systemPrompt = ...` to `const DEFAULT_SYSTEM_PROMPT = ...`
+
+#### 2. Add Organization Lookup and Custom Prompt Fetch (After line 77, before formatting conversation)
+
+Following the same pattern as `analyze-review-dispute`:
+
+```typescript
+// Get the listing to find organization
+const { data: listing } = await supabase
+  .from("listings")
+  .select("guesty_account_id")
+  .eq("id", review.listing_id)
+  .single();
+
+let orgId = null;
+if (listing?.guesty_account_id) {
+  const { data: guestyAccount } = await supabase
+    .from("guesty_accounts")
+    .select("organization_id")
+    .eq("id", listing.guesty_account_id)
+    .single();
+  orgId = guestyAccount?.organization_id;
+}
+
+// Fetch custom prompt if configured
+let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+if (orgId) {
+  const { data: promptConfig } = await supabase
+    .from("ai_prompt_configs")
+    .select("system_prompt")
+    .eq("organization_id", orgId)
+    .eq("prompt_key", "conversation_redflags_analysis")
+    .single();
+
+  if (promptConfig?.system_prompt) {
+    systemPrompt = promptConfig.system_prompt;
+    console.log("Using custom conversation red flags prompt");
+  }
+}
+```
+
+#### 3. Update Review Query (Line 67-68)
+
+Add `listing_id` to the select:
+
+```typescript
+.select("id, listing_id, review_text, dispute_message_history, guest_name, review_date")
+```
+
+## Implementation Flow
+
+```text
+User navigates to Settings → AI Prompts
+        |
+        v
+New "Conversation Red Flags" tab appears
+        |
+        v
+User can view/edit the prompt
+        |
+        v
+Save stores to ai_prompt_configs table
+  with prompt_key = 'conversation_redflags_analysis'
+        |
+        v
+When user clicks "Analyze for Red Flags"
+        |
+        v
+Edge function fetches custom prompt from DB
+        |
+        v
+AI uses organization-specific prompt
 ```
 
 ## Files to Modify
 
 | File | Action |
 |------|--------|
-| `supabase/functions/analyze-review-dispute/index.ts` | Add official policy text to prompt, update tool schema, store policy citations |
-| `supabase/functions/analyze-conversation-redflags/index.ts` | Add policy framework to prompt, add policyViolated field to red flag schema |
+| `src/components/AIPromptsSettings.tsx` | Add new tab, state, and handlers for conversation red flags prompt |
+| `supabase/functions/analyze-conversation-redflags/index.ts` | Fetch custom prompt from ai_prompt_configs table |
 
-## Expected Outcome
+## Key Database Details
 
-After implementation:
-1. **Stronger Cases**: AI will cite exact policy language like "Per Airbnb's Reviews Policy: 'Guests should not write biased or inauthentic reviews as a form of retaliation...'"
-2. **Better Evidence Matching**: Red flags will explicitly reference which policy clause was violated
-3. **Copy-Paste Ready**: Case descriptions will include quotable policy text ready for Airbnb dispute submission
-4. **Higher Success Rate**: Airbnb Support sees their own policy language reflected back, strengthening credibility
+The `ai_prompt_configs` table already exists and stores prompts with:
+- `organization_id` - Links to the organization
+- `prompt_key` - Unique identifier (we'll use `'conversation_redflags_analysis'`)
+- `prompt_name` - Display name (e.g., "Conversation Red Flags Analysis")
+- `system_prompt` - The actual prompt text
 
-## Sample Output Enhancement
-
-**Before:**
-> "This review appears to be retaliatory because the guest left it after being charged for damages."
-
-**After:**
-> "This review violates Airbnb's Reviews Policy which states: 'Guests should not write biased or inauthentic reviews as a form of retaliation against a host who enforces a policy or rule.' The guest filed this 1-star review on [date], exactly 24 hours after the host submitted a damage claim for $500. The timeline clearly establishes a retaliatory pattern prohibited by Airbnb policy."
+No database migrations needed.
 
