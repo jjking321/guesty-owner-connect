@@ -42,7 +42,15 @@ OBJECTIVE: Analyze whether this review can be disputed and removed based on Airb
 - 21-40%: Possible but weak - some minor violations but hard to prove
 - 41-60%: Moderate chance - clear policy concerns that could be argued
 - 61-80%: Good chance - strong evidence of violation
-- 81-100%: Excellent chance - clear-cut policy violation`;
+- 81-100%: Excellent chance - clear-cut policy violation
+
+## Using Pre-Analyzed Evidence
+If pre-analyzed conversation red flags are provided, incorporate them directly into your case:
+- Reference the exact quotes identified as evidence
+- Use the category classifications (Extortion, Retaliatory, Third-Party, Irrelevant) to strengthen your argument
+- High-severity flags should be prominently featured in the case description
+- Build your argument around the strongest evidence first
+- Cite the specific message quotes when making your case to Airbnb`;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -197,6 +205,31 @@ ${review.category_ratings ? JSON.stringify(review.category_ratings, null, 2) : '
       context += `
 ## Conversation History
 No conversation history available.
+`;
+    }
+
+    // Add pre-analyzed red flags if available
+    if (review.dispute_conversation_redflags) {
+      const redflags = review.dispute_conversation_redflags as any;
+      context += `
+## Pre-Analyzed Conversation Red Flags
+Evidence Strength: ${redflags.evidenceStrength?.toUpperCase() || 'UNKNOWN'}
+Assessment: ${redflags.overallAssessment || 'No assessment available'}
+
+`;
+      if (redflags.redflags && redflags.redflags.length > 0) {
+        context += `### Identified Violations:\n`;
+        redflags.redflags.forEach((flag: any, idx: number) => {
+          context += `
+**${idx + 1}. ${flag.category} (${flag.severity} severity)**
+- Quote: "${flag.quote}"
+- Context: ${flag.context}
+- From: ${flag.sender === 'guest' ? 'Guest' : 'Host'}
+`;
+        });
+      }
+      context += `
+IMPORTANT: Use these pre-analyzed red flags as supporting evidence in your dispute case. Reference the specific quotes when building your argument.
 `;
     }
 
