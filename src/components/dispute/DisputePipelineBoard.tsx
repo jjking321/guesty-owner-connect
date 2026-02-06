@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Loader2, Sparkles, RefreshCw, Search } from "lucide-react";
+import { Loader2, Sparkles, RefreshCw, Search, ArrowUpDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { DisputeCard } from "./DisputeCard";
@@ -67,6 +67,7 @@ export function DisputePipelineBoard() {
   const [scoreFilter, setScoreFilter] = useState<string>('all');
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<string>('likelihood');
 
   // Debounce search input
   useEffect(() => {
@@ -207,9 +208,26 @@ export function DisputePipelineBoard() {
     }
   }, [reviews, selectedReview]);
 
-  // Group reviews by status
+  // Group reviews by status and sort within each column
   const reviewsByColumn = COLUMNS.reduce((acc, col) => {
-    acc[col.id] = reviews.filter(r => r.dispute_status === col.id);
+    const columnReviews = reviews.filter(r => r.dispute_status === col.id);
+    
+    // Sort reviews within each column
+    columnReviews.sort((a, b) => {
+      if (sortBy === 'likelihood') {
+        // Sort by likelihood score descending (nulls last)
+        const scoreA = a.dispute_likelihood_score ?? -1;
+        const scoreB = b.dispute_likelihood_score ?? -1;
+        return scoreB - scoreA;
+      } else {
+        // Sort by date descending
+        const dateA = a.review_date ? new Date(a.review_date).getTime() : 0;
+        const dateB = b.review_date ? new Date(b.review_date).getTime() : 0;
+        return dateB - dateA;
+      }
+    });
+    
+    acc[col.id] = columnReviews;
     return acc;
   }, {} as Record<string, DisputeReview[]>);
 
@@ -384,6 +402,17 @@ export function DisputePipelineBoard() {
               <SelectItem value="medium">Medium (30-69%)</SelectItem>
               <SelectItem value="low">Low (&lt;30%)</SelectItem>
               <SelectItem value="unanalyzed">Not Analyzed</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={sortBy} onValueChange={setSortBy}>
+            <SelectTrigger className="w-[180px]">
+              <ArrowUpDown className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="Sort by..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="likelihood">Likelihood (High→Low)</SelectItem>
+              <SelectItem value="date">Date (Newest First)</SelectItem>
             </SelectContent>
           </Select>
         </div>
