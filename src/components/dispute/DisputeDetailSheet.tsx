@@ -25,7 +25,9 @@ import {
   MapPin,
   Tag,
   HelpCircle,
-  Maximize2
+  Maximize2,
+  Plus,
+  X
 } from "lucide-react";
 
 const getCategoryIcon = (category: string) => {
@@ -93,6 +95,8 @@ interface DisputeReview {
   dispute_notes: string | null;
   dispute_conversation_redflags?: ConversationRedFlags | null;
   dispute_conversation_analyzed_at?: string | null;
+  dispute_analysis_context?: string | null;
+  dispute_redflags_excluded?: number[] | null;
   property_name?: string;
   reservation_id?: string | null;
 }
@@ -114,12 +118,17 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
   const [editedCaseFile, setEditedCaseFile] = useState<any>(null);
   const [notes, setNotes] = useState('');
   const [conversationExpanded, setConversationExpanded] = useState(false);
+  const [analysisContext, setAnalysisContext] = useState('');
+  const [excludedFlags, setExcludedFlags] = useState<number[]>([]);
+  const [showContextInput, setShowContextInput] = useState(false);
 
   // Initialize state when review changes
   useState(() => {
     if (review) {
       setEditedCaseFile(review.dispute_case_file);
       setNotes(review.dispute_notes || '');
+      setAnalysisContext(review.dispute_analysis_context || '');
+      setExcludedFlags(review.dispute_redflags_excluded || []);
     }
   });
 
@@ -179,11 +188,18 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
     setAnalyzingRedFlags(true);
     try {
       const { data, error } = await supabase.functions.invoke('analyze-conversation-redflags', {
-        body: { reviewId: review.id },
+        body: { 
+          reviewId: review.id,
+          additionalContext: analysisContext || undefined,
+          excludedFlagIndices: excludedFlags.length > 0 ? excludedFlags : undefined,
+        },
       });
 
       if (error) throw error;
 
+      // Reset excluded flags after re-analysis since indices may change
+      setExcludedFlags([]);
+      
       toast({
         title: "Red flag analysis complete",
         description: data.message || `Found ${data.analysis?.redflags?.length || 0} red flags`,
@@ -197,6 +213,40 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
       });
     } finally {
       setAnalyzingRedFlags(false);
+    }
+  };
+
+  const handleToggleExcludeFlag = (index: number) => {
+    setExcludedFlags(prev => 
+      prev.includes(index) 
+        ? prev.filter(i => i !== index)
+        : [...prev, index]
+    );
+  };
+
+  const handleSaveExclusions = async () => {
+    setUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('reviews')
+        .update({ 
+          dispute_redflags_excluded: excludedFlags,
+          dispute_analysis_context: analysisContext,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', review.id);
+
+      if (error) throw error;
+      toast({ title: "Changes saved" });
+      onUpdate();
+    } catch (error: any) {
+      toast({
+        title: "Save failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -602,6 +652,34 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                     </Button>
                   </div>
 
+                  {/* Additional Context for Re-analysis */}
+                  <div className="mb-3">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setShowContextInput(!showContextInput)}
+                      className="text-xs"
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      {showContextInput ? 'Hide Context' : 'Add Context for Re-analysis'}
+                    </Button>
+                    
+                    {showContextInput && (
+                      <div className="mt-2 space-y-2">
+                        <Textarea
+                          value={analysisContext}
+                          onChange={(e) => setAnalysisContext(e.target.value)}
+                          placeholder="Add additional context the AI should consider (e.g., 'Guest was refunded after the stay', 'Host filed a damage claim before review')..."
+                          rows={3}
+                          className="text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          This context will be included when re-analyzing for red flags.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                   {review.dispute_conversation_redflags ? (
                     <div className="space-y-4">
                       {/* Evidence Strength Badge */}
@@ -630,53 +708,88 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                       {/* Red Flag Cards */}
                       {review.dispute_conversation_redflags.redflags?.length > 0 ? (
                         <div className="space-y-3">
-                          {review.dispute_conversation_redflags.redflags.map((flag: RedFlag, idx: number) => (
-                            <div
-                              key={idx}
-                              className={cn(
-                                "p-3 rounded-lg border-l-4",
-                                flag.severity === 'high' && "border-l-destructive bg-destructive/10",
-                                flag.severity === 'medium' && "border-l-amber-500 bg-amber-50 dark:bg-amber-950/20",
-                                flag.severity === 'low' && "border-l-yellow-400 bg-yellow-50 dark:bg-yellow-950/20"
-                              )}
-                            >
-                              <div className="flex items-center gap-2 mb-2">
-                                <Badge 
-                                  variant={flag.severity === 'high' ? 'destructive' : 'secondary'}
-                                  className={cn(
-                                    flag.severity === 'medium' && "bg-amber-500 text-white hover:bg-amber-500",
-                                    flag.severity === 'low' && "bg-yellow-400 text-black hover:bg-yellow-400"
-                                  )}
-                                >
-                                  {flag.category}
-                                </Badge>
-                                <span className={cn(
-                                  "text-xs font-medium px-2 py-0.5 rounded",
-                                  flag.severity === 'high' && "bg-destructive/20 text-destructive",
-                                  flag.severity === 'medium' && "bg-amber-500/20 text-amber-700 dark:text-amber-400",
-                                  flag.severity === 'low' && "bg-yellow-400/20 text-yellow-700 dark:text-yellow-400"
-                                )}>
-                                  {flag.severity.toUpperCase()}
-                                </span>
-                              </div>
-                              
-                              <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-sm text-muted-foreground mb-2">
-                                "{flag.quote}"
-                              </blockquote>
-                              
-                              <p className="text-sm">{flag.context}</p>
-                              
-                              <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                                <span className="font-medium">{flag.sender === 'guest' ? 'Guest' : 'Host'}</span>
-                                {flag.timestamp && (
-                                  <>
-                                    <span>•</span>
-                                    <span>{flag.timestamp}</span>
-                                  </>
+                          {review.dispute_conversation_redflags.redflags.map((flag: RedFlag, idx: number) => {
+                            const isExcluded = excludedFlags.includes(idx);
+                            return (
+                              <div
+                                key={idx}
+                                className={cn(
+                                  "p-3 rounded-lg border-l-4 relative",
+                                  isExcluded && "opacity-50",
+                                  flag.severity === 'high' && "border-l-destructive bg-destructive/10",
+                                  flag.severity === 'medium' && "border-l-amber-500 bg-amber-50 dark:bg-amber-950/20",
+                                  flag.severity === 'low' && "border-l-yellow-400 bg-yellow-50 dark:bg-yellow-950/20"
                                 )}
+                              >
+                                {/* Exclude toggle button - top right */}
+                                <button
+                                  onClick={() => handleToggleExcludeFlag(idx)}
+                                  className={cn(
+                                    "absolute top-2 right-2 p-1 rounded hover:bg-muted transition-colors",
+                                    isExcluded ? "text-muted-foreground" : "text-destructive"
+                                  )}
+                                  title={isExcluded ? "Include this flag" : "Exclude this flag"}
+                                >
+                                  {isExcluded ? <Plus className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                                </button>
+                                
+                                {isExcluded && (
+                                  <Badge variant="outline" className="absolute top-2 left-2 text-xs">
+                                    Excluded
+                                  </Badge>
+                                )}
+
+                                <div className={cn("flex items-center gap-2 mb-2", isExcluded && "mt-6")}>
+                                  <Badge 
+                                    variant={flag.severity === 'high' ? 'destructive' : 'secondary'}
+                                    className={cn(
+                                      flag.severity === 'medium' && "bg-amber-500 text-white hover:bg-amber-500",
+                                      flag.severity === 'low' && "bg-yellow-400 text-black hover:bg-yellow-400"
+                                    )}
+                                  >
+                                    {flag.category}
+                                  </Badge>
+                                  <span className={cn(
+                                    "text-xs font-medium px-2 py-0.5 rounded",
+                                    flag.severity === 'high' && "bg-destructive/20 text-destructive",
+                                    flag.severity === 'medium' && "bg-amber-500/20 text-amber-700 dark:text-amber-400",
+                                    flag.severity === 'low' && "bg-yellow-400/20 text-yellow-700 dark:text-yellow-400"
+                                  )}>
+                                    {flag.severity.toUpperCase()}
+                                  </span>
+                                </div>
+                                
+                                <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-sm text-muted-foreground mb-2">
+                                  "{flag.quote}"
+                                </blockquote>
+                                
+                                <p className="text-sm">{flag.context}</p>
+                                
+                                <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                                  <span className="font-medium">{flag.sender === 'guest' ? 'Guest' : 'Host'}</span>
+                                  {flag.timestamp && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{flag.timestamp}</span>
+                                    </>
+                                  )}
+                                </div>
                               </div>
+                            );
+                          })}
+
+                          {/* Save Exclusions Button */}
+                          {excludedFlags.length > 0 && (
+                            <div className="flex items-center justify-between pt-2 border-t">
+                              <span className="text-sm text-muted-foreground">
+                                {excludedFlags.length} flag{excludedFlags.length > 1 ? 's' : ''} excluded
+                              </span>
+                              <Button size="sm" variant="outline" onClick={handleSaveExclusions} disabled={updating}>
+                                {updating && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                                Save Exclusions
+                              </Button>
                             </div>
-                          ))}
+                          )}
                         </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">
