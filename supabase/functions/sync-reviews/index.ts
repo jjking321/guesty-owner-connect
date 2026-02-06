@@ -593,6 +593,12 @@ async function performSync(
             }
           }
 
+          // Extract host's public response (their reply to the review)
+          const hostResponse = rawReview.response || rawReview.host_response || rawReview.public_response || null;
+          
+          // Extract private note/feedback from host
+          const privateNote = rawReview.private_feedback || rawReview.private_review || rawReview.private_note || null;
+
           return {
             id: review._id,
             guesty_account_id: guestyAccountId,
@@ -601,7 +607,8 @@ async function performSync(
             guest_name: guestName,
             rating: rating,
             review_text: reviewText,
-            response_text: rawReview.private_feedback || null,
+            response_text: hostResponse,
+            private_note: privateNote,
             review_date: review.createdAt || null,
             source: formatChannelId(review.channelId),
             category_ratings: categoryRatings,
