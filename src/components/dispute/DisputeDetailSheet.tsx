@@ -828,7 +828,12 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
             {/* Case File */}
             {caseFile && (
               <div>
-                <Label className="text-sm font-medium">Dispute Case File</Label>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium">Dispute Case File</Label>
+                  {caseFile.violation_category && caseFile.violation_category !== 'None' && (
+                    <Badge variant="outline">{caseFile.violation_category}</Badge>
+                  )}
+                </div>
                 
                 <div className="mt-2 space-y-3">
                   <div>
