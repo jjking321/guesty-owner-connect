@@ -44,7 +44,7 @@ serve(async (req) => {
   }
 
   try {
-    const { reviewId } = await req.json();
+    const { reviewId, additionalContext, excludedFlagIndices } = await req.json();
     
     if (!reviewId) {
       return new Response(
@@ -126,7 +126,7 @@ serve(async (req) => {
       `[${msg.sender?.toUpperCase() || 'UNKNOWN'}${msg.timestamp ? ` - ${new Date(msg.timestamp).toLocaleString()}` : ''}]: ${msg.content || ''}`
     ).join("\n\n");
 
-    const userPrompt = `Please analyze the following conversation and review for potential policy violations:
+    let userPrompt = `Please analyze the following conversation and review for potential policy violations:
 
 REVIEW TEXT:
 "${review.review_text || 'No review text available'}"
@@ -135,7 +135,18 @@ GUEST: ${review.guest_name || 'Unknown'}
 REVIEW DATE: ${review.review_date ? new Date(review.review_date).toLocaleDateString() : 'Unknown'}
 
 CONVERSATION HISTORY:
-${formattedConversation}
+${formattedConversation}`;
+
+    if (additionalContext) {
+      userPrompt += `
+
+ADDITIONAL CONTEXT FROM HOST/MANAGER:
+${additionalContext}
+
+Please factor this additional context into your analysis.`;
+    }
+
+    userPrompt += `
 
 Analyze this conversation for any red flags that could support a dispute claim.`;
 
@@ -262,6 +273,8 @@ Analyze this conversation for any red flags that could support a dispute claim.`
       .update({
         dispute_conversation_redflags: analysis,
         dispute_conversation_analyzed_at: new Date().toISOString(),
+        dispute_analysis_context: additionalContext || null,
+        dispute_redflags_excluded: [], // Clear exclusions on re-analysis
         updated_at: new Date().toISOString(),
       })
       .eq("id", reviewId);

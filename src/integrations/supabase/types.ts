@@ -1640,6 +1640,7 @@ export type Database = {
       reviews: {
         Row: {
           category_ratings: Json | null
+          dispute_analysis_context: string | null
           dispute_analyzed_at: string | null
           dispute_case_file: Json | null
           dispute_conversation_analyzed_at: string | null
@@ -1652,6 +1653,7 @@ export type Database = {
           dispute_likelihood_score: number | null
           dispute_message_history: Json | null
           dispute_notes: string | null
+          dispute_redflags_excluded: Json | null
           dispute_resolution: string | null
           dispute_resolved_at: string | null
           dispute_status: string | null
@@ -1676,6 +1678,7 @@ export type Database = {
         }
         Insert: {
           category_ratings?: Json | null
+          dispute_analysis_context?: string | null
           dispute_analyzed_at?: string | null
           dispute_case_file?: Json | null
           dispute_conversation_analyzed_at?: string | null
@@ -1688,6 +1691,7 @@ export type Database = {
           dispute_likelihood_score?: number | null
           dispute_message_history?: Json | null
           dispute_notes?: string | null
+          dispute_redflags_excluded?: Json | null
           dispute_resolution?: string | null
           dispute_resolved_at?: string | null
           dispute_status?: string | null
@@ -1712,6 +1716,7 @@ export type Database = {
         }
         Update: {
           category_ratings?: Json | null
+          dispute_analysis_context?: string | null
           dispute_analyzed_at?: string | null
           dispute_case_file?: Json | null
           dispute_conversation_analyzed_at?: string | null
@@ -1724,6 +1729,7 @@ export type Database = {
           dispute_likelihood_score?: number | null
           dispute_message_history?: Json | null
           dispute_notes?: string | null
+          dispute_redflags_excluded?: Json | null
           dispute_resolution?: string | null
           dispute_resolved_at?: string | null
           dispute_status?: string | null
