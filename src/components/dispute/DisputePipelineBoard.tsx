@@ -144,6 +144,16 @@ export function DisputePipelineBoard() {
     },
   });
 
+  // Sync selectedReview when reviews data updates (for real-time UI after AI analysis)
+  useEffect(() => {
+    if (selectedReview && reviews.length > 0) {
+      const updated = reviews.find(r => r.id === selectedReview.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(selectedReview)) {
+        setSelectedReview(updated);
+      }
+    }
+  }, [reviews, selectedReview]);
+
   // Group reviews by status
   const reviewsByColumn = COLUMNS.reduce((acc, col) => {
     acc[col.id] = reviews.filter(r => r.dispute_status === col.id);
@@ -360,13 +370,6 @@ export function DisputePipelineBoard() {
         onOpenChange={setSheetOpen}
         onUpdate={() => {
           queryClient.invalidateQueries({ queryKey: ['dispute-reviews'] });
-          // Refresh selected review
-          if (selectedReview) {
-            const updated = reviews.find(r => r.id === selectedReview.id);
-            if (updated) {
-              setSelectedReview(updated);
-            }
-          }
         }}
       />
     </div>
