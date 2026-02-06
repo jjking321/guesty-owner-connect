@@ -1,95 +1,180 @@
 
 
-# Plan: Fix Guesty Conversation API Response Parsing
+# Plan: Scrollable Conversation History with Expand Popup
 
-## Problem
+## Overview
 
-The current implementation parses Guesty API responses incorrectly. The actual response structure nests data under `data.conversations` and `data.posts`, not at the top level.
+Enhance the conversation history section in the DisputeDetailSheet with:
+1. A proper ScrollArea component for smooth scrolling
+2. An "Expand" button to open the full conversation in a popup dialog
+3. Better visual styling for the message container
 
-## Changes Required
+## Current Implementation
 
-### File: `supabase/functions/fetch-dispute-conversation/index.ts`
+The conversation history currently uses a basic `div` with `max-h-60 overflow-y-auto`:
 
-### 1. Update Conversations URL (Line 347)
-
-Add `&limit=1` to the query since we only need the first matching conversation:
-
-```typescript
-// Current
-const conversationsUrl = `...?filters=${encodeURIComponent(filters)}`;
-
-// Fixed
-const conversationsUrl = `...?filters=${encodeURIComponent(filters)}&limit=1`;
+```tsx
+<div className="space-y-3 max-h-60 overflow-y-auto">
+  {messages.map((msg: any, idx: number) => (
+    // ... message bubbles
+  ))}
+</div>
 ```
 
-### 2. Fix Conversations Response Parsing (Lines 350-351)
+## Proposed Changes
 
-```typescript
-// Current (wrong)
-const conversations = conversationsData.results || conversationsData.data || [];
+### 1. Add State for Popup Dialog
 
-// Fixed (correct nested structure)
-const conversations = conversationsData?.data?.conversations || [];
+Add a new state variable to control the expanded conversation dialog:
+
+```tsx
+const [conversationExpanded, setConversationExpanded] = useState(false);
 ```
 
-### 3. Update Posts URL (Line 374)
+### 2. Import Dialog Components
 
-Add `?limit=100` to fetch more messages:
+Add Dialog imports to the existing imports:
 
-```typescript
-// Current
-const postsUrl = `.../${conversationId}/posts`;
-
-// Fixed
-const postsUrl = `.../${conversationId}/posts?limit=100`;
+```tsx
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Maximize2 } from "lucide-react";
 ```
 
-### 4. Fix Posts Response Parsing (Lines 377-378)
+### 3. Create Reusable Message Component
 
-```typescript
-// Current (wrong)
-const posts = postsData.results || postsData.data || postsData || [];
+Extract the message rendering into a reusable component to avoid duplication:
 
-// Fixed (correct nested structure)
-const posts = postsData?.data?.posts || [];
+```tsx
+const MessageBubble = ({ msg, showFullTimestamp = false }: { msg: any; showFullTimestamp?: boolean }) => (
+  <div
+    className={cn(
+      "p-3 rounded-lg text-sm",
+      msg.sender === 'guest' 
+        ? "bg-muted ml-4" 
+        : "bg-primary/10 mr-4"
+    )}
+  >
+    <div className="flex items-center justify-between mb-1">
+      <span className="font-medium text-xs">
+        {msg.sender === 'guest' ? 'Guest' : 'Host'}
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {msg.timestamp 
+          ? (showFullTimestamp 
+              ? new Date(msg.timestamp).toLocaleString() 
+              : new Date(msg.timestamp).toLocaleDateString())
+          : ''}
+      </span>
+    </div>
+    <p className="whitespace-pre-wrap">{msg.content}</p>
+  </div>
+);
 ```
 
-### 5. Update Message Transformation (Lines 381-396)
+### 4. Update Conversation History Section
 
-Align with the correct field names from your reference:
+Replace the current implementation with a proper ScrollArea and add an Expand button:
 
-```typescript
-const messages = posts.map((post: any) => {
-  const isGuest = post.sender?.type === 'guest' || post.sentBy === 'guest';
-  const text = post.body || post.message || post.content || '';
-  
-  return {
-    id: post._id || post.id,
-    timestamp: post.createdAt || post.sentAt || new Date().toISOString(),
-    sender: isGuest ? 'guest' : 'host',
-    senderName: post.sender?.name || post.sender?.fullName || (isGuest ? 'Guest' : 'Host'),
-    content: text,
-    source: post.source || 'unknown',
-  };
-}).filter((m: any) => m.content.trim().length > 0)
-  .sort((a: any, b: any) => 
-    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
+```tsx
+{/* Conversation History */}
+<div>
+  <div className="flex items-center justify-between mb-3">
+    <Label className="text-sm font-medium flex items-center gap-2">
+      <MessageSquare className="h-4 w-4" />
+      Conversation History ({messages.length} messages)
+    </Label>
+    <div className="flex gap-2">
+      {messages.length > 0 && (
+        <Button 
+          size="sm" 
+          variant="ghost"
+          onClick={() => setConversationExpanded(true)}
+        >
+          <Maximize2 className="h-4 w-4 mr-1" />
+          Expand
+        </Button>
+      )}
+      <Button 
+        size="sm" 
+        variant="outline" 
+        onClick={handleFetchConversation} 
+        disabled={fetchingConversation}
+      >
+        {fetchingConversation ? (
+          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+        ) : (
+          <RefreshCw className="h-4 w-4 mr-2" />
+        )}
+        {messages.length > 0 ? 'Refresh' : 'Fetch'}
+      </Button>
+    </div>
+  </div>
+
+  {messages.length > 0 ? (
+    <ScrollArea className="h-60 rounded-md border p-3">
+      <div className="space-y-3 pr-4">
+        {messages.map((msg: any, idx: number) => (
+          <MessageBubble key={idx} msg={msg} />
+        ))}
+      </div>
+    </ScrollArea>
+  ) : (
+    <p className="text-sm text-muted-foreground">
+      No conversation history available. Click "Fetch" to retrieve messages.
+    </p>
+  )}
+</div>
 ```
 
-## Summary of Changes
+### 5. Add Expanded Conversation Dialog
 
-| Line | Current | Fixed |
-|------|---------|-------|
-| 347 | `?filters=...` | `?filters=...&limit=1` |
-| 350 | `conversationsData.results \|\| conversationsData.data` | `conversationsData?.data?.conversations` |
-| 374 | `/posts` | `/posts?limit=100` |
-| 377 | `postsData.results \|\| postsData.data` | `postsData?.data?.posts` |
-| 381-396 | Complex sender detection | Simplified with `sentBy` check and empty message filter |
+Add a Dialog component after the conversation history section for the expanded view:
 
-## Files to Modify
+```tsx
+{/* Expanded Conversation Dialog */}
+<Dialog open={conversationExpanded} onOpenChange={setConversationExpanded}>
+  <DialogContent className="max-w-3xl max-h-[80vh]">
+    <DialogHeader>
+      <DialogTitle className="flex items-center gap-2">
+        <MessageSquare className="h-5 w-5" />
+        Conversation History - {review.guest_name || 'Guest'}
+      </DialogTitle>
+    </DialogHeader>
+    <ScrollArea className="h-[60vh] pr-4">
+      <div className="space-y-4">
+        {messages.map((msg: any, idx: number) => (
+          <MessageBubble key={idx} msg={msg} showFullTimestamp />
+        ))}
+      </div>
+    </ScrollArea>
+  </DialogContent>
+</Dialog>
+```
 
-| File | Action |
-|------|--------|
-| `supabase/functions/fetch-dispute-conversation/index.ts` | Fix API URL params and response parsing |
+## Visual Design
+
+### Inline View (in Sheet)
+- Height: 240px (h-60)
+- Bordered container with rounded corners
+- Visible scrollbar for easy navigation
+- "Expand" button in header
+
+### Expanded Popup View
+- Large dialog (max-w-3xl)
+- Maximum height of 80vh
+- Full timestamps shown
+- More breathing room between messages
+
+## File to Modify
+
+| File | Changes |
+|------|---------|
+| `src/components/dispute/DisputeDetailSheet.tsx` | Add Dialog import, state, MessageBubble component, ScrollArea wrapper, and expanded dialog |
+
+## Technical Details
+
+- The `MessageBubble` component will be defined inside the main component to access the `cn` utility
+- ScrollArea from shadcn provides a styled scrollbar that matches the design system
+- The Dialog opens on top of the Sheet (both use portals with proper z-index)
+- `showFullTimestamp` prop allows the expanded view to show date AND time
 
