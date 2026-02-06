@@ -354,12 +354,12 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
-        <SheetHeader className="pr-8">
-          <SheetTitle className="flex items-center gap-2">
-            <span className="truncate">{review.property_name || 'Unknown Property'}</span>
+      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto overflow-x-hidden">
+        <SheetHeader className="pr-8 min-w-0">
+          <SheetTitle className="flex items-center gap-2 min-w-0">
+            <span className="truncate min-w-0">{review.property_name || 'Unknown Property'}</span>
             {review.dispute_is_high_priority && (
-              <Badge variant="destructive">High Priority</Badge>
+              <Badge variant="destructive" className="shrink-0">High Priority</Badge>
             )}
           </SheetTitle>
           <SheetDescription className="truncate">
@@ -575,21 +575,26 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                       <div
                         key={idx}
                         className={cn(
-                          "p-3 rounded-lg text-sm",
-                          msg.sender === 'guest' 
-                            ? "bg-muted ml-4" 
-                            : "bg-primary/10 mr-4"
+                          "flex",
+                          msg.sender === 'guest' ? "justify-end" : "justify-start"
                         )}
                       >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-xs">
-                            {msg.sender === 'guest' ? 'Guest' : 'Host'}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {msg.timestamp ? new Date(msg.timestamp).toLocaleDateString() : ''}
-                          </span>
+                        <div
+                          className={cn(
+                            "max-w-[85%] w-fit p-3 rounded-lg text-sm overflow-hidden",
+                            msg.sender === 'guest' ? "bg-muted" : "bg-primary/10"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-3 mb-1 min-w-0">
+                            <span className="font-medium text-xs shrink-0">
+                              {msg.sender === 'guest' ? 'Guest' : 'Host'}
+                            </span>
+                            <span className="text-xs text-muted-foreground truncate">
+                              {msg.timestamp ? new Date(msg.timestamp).toLocaleDateString() : ''}
+                            </span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-all">{msg.content}</p>
                         </div>
-                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                       </div>
                     ))}
                   </div>
@@ -616,21 +621,26 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                       <div
                         key={idx}
                         className={cn(
-                          "p-3 rounded-lg text-sm",
-                          msg.sender === 'guest' 
-                            ? "bg-muted ml-4" 
-                            : "bg-primary/10 mr-4"
+                          "flex",
+                          msg.sender === 'guest' ? "justify-end" : "justify-start"
                         )}
                       >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-xs">
-                            {msg.sender === 'guest' ? 'Guest' : 'Host'}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {msg.timestamp ? new Date(msg.timestamp).toLocaleString() : ''}
-                          </span>
+                        <div
+                          className={cn(
+                            "max-w-[85%] w-fit p-3 rounded-lg text-sm overflow-hidden",
+                            msg.sender === 'guest' ? "bg-muted" : "bg-primary/10"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-3 mb-1 min-w-0">
+                            <span className="font-medium text-xs shrink-0">
+                              {msg.sender === 'guest' ? 'Guest' : 'Host'}
+                            </span>
+                            <span className="text-xs text-muted-foreground truncate">
+                              {msg.timestamp ? new Date(msg.timestamp).toLocaleString() : ''}
+                            </span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-all">{msg.content}</p>
                         </div>
-                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                       </div>
                     ))}
                   </div>
