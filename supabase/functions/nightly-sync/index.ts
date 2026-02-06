@@ -5,136 +5,123 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface SyncResult {
-  success: boolean;
+// Pipeline steps in order
+type PipelineStep = 
+  | 'INIT'
+  | 'ACCOUNT_SYNCS'
+  | 'AIRBNB_RATINGS'
+  | 'PROBABILITIES'
+  | 'FORECASTS'
+  | 'ACTIONABLES'
+  | 'COMPLETED';
+
+// Per-account sync phases
+type AccountSyncPhase = 'listings' | 'reservations' | 'owners' | 'calendar' | 'done';
+
+interface AccountState {
+  currentPhase: AccountSyncPhase;
+  phasesCompleted: AccountSyncPhase[];
   error?: string;
-  skipped?: boolean;
 }
 
-interface AccountSyncResult {
-  account: string;
-  accountId: string;
-  syncs: {
-    listings?: SyncResult;
-    reservations?: SyncResult;
-    owners?: SyncResult;
-    calendar?: SyncResult;
-  };
-  error?: string;
-  lastAutomatedSyncUpdated: boolean;
+interface NightlySyncRun {
+  id: string;
+  started_at: string;
+  completed_at: string | null;
+  current_step: PipelineStep;
+  status: 'running' | 'completed' | 'failed';
+  account_ids: string[];
+  account_states: Record<string, AccountState>;
+  step_results: Record<string, any>;
+  error_message: string | null;
+  invocation_count: number;
 }
+
+interface Account {
+  id: string;
+  account_name: string;
+  airbnb_scrape_enabled: boolean | null;
+  forecast_generation_enabled: boolean | null;
+  probability_calculation_enabled: boolean | null;
+  actionables_generation_enabled: boolean | null;
+}
+
+const MAX_INVOCATIONS = 200;
+const MAX_RUN_TIME_MS = 2 * 60 * 60 * 1000; // 2 hours
+const SELF_INVOKE_DELAY_MS = 15000; // 15 seconds between self-invocations
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForProgressCompletion(
-  supabase: any,
-  progressId: string,
-  label: string,
-  timeoutMs: number = 1800000 // 30 minute default
-): Promise<SyncResult> {
-  const startTime = Date.now();
-  const pollInterval = 10000; // 10 seconds
-
-  console.log(`[${label}] Waiting for completion (timeout: ${timeoutMs / 1000}s)...`);
-
-  while (Date.now() - startTime < timeoutMs) {
-    const { data: progress, error } = await supabase
-      .from('forecast_generation_progress')
-      .select('status, completed_forecasts, failed_forecasts, total_forecasts')
-      .eq('id', progressId)
-      .single();
-
-    if (error) {
-      console.error(`[${label}] Error polling progress:`, error);
-      await sleep(pollInterval);
-      continue;
-    }
-
-    if (progress?.status === 'completed') {
-      console.log(`[${label}] Completed: ${progress.completed_forecasts} success, ${progress.failed_forecasts} failed`);
-      return { success: true };
-    }
-
-    if (progress?.status === 'failed') {
-      return { success: false, error: `${label} failed` };
-    }
-
-    console.log(`[${label}] Progress: ${progress?.completed_forecasts || 0}/${progress?.total_forecasts || 0}`);
-    await sleep(pollInterval);
-  }
-
-  return { success: false, error: `${label} timed out` };
-}
-
-async function waitForSyncCompletion(
+// Check if a sync job is complete for an account/sync_type
+async function isSyncComplete(
   supabase: any,
   accountId: string,
-  syncType: string,
-  timeoutMs: number = 600000 // 10 minute default timeout
-): Promise<SyncResult> {
-  const startTime = Date.now();
-  const pollInterval = 5000; // 5 seconds
-  let lastJobId: string | null = null;
+  syncType: string
+): Promise<{ complete: boolean; success: boolean; error?: string }> {
+  const { data: jobs, error } = await supabase
+    .from('sync_jobs')
+    .select('status, error_message')
+    .eq('guesty_account_id', accountId)
+    .eq('sync_type', syncType)
+    .order('started_at', { ascending: false })
+    .limit(1);
 
-  console.log(`[${syncType}] Waiting for sync completion (timeout: ${timeoutMs / 1000}s)...`);
-
-  // First, wait a moment for the job to be created
-  await sleep(2000);
-
-  while (Date.now() - startTime < timeoutMs) {
-    try {
-      const { data: jobs, error } = await supabase
-        .from('sync_jobs')
-        .select('id, status, error_message, progress_message, items_synced')
-        .eq('guesty_account_id', accountId)
-        .eq('sync_type', syncType)
-        .order('started_at', { ascending: false })
-        .limit(1);
-
-      if (error) {
-        console.error(`[${syncType}] Error polling sync_jobs:`, error);
-        await sleep(pollInterval);
-        continue;
-      }
-
-      if (jobs && jobs.length > 0) {
-        const job = jobs[0];
-        
-        // Track if this is a new job
-        if (lastJobId === null) {
-          lastJobId = job.id;
-        } else if (job.id !== lastJobId) {
-          // A new job was created, reset tracking
-          lastJobId = job.id;
-        }
-
-        if (job.status === 'completed') {
-          console.log(`[${syncType}] Sync completed successfully. Items synced: ${job.items_synced || 'N/A'}`);
-          return { success: true };
-        }
-
-        if (job.status === 'failed') {
-          console.error(`[${syncType}] Sync failed: ${job.error_message}`);
-          return { success: false, error: job.error_message || 'Sync failed' };
-        }
-
-        // Still running
-        console.log(`[${syncType}] Still running... ${job.progress_message || ''} (${job.items_synced || 0} items)`);
-      } else {
-        console.log(`[${syncType}] No sync job found yet, waiting...`);
-      }
-
-      await sleep(pollInterval);
-    } catch (pollError: any) {
-      console.error(`[${syncType}] Poll error:`, pollError.message);
-      await sleep(pollInterval);
-    }
+  if (error || !jobs || jobs.length === 0) {
+    return { complete: false, success: false };
   }
 
-  console.error(`[${syncType}] Sync timed out after ${timeoutMs / 1000}s`);
-  return { success: false, error: `Sync timed out after ${timeoutMs / 1000} seconds` };
+  const job = jobs[0];
+  if (job.status === 'completed') {
+    return { complete: true, success: true };
+  }
+  if (job.status === 'failed') {
+    return { complete: true, success: false, error: job.error_message };
+  }
+  return { complete: false, success: false };
+}
+
+// Check if a progress-based task is complete
+async function isProgressComplete(
+  supabase: any,
+  progressId: string
+): Promise<{ complete: boolean; success: boolean; error?: string }> {
+  const { data: progress, error } = await supabase
+    .from('forecast_generation_progress')
+    .select('status, error_message')
+    .eq('id', progressId)
+    .single();
+
+  if (error || !progress) {
+    return { complete: false, success: false };
+  }
+
+  if (progress.status === 'completed') {
+    return { complete: true, success: true };
+  }
+  if (progress.status === 'failed') {
+    return { complete: true, success: false, error: progress.error_message };
+  }
+  return { complete: false, success: false };
+}
+
+// Get next sync phase for an account
+function getNextPhase(currentPhase: AccountSyncPhase): AccountSyncPhase {
+  const order: AccountSyncPhase[] = ['listings', 'reservations', 'owners', 'calendar', 'done'];
+  const currentIndex = order.indexOf(currentPhase);
+  return order[Math.min(currentIndex + 1, order.length - 1)];
+}
+
+// Map phase to sync_type used in sync_jobs table
+function getSyncType(phase: AccountSyncPhase): string {
+  switch (phase) {
+    case 'listings': return 'listings';
+    case 'reservations': return 'new_reservations';
+    case 'owners': return 'owners';
+    case 'calendar': return 'capacity_calendar';
+    default: return phase;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -142,328 +129,578 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  const startTime = Date.now();
-  console.log('=== Nightly Sync Started ===');
-  console.log(`Start time: ${new Date().toISOString()}`);
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  );
+
+  // Invoker client with service-role marker for self-invocation
+  const supabaseInvoke = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    { global: { headers: { 'x-service-role': 'true' } } }
+  );
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+    const body = await req.json().catch(() => ({}));
+    const runId: string | undefined = body.run_id;
 
-    // Use a dedicated invoker client for service-role/batch calls.
-    // IMPORTANT: passing `headers` to functions.invoke can override defaults (apikey/authorization).
-    const supabaseInvoke = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      { global: { headers: { 'x-service-role': 'true' } } }
-    );
+    let run: NightlySyncRun;
 
-    // Get all accounts with automated sync enabled
-    const { data: accounts, error: accountsError } = await supabase
-      .from('guesty_accounts')
-      .select('id, account_name, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled, actionables_generation_enabled')
-      .eq('automated_sync_enabled', true);
+    if (!runId) {
+      // === INIT: Start a new run ===
+      console.log('=== Nightly Sync: Starting new run ===');
 
-    if (accountsError) {
-      console.error('Error fetching accounts:', accountsError);
-      throw new Error(`Failed to fetch accounts: ${accountsError.message}`);
-    }
+      // Check for any already running syncs (prevent duplicates)
+      const { data: existingRuns } = await supabase
+        .from('nightly_sync_runs')
+        .select('id, started_at')
+        .eq('status', 'running')
+        .gte('started_at', new Date(Date.now() - MAX_RUN_TIME_MS).toISOString());
 
-    if (!accounts || accounts.length === 0) {
-      console.log('No accounts with automated sync enabled');
+      if (existingRuns && existingRuns.length > 0) {
+        console.log('Another nightly sync is already running:', existingRuns[0].id);
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: 'Another nightly sync is already running',
+            existing_run_id: existingRuns[0].id 
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Fetch accounts with automated sync enabled
+      const { data: accounts, error: accountsError } = await supabase
+        .from('guesty_accounts')
+        .select('id, account_name, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled, actionables_generation_enabled')
+        .eq('automated_sync_enabled', true);
+
+      if (accountsError) {
+        throw new Error(`Failed to fetch accounts: ${accountsError.message}`);
+      }
+
+      if (!accounts || accounts.length === 0) {
+        console.log('No accounts with automated sync enabled');
+        return new Response(
+          JSON.stringify({ success: true, message: 'No accounts with automated sync enabled' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Initialize account states
+      const accountStates: Record<string, AccountState> = {};
+      for (const account of accounts) {
+        accountStates[account.id] = {
+          currentPhase: 'listings',
+          phasesCompleted: [],
+        };
+      }
+
+      // Create run record
+      const { data: newRun, error: createError } = await supabase
+        .from('nightly_sync_runs')
+        .insert({
+          current_step: 'ACCOUNT_SYNCS',
+          status: 'running',
+          account_ids: accounts.map(a => a.id),
+          account_states: accountStates,
+          step_results: { accounts: accounts.map(a => ({ id: a.id, name: a.account_name })) },
+          invocation_count: 1,
+        })
+        .select()
+        .single();
+
+      if (createError || !newRun) {
+        throw new Error(`Failed to create run record: ${createError?.message}`);
+      }
+
+      run = newRun as NightlySyncRun;
+      console.log(`Created run ${run.id} with ${accounts.length} accounts`);
+
+      // Fire off initial listings sync for ALL accounts in parallel
+      console.log('Firing off listings sync for all accounts in parallel...');
+      const syncPromises = accounts.map(account => 
+        supabaseInvoke.functions.invoke('sync-guesty-data', {
+          body: { accountId: account.id, syncType: 'listings' }
+        }).catch(err => {
+          console.error(`Failed to invoke listings sync for ${account.account_name}:`, err);
+          return { error: err };
+        })
+      );
+      await Promise.all(syncPromises);
+
+      // Self-invoke to check progress
+      console.log('Self-invoking to check progress...');
+      await sleep(SELF_INVOKE_DELAY_MS);
+      await supabaseInvoke.functions.invoke('nightly-sync', {
+        body: { run_id: run.id }
+      });
+
       return new Response(
         JSON.stringify({ 
           success: true, 
-          message: 'No accounts with automated sync enabled',
-          results: [] 
+          message: 'Nightly sync started',
+          run_id: run.id 
         }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+
+    } else {
+      // === CONTINUATION: Process existing run ===
+      console.log(`=== Nightly Sync: Continuing run ${runId} ===`);
+
+      const { data: existingRun, error: fetchError } = await supabase
+        .from('nightly_sync_runs')
+        .select('*')
+        .eq('id', runId)
+        .single();
+
+      if (fetchError || !existingRun) {
+        throw new Error(`Failed to fetch run ${runId}: ${fetchError?.message}`);
+      }
+
+      run = existingRun as NightlySyncRun;
+
+      // Safety checks
+      if (run.status !== 'running') {
+        console.log(`Run ${runId} is not running (status: ${run.status}), exiting`);
+        return new Response(
+          JSON.stringify({ success: true, message: 'Run already completed', status: run.status }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (run.invocation_count >= MAX_INVOCATIONS) {
+        console.error(`Run ${runId} exceeded max invocations (${MAX_INVOCATIONS})`);
+        await supabase.from('nightly_sync_runs').update({
+          status: 'failed',
+          error_message: `Exceeded maximum invocations (${MAX_INVOCATIONS})`,
+          completed_at: new Date().toISOString(),
+        }).eq('id', runId);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Exceeded max invocations' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const runStartTime = new Date(run.started_at).getTime();
+      if (Date.now() - runStartTime > MAX_RUN_TIME_MS) {
+        console.error(`Run ${runId} exceeded max run time (2 hours)`);
+        await supabase.from('nightly_sync_runs').update({
+          status: 'failed',
+          error_message: 'Exceeded maximum run time (2 hours)',
+          completed_at: new Date().toISOString(),
+        }).eq('id', runId);
+        return new Response(
+          JSON.stringify({ success: false, error: 'Exceeded max run time' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Increment invocation count
+      await supabase.from('nightly_sync_runs').update({
+        invocation_count: run.invocation_count + 1,
+      }).eq('id', runId);
+
+      console.log(`Current step: ${run.current_step}, invocation: ${run.invocation_count + 1}`);
+
+      // Process based on current step
+      switch (run.current_step) {
+        case 'ACCOUNT_SYNCS':
+          await processAccountSyncs(supabase, supabaseInvoke, run);
+          break;
+        case 'AIRBNB_RATINGS':
+          await processAirbnbRatings(supabase, supabaseInvoke, run);
+          break;
+        case 'PROBABILITIES':
+          await processProbabilities(supabase, supabaseInvoke, run);
+          break;
+        case 'FORECASTS':
+          await processForecasts(supabase, supabaseInvoke, run);
+          break;
+        case 'ACTIONABLES':
+          await processActionables(supabase, supabaseInvoke, run);
+          break;
+        case 'COMPLETED':
+          await completeRun(supabase, run);
+          break;
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, run_id: runId, step: run.current_step }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Found ${accounts.length} account(s) with automated sync enabled`);
-
-    const results: AccountSyncResult[] = [];
-
-    for (const account of accounts) {
-      console.log(`\n--- Processing account: ${account.account_name} (${account.id}) ---`);
-      
-      const accountResult: AccountSyncResult = {
-        account: account.account_name,
-        accountId: account.id,
-        syncs: {},
-        lastAutomatedSyncUpdated: false,
-      };
-
-      try {
-        // 1. Sync Properties (listings)
-        console.log(`[${account.account_name}] Starting listings sync...`);
-        const { error: listingsInvokeError } = await supabase.functions.invoke('sync-guesty-data', {
-          body: { accountId: account.id, syncType: 'listings' }
-        });
-
-        if (listingsInvokeError) {
-          console.error(`[${account.account_name}] Failed to invoke listings sync:`, listingsInvokeError);
-          accountResult.syncs.listings = { success: false, error: listingsInvokeError.message };
-        } else {
-          accountResult.syncs.listings = await waitForSyncCompletion(
-            supabase, 
-            account.id, 
-            'listings',
-            600000 // 10 min timeout
-          );
-        }
-
-        // 2. Sync Reservations (incremental - new reservations)
-        console.log(`[${account.account_name}] Starting new reservations sync...`);
-        const { error: reservationsInvokeError } = await supabase.functions.invoke('sync-new-reservations', {
-          body: { accountId: account.id }
-        });
-
-        if (reservationsInvokeError) {
-          console.error(`[${account.account_name}] Failed to invoke reservations sync:`, reservationsInvokeError);
-          accountResult.syncs.reservations = { success: false, error: reservationsInvokeError.message };
-        } else {
-          accountResult.syncs.reservations = await waitForSyncCompletion(
-            supabase,
-            account.id,
-            'new_reservations',
-            600000 // 10 min timeout
-          );
-        }
-
-        // 3. Sync Owners
-        console.log(`[${account.account_name}] Starting owners sync...`);
-        const { error: ownersInvokeError } = await supabase.functions.invoke('sync-owners', {
-          body: { accountId: account.id }
-        });
-
-        if (ownersInvokeError) {
-          console.error(`[${account.account_name}] Failed to invoke owners sync:`, ownersInvokeError);
-          accountResult.syncs.owners = { success: false, error: ownersInvokeError.message };
-        } else {
-          // Owners sync doesn't use sync_jobs table, it returns directly
-          // Wait a short time to let it complete
-          await sleep(10000); // 10 seconds should be plenty for owners
-          accountResult.syncs.owners = { success: true };
-          console.log(`[${account.account_name}] Owners sync completed`);
-        }
-
-        // 4. Sync Calendar (this is the longest one)
-        console.log(`[${account.account_name}] Starting calendar sync...`);
-        const { error: calendarInvokeError } = await supabaseInvoke.functions.invoke('sync-bulk-calendar', {
-          body: { guestyAccountId: account.id }
-        });
-
-        if (calendarInvokeError) {
-          console.error(`[${account.account_name}] Failed to invoke calendar sync:`, calendarInvokeError);
-          accountResult.syncs.calendar = { success: false, error: calendarInvokeError.message };
-        } else {
-          accountResult.syncs.calendar = await waitForSyncCompletion(
-            supabase,
-            account.id,
-            'capacity_calendar',
-            900000 // 15 min timeout for calendar (it's the longest)
-          );
-        }
-
-        // Update last_automated_sync timestamp
-        const { error: updateError } = await supabase
-          .from('guesty_accounts')
-          .update({ last_automated_sync: new Date().toISOString() })
-          .eq('id', account.id);
-
-        if (updateError) {
-          console.error(`[${account.account_name}] Failed to update last_automated_sync:`, updateError);
-        } else {
-          accountResult.lastAutomatedSyncUpdated = true;
-          console.log(`[${account.account_name}] Updated last_automated_sync timestamp`);
-        }
-
-      } catch (accountError: any) {
-        console.error(`[${account.account_name}] Error processing account:`, accountError);
-        accountResult.error = accountError.message;
-      }
-
-      results.push(accountResult);
-
-      // Wait between accounts to avoid any rate limit overlap
-      if (accounts.indexOf(account) < accounts.length - 1) {
-        console.log('Waiting 30 seconds before next account...');
-        await sleep(30000);
-      }
-    }
-
-    // 5. Scrape Airbnb Ratings (runs once for entire org, not per account)
-    // Only run if at least one account has airbnb_scrape_enabled
-    const airbnbScrapeEnabled = accounts.some(a => a.airbnb_scrape_enabled !== false);
-    let airbnbScrapeResult: SyncResult | null = null;
-    const firstAccountId = accounts[0]?.id;
-
-    if (firstAccountId && airbnbScrapeEnabled) {
-      console.log(`\n--- Scraping Airbnb Ratings ---`);
-      const { error: airbnbInvokeError } = await supabaseInvoke.functions.invoke(
-        'bulk-scrape-airbnb-ratings',
-        {
-          body: {},
-        }
-      );
-
-      if (airbnbInvokeError) {
-        console.error('Failed to invoke Airbnb ratings scrape:', airbnbInvokeError);
-        airbnbScrapeResult = { success: false, error: airbnbInvokeError.message };
-      } else {
-        // Poll for completion with 20 min timeout (225 listings * 3s = ~11 min)
-        airbnbScrapeResult = await waitForSyncCompletion(
-          supabase,
-          firstAccountId,
-          'airbnb_ratings',
-          1200000 // 20 minutes
-        );
-      }
-    } else if (!airbnbScrapeEnabled) {
-      console.log(`\n--- Skipping Airbnb Ratings (disabled) ---`);
-      airbnbScrapeResult = { success: true, skipped: true };
-    }
-
-    // 6. Calculate All Booking Probabilities (runs once for entire org)
-    // Only run if at least one account has probability_calculation_enabled
-    const probabilityEnabled = accounts.some(a => a.probability_calculation_enabled !== false);
-    let probabilityResult: SyncResult | null = null;
-
-    if (probabilityEnabled) {
-      console.log(`\n--- Calculating Booking Probabilities ---`);
-      const { data: probResponse, error: probInvokeError } = await supabaseInvoke.functions.invoke(
-        'calculate-all-probabilities',
-        {
-          body: {},
-        }
-      );
-
-      if (probInvokeError) {
-        console.error('Failed to invoke probability calculation:', probInvokeError);
-        probabilityResult = { success: false, error: probInvokeError.message };
-      } else if (probResponse?.progress_id) {
-        // Poll for completion with 20 min timeout
-        probabilityResult = await waitForProgressCompletion(
-          supabase,
-          probResponse.progress_id,
-          'probabilities',
-          1200000 // 20 minutes
-        );
-      }
-    } else {
-      console.log(`\n--- Skipping Probability Calculation (disabled) ---`);
-      probabilityResult = { success: true, skipped: true };
-    }
-
-    // 7. Regenerate All Forecasts (runs once for entire org)
-    // Only run if at least one account has forecast_generation_enabled
-    const forecastEnabled = accounts.some(a => a.forecast_generation_enabled !== false);
-    let forecastResult: SyncResult | null = null;
-
-    if (forecastEnabled) {
-      console.log(`\n--- Regenerating Forecasts ---`);
-      const { data: forecastResponse, error: forecastInvokeError } = await supabaseInvoke.functions.invoke(
-        'generate-all-forecasts',
-        {
-          body: {},
-        }
-      );
-
-      if (forecastInvokeError) {
-        console.error('Failed to invoke forecast generation:', forecastInvokeError);
-        forecastResult = { success: false, error: forecastInvokeError.message };
-      } else if (forecastResponse?.progress_id) {
-        // Poll for completion with 30 min timeout
-        forecastResult = await waitForProgressCompletion(
-          supabase,
-          forecastResponse.progress_id,
-          'forecasts',
-          1800000 // 30 minutes
-        );
-      }
-    } else {
-      console.log(`\n--- Skipping Forecast Regeneration (disabled) ---`);
-      forecastResult = { success: true, skipped: true };
-    }
-
-    // 8. Generate Actionables
-    const actionablesEnabled = accounts.some(a => a.actionables_generation_enabled !== false);
-    let actionablesResult: SyncResult | null = null;
-
-    if (actionablesEnabled) {
-      console.log(`\n--- Generating Actionables ---`);
-      const { error: actionablesInvokeError } = await supabaseInvoke.functions.invoke(
-        'generate-actionables',
-        {
-          body: {},
-        }
-      );
-
-      if (actionablesInvokeError) {
-        console.error('Failed to invoke actionables generation:', actionablesInvokeError);
-        actionablesResult = { success: false, error: actionablesInvokeError.message };
-      } else {
-        actionablesResult = { success: true };
-        console.log('Actionables generation completed');
-      }
-    } else {
-      console.log(`\n--- Skipping Actionables Generation (disabled) ---`);
-      actionablesResult = { success: true, skipped: true };
-    }
-
-    const duration = Math.round((Date.now() - startTime) / 1000);
-    console.log(`\n=== Nightly Sync Completed ===`);
-    console.log(`Total duration: ${duration} seconds`);
-    console.log(`Accounts processed: ${results.length}`);
-    if (airbnbScrapeResult) {
-      console.log(`Airbnb ratings scrape: ${airbnbScrapeResult.success ? 'completed' : 'failed'}${airbnbScrapeResult.skipped ? ' (skipped)' : ''}`);
-    }
-    if (probabilityResult) {
-      console.log(`Probability calculation: ${probabilityResult.success ? 'completed' : 'failed'}${probabilityResult.skipped ? ' (skipped)' : ''}`);
-    }
-    if (forecastResult) {
-      console.log(`Forecast generation: ${forecastResult.success ? 'completed' : 'failed'}${forecastResult.skipped ? ' (skipped)' : ''}`);
-    }
-    if (actionablesResult) {
-      console.log(`Actionables generation: ${actionablesResult.success ? 'completed' : 'failed'}${actionablesResult.skipped ? ' (skipped)' : ''}`);
-    }
-
-    // Summary
-    const successfulAccounts = results.filter(r => !r.error).length;
-    const failedAccounts = results.filter(r => r.error).length;
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: `Nightly sync completed for ${successfulAccounts} account(s)`,
-        duration: `${duration}s`,
-        successfulAccounts,
-        failedAccounts,
-        results,
-        airbnbRatingsScrape: airbnbScrapeResult,
-        probabilityCalculation: probabilityResult,
-        forecastGeneration: forecastResult,
-        actionablesGeneration: actionablesResult,
-      }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-
   } catch (error: any) {
     console.error('Nightly sync error:', error);
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error.message,
-        duration: `${Math.round((Date.now() - startTime) / 1000)}s`
-      }),
-      { 
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
+      JSON.stringify({ success: false, error: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
+
+// === STEP PROCESSORS ===
+
+async function processAccountSyncs(
+  supabase: any,
+  supabaseInvoke: any,
+  run: NightlySyncRun
+): Promise<void> {
+  console.log('Processing ACCOUNT_SYNCS step...');
+
+  const accountStates = { ...run.account_states };
+  let allDone = true;
+  let anyProgress = false;
+
+  // Check each account's current phase
+  for (const accountId of run.account_ids) {
+    const state = accountStates[accountId];
+    if (!state || state.currentPhase === 'done') continue;
+
+    allDone = false;
+    const syncType = getSyncType(state.currentPhase);
+    
+    // Special handling for owners sync (doesn't use sync_jobs table)
+    if (state.currentPhase === 'owners') {
+      // Owners sync completes quickly, just move to next phase
+      console.log(`[${accountId}] Owners sync assumed complete, moving to calendar`);
+      state.phasesCompleted.push('owners');
+      state.currentPhase = 'calendar';
+      anyProgress = true;
+
+      // Fire off calendar sync
+      console.log(`[${accountId}] Firing calendar sync...`);
+      await supabaseInvoke.functions.invoke('sync-bulk-calendar', {
+        body: { guestyAccountId: accountId }
+      }).catch((err: any) => console.error(`Failed to invoke calendar sync:`, err));
+      continue;
+    }
+
+    const result = await isSyncComplete(supabase, accountId, syncType);
+    
+    if (result.complete) {
+      if (result.success) {
+        console.log(`[${accountId}] ${state.currentPhase} completed successfully`);
+        state.phasesCompleted.push(state.currentPhase);
+        state.currentPhase = getNextPhase(state.currentPhase);
+        anyProgress = true;
+
+        // Fire off next phase if not done
+        if (state.currentPhase !== 'done') {
+          console.log(`[${accountId}] Firing ${state.currentPhase} sync...`);
+          if (state.currentPhase === 'reservations') {
+            await supabaseInvoke.functions.invoke('sync-new-reservations', {
+              body: { accountId }
+            }).catch((err: any) => console.error(`Failed to invoke reservations sync:`, err));
+          } else if (state.currentPhase === 'owners') {
+            await supabaseInvoke.functions.invoke('sync-owners', {
+              body: { accountId }
+            }).catch((err: any) => console.error(`Failed to invoke owners sync:`, err));
+          } else if (state.currentPhase === 'calendar') {
+            await supabaseInvoke.functions.invoke('sync-bulk-calendar', {
+              body: { guestyAccountId: accountId }
+            }).catch((err: any) => console.error(`Failed to invoke calendar sync:`, err));
+          }
+        }
+      } else {
+        console.error(`[${accountId}] ${state.currentPhase} failed: ${result.error}`);
+        state.error = result.error;
+        // Skip to done on failure
+        state.currentPhase = 'done';
+        anyProgress = true;
+      }
+    } else {
+      console.log(`[${accountId}] ${state.currentPhase} still running...`);
+    }
+  }
+
+  // Update run state
+  if (anyProgress) {
+    await supabase.from('nightly_sync_runs').update({
+      account_states: accountStates,
+    }).eq('id', run.id);
+  }
+
+  // Check if all accounts are done
+  const accountsDone = run.account_ids.every(id => accountStates[id]?.currentPhase === 'done');
+
+  if (accountsDone) {
+    console.log('All account syncs complete, transitioning to AIRBNB_RATINGS');
+
+    // Update last_automated_sync for all accounts
+    for (const accountId of run.account_ids) {
+      await supabase.from('guesty_accounts').update({
+        last_automated_sync: new Date().toISOString(),
+      }).eq('id', accountId);
+    }
+
+    await supabase.from('nightly_sync_runs').update({
+      current_step: 'AIRBNB_RATINGS',
+      account_states: accountStates,
+    }).eq('id', run.id);
+
+    // Fire off Airbnb ratings scrape
+    const accounts = run.step_results.accounts as Account[];
+    const airbnbEnabled = accounts?.some(a => a.airbnb_scrape_enabled !== false);
+    
+    if (airbnbEnabled) {
+      console.log('Firing Airbnb ratings scrape...');
+      await supabaseInvoke.functions.invoke('bulk-scrape-airbnb-ratings', {
+        body: {}
+      }).catch((err: any) => console.error('Failed to invoke Airbnb scrape:', err));
+    }
+  }
+
+  // Self-invoke to continue
+  console.log('Self-invoking to continue...');
+  await sleep(SELF_INVOKE_DELAY_MS);
+  await supabaseInvoke.functions.invoke('nightly-sync', {
+    body: { run_id: run.id }
+  });
+}
+
+async function processAirbnbRatings(
+  supabase: any,
+  supabaseInvoke: any,
+  run: NightlySyncRun
+): Promise<void> {
+  console.log('Processing AIRBNB_RATINGS step...');
+
+  const accounts = run.step_results.accounts as Account[];
+  const airbnbEnabled = accounts?.some(a => a.airbnb_scrape_enabled !== false);
+
+  if (!airbnbEnabled) {
+    console.log('Airbnb scraping disabled, skipping to PROBABILITIES');
+    await supabase.from('nightly_sync_runs').update({
+      current_step: 'PROBABILITIES',
+      step_results: { ...run.step_results, airbnb_ratings: { skipped: true } },
+    }).eq('id', run.id);
+  } else {
+    // Check if scrape is complete
+    const firstAccountId = run.account_ids[0];
+    const result = await isSyncComplete(supabase, firstAccountId, 'airbnb_ratings');
+
+    if (result.complete) {
+      console.log(`Airbnb ratings scrape complete (success: ${result.success})`);
+      await supabase.from('nightly_sync_runs').update({
+        current_step: 'PROBABILITIES',
+        step_results: { ...run.step_results, airbnb_ratings: { success: result.success, error: result.error } },
+      }).eq('id', run.id);
+    } else {
+      console.log('Airbnb ratings still running...');
+    }
+  }
+
+  // Fire off probabilities if transitioning
+  const { data: updatedRun } = await supabase.from('nightly_sync_runs').select('current_step').eq('id', run.id).single();
+  if (updatedRun?.current_step === 'PROBABILITIES') {
+    const probEnabled = accounts?.some(a => a.probability_calculation_enabled !== false);
+    if (probEnabled) {
+      console.log('Firing probability calculation...');
+      const { data: probResponse } = await supabaseInvoke.functions.invoke('calculate-all-probabilities', {
+        body: {}
+      }).catch((err: any) => {
+        console.error('Failed to invoke probability calculation:', err);
+        return { data: null };
+      });
+
+      if (probResponse?.progress_id) {
+        await supabase.from('nightly_sync_runs').update({
+          step_results: { ...run.step_results, probability_progress_id: probResponse.progress_id },
+        }).eq('id', run.id);
+      }
+    }
+  }
+
+  // Self-invoke to continue
+  console.log('Self-invoking to continue...');
+  await sleep(SELF_INVOKE_DELAY_MS);
+  await supabaseInvoke.functions.invoke('nightly-sync', {
+    body: { run_id: run.id }
+  });
+}
+
+async function processProbabilities(
+  supabase: any,
+  supabaseInvoke: any,
+  run: NightlySyncRun
+): Promise<void> {
+  console.log('Processing PROBABILITIES step...');
+
+  const accounts = run.step_results.accounts as Account[];
+  const probEnabled = accounts?.some(a => a.probability_calculation_enabled !== false);
+
+  if (!probEnabled) {
+    console.log('Probability calculation disabled, skipping to FORECASTS');
+    await supabase.from('nightly_sync_runs').update({
+      current_step: 'FORECASTS',
+      step_results: { ...run.step_results, probabilities: { skipped: true } },
+    }).eq('id', run.id);
+  } else {
+    const progressId = run.step_results.probability_progress_id;
+    if (progressId) {
+      const result = await isProgressComplete(supabase, progressId);
+      if (result.complete) {
+        console.log(`Probability calculation complete (success: ${result.success})`);
+        await supabase.from('nightly_sync_runs').update({
+          current_step: 'FORECASTS',
+          step_results: { ...run.step_results, probabilities: { success: result.success, error: result.error } },
+        }).eq('id', run.id);
+      } else {
+        console.log('Probability calculation still running...');
+      }
+    } else {
+      // No progress ID, might have failed to start
+      console.log('No probability progress ID, moving to FORECASTS');
+      await supabase.from('nightly_sync_runs').update({
+        current_step: 'FORECASTS',
+        step_results: { ...run.step_results, probabilities: { skipped: true, reason: 'no_progress_id' } },
+      }).eq('id', run.id);
+    }
+  }
+
+  // Fire off forecasts if transitioning
+  const { data: updatedRun } = await supabase.from('nightly_sync_runs').select('current_step').eq('id', run.id).single();
+  if (updatedRun?.current_step === 'FORECASTS') {
+    const forecastEnabled = accounts?.some(a => a.forecast_generation_enabled !== false);
+    if (forecastEnabled) {
+      console.log('Firing forecast generation...');
+      const { data: forecastResponse } = await supabaseInvoke.functions.invoke('generate-all-forecasts', {
+        body: {}
+      }).catch((err: any) => {
+        console.error('Failed to invoke forecast generation:', err);
+        return { data: null };
+      });
+
+      if (forecastResponse?.progress_id) {
+        await supabase.from('nightly_sync_runs').update({
+          step_results: { ...run.step_results, forecast_progress_id: forecastResponse.progress_id },
+        }).eq('id', run.id);
+      }
+    }
+  }
+
+  // Self-invoke to continue
+  console.log('Self-invoking to continue...');
+  await sleep(SELF_INVOKE_DELAY_MS);
+  await supabaseInvoke.functions.invoke('nightly-sync', {
+    body: { run_id: run.id }
+  });
+}
+
+async function processForecasts(
+  supabase: any,
+  supabaseInvoke: any,
+  run: NightlySyncRun
+): Promise<void> {
+  console.log('Processing FORECASTS step...');
+
+  const accounts = run.step_results.accounts as Account[];
+  const forecastEnabled = accounts?.some(a => a.forecast_generation_enabled !== false);
+
+  if (!forecastEnabled) {
+    console.log('Forecast generation disabled, skipping to ACTIONABLES');
+    await supabase.from('nightly_sync_runs').update({
+      current_step: 'ACTIONABLES',
+      step_results: { ...run.step_results, forecasts: { skipped: true } },
+    }).eq('id', run.id);
+  } else {
+    const progressId = run.step_results.forecast_progress_id;
+    if (progressId) {
+      const result = await isProgressComplete(supabase, progressId);
+      if (result.complete) {
+        console.log(`Forecast generation complete (success: ${result.success})`);
+        await supabase.from('nightly_sync_runs').update({
+          current_step: 'ACTIONABLES',
+          step_results: { ...run.step_results, forecasts: { success: result.success, error: result.error } },
+        }).eq('id', run.id);
+      } else {
+        console.log('Forecast generation still running...');
+      }
+    } else {
+      console.log('No forecast progress ID, moving to ACTIONABLES');
+      await supabase.from('nightly_sync_runs').update({
+        current_step: 'ACTIONABLES',
+        step_results: { ...run.step_results, forecasts: { skipped: true, reason: 'no_progress_id' } },
+      }).eq('id', run.id);
+    }
+  }
+
+  // Fire off actionables if transitioning
+  const { data: updatedRun } = await supabase.from('nightly_sync_runs').select('current_step').eq('id', run.id).single();
+  if (updatedRun?.current_step === 'ACTIONABLES') {
+    const actionablesEnabled = accounts?.some(a => a.actionables_generation_enabled !== false);
+    if (actionablesEnabled) {
+      console.log('Firing actionables generation...');
+      await supabaseInvoke.functions.invoke('generate-actionables', {
+        body: {}
+      }).catch((err: any) => console.error('Failed to invoke actionables generation:', err));
+    }
+  }
+
+  // Self-invoke to continue
+  console.log('Self-invoking to continue...');
+  await sleep(SELF_INVOKE_DELAY_MS);
+  await supabaseInvoke.functions.invoke('nightly-sync', {
+    body: { run_id: run.id }
+  });
+}
+
+async function processActionables(
+  supabase: any,
+  supabaseInvoke: any,
+  run: NightlySyncRun
+): Promise<void> {
+  console.log('Processing ACTIONABLES step...');
+
+  const accounts = run.step_results.accounts as Account[];
+  const actionablesEnabled = accounts?.some(a => a.actionables_generation_enabled !== false);
+
+  if (!actionablesEnabled) {
+    console.log('Actionables generation disabled, moving to COMPLETED');
+  } else {
+    // Actionables is a quick operation, assume complete after one invocation
+    console.log('Actionables generation assumed complete');
+  }
+
+  await supabase.from('nightly_sync_runs').update({
+    current_step: 'COMPLETED',
+    step_results: { ...run.step_results, actionables: { success: true } },
+  }).eq('id', run.id);
+
+  // Self-invoke to finalize
+  console.log('Self-invoking to finalize...');
+  await sleep(1000);
+  await supabaseInvoke.functions.invoke('nightly-sync', {
+    body: { run_id: run.id }
+  });
+}
+
+async function completeRun(
+  supabase: any,
+  run: NightlySyncRun
+): Promise<void> {
+  console.log('=== Nightly Sync: Completing run ===');
+
+  const duration = Math.round((Date.now() - new Date(run.started_at).getTime()) / 1000);
+  
+  await supabase.from('nightly_sync_runs').update({
+    status: 'completed',
+    completed_at: new Date().toISOString(),
+    step_results: {
+      ...run.step_results,
+      summary: {
+        duration_seconds: duration,
+        accounts_processed: run.account_ids.length,
+        completed_at: new Date().toISOString(),
+      }
+    },
+  }).eq('id', run.id);
+
+  console.log(`Run ${run.id} completed in ${duration} seconds`);
+  console.log(`Accounts processed: ${run.account_ids.length}`);
+  console.log('Step results:', JSON.stringify(run.step_results, null, 2));
+}
