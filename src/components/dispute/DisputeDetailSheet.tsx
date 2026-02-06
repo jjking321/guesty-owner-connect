@@ -576,7 +576,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                         key={idx}
                         className={cn(
                           "flex",
-                          msg.sender === 'guest' ? "justify-end" : "justify-start"
+                          msg.sender === 'guest' ? "justify-start" : "justify-end"
                         )}
                       >
                         <div
@@ -622,7 +622,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                         key={idx}
                         className={cn(
                           "flex",
-                          msg.sender === 'guest' ? "justify-end" : "justify-start"
+                          msg.sender === 'guest' ? "justify-start" : "justify-end"
                         )}
                       >
                         <div
