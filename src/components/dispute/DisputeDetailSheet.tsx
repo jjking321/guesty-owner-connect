@@ -368,7 +368,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
         </SheetHeader>
 
         <ScrollArea className="h-[calc(100vh-120px)]">
-          <div className="space-y-6 py-4 pl-6">
+          <div className="space-y-6 py-4 pr-6">
             {/* Review Header */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1">
