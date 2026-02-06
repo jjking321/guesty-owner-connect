@@ -86,6 +86,10 @@ Deno.serve(async (req) => {
           continue;
         }
 
+        // Track conversation fetch success
+        let conversationFetched = false;
+        let messageCount = 0;
+
         // Step 1: Fetch conversation from Guesty
         console.log(`Step 1: Fetching conversation for reservation ${review.reservation_id}`);
         const convResponse = await fetch(`${supabaseUrl}/functions/v1/fetch-dispute-conversation`, {
@@ -102,6 +106,22 @@ Deno.serve(async (req) => {
 
         if (!convResponse.ok) {
           const errorText = await convResponse.text();
+          
+          // Check for OAuth rate limit (propagated from fetch-dispute-conversation)
+          if (errorText.includes('OAUTH_RATE_LIMIT')) {
+            console.log('Guesty OAuth rate limited, stopping batch');
+            return new Response(JSON.stringify({
+              success: false,
+              message: 'Guesty authentication rate limited. Please wait a few minutes.',
+              processed,
+              skipped: skipped + (triageReviews.length - results.length),
+              results,
+            }), {
+              status: 429,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          
           if (convResponse.status === 429) {
             console.log(`Rate limited on conversation fetch, skipping review`);
             result.error = 'Rate limit on conversation fetch';
@@ -110,19 +130,37 @@ Deno.serve(async (req) => {
             await delay(5000); // Wait longer on rate limit
             continue;
           }
-          console.log(`Conversation fetch failed: ${convResponse.status} - ${errorText}`);
-          // Continue anyway - might not have conversation but can still analyze review
+          
+          // Handle server errors (Guesty API down)
+          if (convResponse.status >= 500) {
+            console.log(`Guesty API error on conversation fetch (${convResponse.status}), skipping review`);
+            result.error = `Guesty API error: ${convResponse.status}`;
+            skipped++;
+            results.push(result);
+            await delay(3000);
+            continue;
+          }
+          
+          // For 404 or other client errors, log warning but continue
+          console.log(`Conversation fetch warning: ${convResponse.status} - ${errorText}`);
         } else {
           const convData = await convResponse.json();
-          console.log(`Fetched ${convData.messageCount || 0} messages`);
+          messageCount = convData.messages?.length || 0;
+          conversationFetched = messageCount > 0;
+          console.log(`Fetched ${messageCount} messages`);
+          
+          if (messageCount === 0) {
+            console.log(`Warning: No messages found for review ${review.id}`);
+          }
         }
 
         // Delay before next API call
         await delay(1000);
 
-        // Step 2: Analyze conversation red flags
-        console.log(`Step 2: Analyzing conversation red flags`);
-        const redflagResponse = await fetch(`${supabaseUrl}/functions/v1/analyze-conversation-redflags`, {
+        // Step 2: Analyze conversation red flags (only if messages were fetched)
+        if (conversationFetched) {
+          console.log(`Step 2: Analyzing conversation red flags`);
+          const redflagResponse = await fetch(`${supabaseUrl}/functions/v1/analyze-conversation-redflags`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${supabaseServiceKey}`,
@@ -131,40 +169,43 @@ Deno.serve(async (req) => {
           body: JSON.stringify({ reviewId: review.id }),
         });
 
-        if (!redflagResponse.ok) {
-          if (redflagResponse.status === 429) {
-            console.log(`Rate limited on red flag analysis, skipping review`);
-            result.error = 'Rate limit on red flag analysis';
-            skipped++;
-            results.push(result);
-            await delay(5000);
-            continue;
+          if (!redflagResponse.ok) {
+            if (redflagResponse.status === 429) {
+              console.log(`Rate limited on red flag analysis, skipping review`);
+              result.error = 'Rate limit on red flag analysis';
+              skipped++;
+              results.push(result);
+              await delay(5000);
+              continue;
+            }
+            if (redflagResponse.status === 402) {
+              console.log(`AI credits exhausted, stopping batch`);
+              result.error = 'AI credits exhausted';
+              results.push(result);
+              return new Response(JSON.stringify({
+                success: false,
+                message: 'AI credits exhausted',
+                processed,
+                skipped: skipped + 1,
+                results,
+              }), {
+                status: 402,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+            const errorText = await redflagResponse.text();
+            console.log(`Red flag analysis failed: ${redflagResponse.status} - ${errorText}`);
+            // Continue to final analysis anyway
+          } else {
+            const redflagData = await redflagResponse.json();
+            console.log(`Red flag analysis complete: ${redflagData.evidenceStrength || 'unknown'} evidence`);
           }
-          if (redflagResponse.status === 402) {
-            console.log(`AI credits exhausted, stopping batch`);
-            result.error = 'AI credits exhausted';
-            results.push(result);
-            return new Response(JSON.stringify({
-              success: false,
-              message: 'AI credits exhausted',
-              processed,
-              skipped: skipped + 1,
-              results,
-            }), {
-              status: 402,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
-          }
-          const errorText = await redflagResponse.text();
-          console.log(`Red flag analysis failed: ${redflagResponse.status} - ${errorText}`);
-          // Continue to final analysis anyway
-        } else {
-          const redflagData = await redflagResponse.json();
-          console.log(`Red flag analysis complete: ${redflagData.evidenceStrength || 'unknown'} evidence`);
-        }
 
-        // Delay before next API call
-        await delay(1000);
+          // Delay before next API call
+          await delay(1000);
+        } else {
+          console.log(`Skipping red flag analysis: no conversation history`);
+        }
 
         // Step 3: Run final dispute analysis
         console.log(`Step 3: Running final dispute analysis`);
@@ -216,8 +257,9 @@ Deno.serve(async (req) => {
         processed++;
         results.push(result);
 
-        // Delay between reviews to respect rate limits
-        await delay(2000);
+        // Delay between reviews to respect Guesty rate limits (15/sec, 120/min)
+        // Each review makes 2-3 Guesty API calls internally
+        await delay(3000);
 
       } catch (error) {
         console.error(`Error processing review ${review.id}:`, error);
