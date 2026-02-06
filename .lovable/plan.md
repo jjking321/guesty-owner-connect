@@ -1,80 +1,70 @@
 
 
-# Fix: Dispute Detail Sheet Sidebar Content Cutoff
+# Plan: Show Private Note Under Review Text in Dispute Detail Sheet
 
-## Problem
+## Overview
 
-The review dispute detail sheet (side panel) is cutting off content on the right side. Text in sections like "Conversation Summary" and message content is being truncated before reaching the edge of the panel.
+Display the private feedback/note from guests below the review text in the dispute detail sheet, matching the pattern already used in `ReviewManagementDialog.tsx`.
 
-## Root Causes
+## Changes Required
 
-| Issue | Location | Description |
-|-------|----------|-------------|
-| CSS class conflict | `sheet.tsx` line 40-41 | The `sheetVariants` includes `sm:max-w-sm` which may override the custom `sm:max-w-2xl` |
-| Missing overflow control | `DisputeDetailSheet.tsx` line 369 | ScrollArea's inner content needs explicit overflow handling |
-| Word wrapping | Various text elements | Long text content may not be breaking properly |
+### 1. Update DisputeReview Interface
 
-## Solution
+**Files:** `src/components/dispute/DisputePipelineBoard.tsx` and `src/components/dispute/DisputeDetailSheet.tsx`
 
-### 1. Update SheetContent to remove conflicting max-width
-
-**File:** `src/components/ui/sheet.tsx`
-
-Change the `sheetVariants` for the `right` side to not include `sm:max-w-sm`, allowing custom className overrides to work:
+Add `private_note` field to the interface:
 
 ```typescript
-// Before:
-right: "inset-y-0 right-0 h-full w-3/4  border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
-
-// After:
-right: "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
+interface DisputeReview {
+  // ... existing fields
+  private_note?: string | null;  // Add this field
+}
 ```
 
-This allows the `DisputeDetailSheet` to properly override with `sm:max-w-2xl`.
+The data is already being fetched since the query uses `select('*')`.
 
-### 2. Add overflow handling to ScrollArea content
+### 2. Add Private Note Display
 
 **File:** `src/components/dispute/DisputeDetailSheet.tsx`
 
-Add `overflow-hidden` to the content container and ensure text breaks properly:
+Insert the private note section directly after the Review Text section (after line 395):
 
 ```typescript
-// Line 369-370:
-<ScrollArea className="h-[calc(100vh-120px)] pr-6">
-  <div className="space-y-6 py-4 pr-2">
-```
+{/* Review Text */}
+<div>
+  <Label className="text-sm font-medium">Review Text</Label>
+  <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap">
+    {review.review_text || 'No review text available'}
+  </p>
+</div>
 
-Changes:
-- Increase `pr-4` to `pr-6` on ScrollArea to give more room for the scrollbar
-- Add `pr-2` to inner div for additional content padding
-
-### 3. Fix text overflow on long content sections
-
-Add `break-words` and `overflow-wrap` to text-heavy sections:
-
-```typescript
-// Conversation summary (around line 501-510)
-<p className="text-sm text-muted-foreground break-words">
-  {review.dispute_conversation_summary}
-</p>
-
-// Message content in conversation history
-<p className="text-sm break-words">
-  {message.body || message.text}
-</p>
+{/* Private Note - NEW */}
+{review.private_note && (
+  <div>
+    <Label className="text-sm font-medium">Private Feedback</Label>
+    <div className="mt-1 p-3 bg-muted/50 rounded-lg border border-border">
+      <p className="text-sm whitespace-pre-wrap text-muted-foreground italic">
+        {review.private_note}
+      </p>
+    </div>
+  </div>
+)}
 ```
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/components/ui/sheet.tsx` | Remove `sm:max-w-sm` from right variant to allow override |
-| `src/components/dispute/DisputeDetailSheet.tsx` | Increase ScrollArea padding, add `break-words` to text elements |
+| `src/components/dispute/DisputePipelineBoard.tsx` | Add `private_note` to DisputeReview interface (line 37) |
+| `src/components/dispute/DisputeDetailSheet.tsx` | Add `private_note` to DisputeReview interface (line 101) and display section (after line 395) |
 
-## Summary
+## Visual Appearance
 
-The fix involves:
-1. Removing the conflicting `sm:max-w-sm` from the sheet component's right variant
-2. Adding proper padding to accommodate the scrollbar
-3. Ensuring long text content wraps properly with `break-words`
+The private note will appear:
+- Below the review text
+- With a "Private Feedback" label
+- In a muted, bordered container
+- With italic styling to distinguish from public content
+
+This matches the existing styling pattern from `ReviewManagementDialog.tsx`.
 
