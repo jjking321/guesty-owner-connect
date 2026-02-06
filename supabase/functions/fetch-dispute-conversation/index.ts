@@ -287,25 +287,15 @@ Deno.serve(async (req) => {
 
     console.log(`Fetching conversation for review: ${reviewId}, reservation: ${reservationId}`);
 
-    // Fetch review with listing and guesty account info
+    // Fetch review
     const { data: review, error: reviewError } = await supabase
       .from('reviews')
-      .select(`
-        id,
-        listing_id,
-        reservation_id,
-        guesty_account_id,
-        listings:listing_id (
-          id,
-          nickname,
-          guesty_account_id
-        )
-      `)
+      .select('id, listing_id, reservation_id, guesty_account_id')
       .eq('id', reviewId)
       .single();
 
     if (reviewError || !review) {
-      throw new Error(`Review not found: ${reviewError?.message}`);
+      throw new Error(`Review not found: ${reviewError?.message || 'No review with this ID'}`);
     }
 
     const targetReservationId = reservationId || review.reservation_id;
