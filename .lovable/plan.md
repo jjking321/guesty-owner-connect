@@ -1,99 +1,72 @@
 
-# Add Real-Time Progress Bar for Bulk Dispute Analysis
+# Fix: "No Reviews to Process" Despite 46 Visible in Triage
 
-## Overview
-Add a status bar to the Dispute Pipeline Board that shows real-time progress when running "Analyze Triage" batch processing. This follows the same pattern used by the ForecastAdmin page and SyncProgressCard for progress tracking.
+## Problem
+When clicking "Analyze Triage" button, the edge function returns "No reviews in triage to process" even though 46 reviews are visible in the triage column.
 
-## Architecture
+## Root Cause
+There's a date mismatch between what the frontend shows and what the backend processes:
 
-### Database
-Create a new table `dispute_analysis_progress` to track batch analysis progress:
+| Component | Date Filter | Result |
+|-----------|------------|--------|
+| Kanban board query | **None** | Shows all 46 triage reviews |
+| Edge function | `review_date >= (today - 30 days)` | Filters out **all** reviews |
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | uuid | Primary key |
-| started_at | timestamp | When the batch started |
-| completed_at | timestamp | When the batch finished |
-| status | text | running, completed, failed |
-| total_reviews | int | Total reviews to process |
-| completed_reviews | int | Successfully analyzed |
-| failed_reviews | int | Failed to analyze |
-| skipped_reviews | int | Skipped (no reservation_id, etc.) |
-| current_guest_name | text | Guest name currently being processed |
-| error_message | text | Error details if failed |
+Your most recent triage review is from **January 6, 2026** - exactly 31 days ago, so everything gets excluded.
 
-Enable realtime for this table so the frontend can subscribe to updates.
+## Solution
+Remove the date filter from the edge function entirely. If a review is visible in the triage column and the user wants to analyze it, we should process it regardless of age. The frontend already determines what's relevant by showing it.
 
-### Backend Changes
+## Changes Required
+
 **File:** `supabase/functions/batch-analyze-disputes/index.ts`
 
-1. At start: Create a progress record with status 'running'
-2. Return the `progress_id` immediately to the frontend (fire-and-forget pattern)
-3. After each review: Update the progress record with counts and current guest name
-4. On completion: Update status to 'completed'
-5. On error: Update status to 'failed' with error message
+### Remove the maxAgeDays filter (Lines 30-39)
 
-### Frontend Changes
-**File:** `src/components/dispute/DisputePipelineBoard.tsx`
+```typescript
+// Before:
+const { limit = 10, skipWithoutReservation = false, maxAgeDays = 7 } = await req.json()...
 
-1. Add state for tracking progress:
-   - `batchProgressId`: The ID returned from the edge function
-   - `batchProgress`: Object with total, completed, failed, skipped, currentGuest
+// Calculate cutoff date for recent reviews only
+const cutoffDate = new Date();
+cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays);
 
-2. Subscribe to realtime updates on `dispute_analysis_progress` table
+let query = supabase
+  .from('reviews')
+  .select('id, guest_name, reservation_id, listing_id, review_date')
+  .eq('dispute_status', 'triage')
+  .gte('review_date', cutoffDate.toISOString())  // <-- This excludes everything
+  ...
 
-3. Show a progress UI below the filters when batch is running:
-   - Progress bar with percentage
-   - Text showing "Analyzing: [Guest Name]"
-   - Counts: "3/10 completed, 1 skipped, 0 failed"
-   - Cancel button to stop the batch
+// After:
+const { limit = 10, skipWithoutReservation = false } = await req.json()...
 
-4. Auto-dismiss progress bar after completion (with brief success state)
-
-## Visual Design
-
-The progress section appears between the filters and the Kanban board:
-
-```text
-┌────────────────────────────────────────────────────────────────┐
-│  🔄 Analyzing Disputes                              [Cancel]   │
-│                                                                │
-│  Currently analyzing: John Smith                               │
-│  ████████████░░░░░░░░░░░░░░░░░░░░  35%                         │
-│  3 completed · 1 skipped · 0 failed                            │
-└────────────────────────────────────────────────────────────────┘
+let query = supabase
+  .from('reviews')
+  .select('id, guest_name, reservation_id, listing_id, review_date')
+  .eq('dispute_status', 'triage')
+  // No date filter - analyze any review in triage
+  ...
 ```
 
-## Implementation Steps
+**File:** `src/components/dispute/DisputePipelineBoard.tsx`
 
-### Step 1: Database Migration
-Create `dispute_analysis_progress` table with RLS policies (service role only for writes, authenticated for reads).
+### Remove maxAgeDays from the function call (Line 283)
 
-Enable realtime: `ALTER PUBLICATION supabase_realtime ADD TABLE dispute_analysis_progress;`
+```typescript
+// Before:
+body: { 
+  limit: Math.min(triageReviews.length, 20),
+  maxAgeDays: 30,
+}
 
-### Step 2: Update Edge Function
-Modify `batch-analyze-disputes/index.ts`:
-- Create progress record at start
-- Return progress_id immediately
-- Use async processing pattern (don't await the full loop before responding)
-- Update progress after each review
+// After:
+body: { 
+  limit: Math.min(triageReviews.length, 20),
+}
+```
 
-### Step 3: Update Frontend
-Modify `DisputePipelineBoard.tsx`:
-- Add progress state management
-- Subscribe to realtime channel for progress updates
-- Render progress card when batch is running
-- Handle completion and error states
-
-## Files to Change
-
-1. **New Migration**: Create `dispute_analysis_progress` table
-2. **supabase/functions/batch-analyze-disputes/index.ts**: Add progress tracking
-3. **src/components/dispute/DisputePipelineBoard.tsx**: Add progress UI with realtime subscription
-
-## Technical Notes
-
-- The edge function uses a "return early, process async" pattern - it returns the progress_id immediately so the UI can start subscribing, while processing continues
-- Progress updates are written to the database after each review (not batched) for real-time visibility
-- The frontend polls or subscribes via Supabase realtime to get updates
-- Cancel functionality updates the progress status to 'cancelled', which the edge function checks between reviews
+## Why This Approach
+- If a review is in triage and visible to the user, they should be able to analyze it
+- Old reviews might still be eligible for dispute (Airbnb allows disputes within certain timeframes)
+- The UI already filters what's shown via the date range picker if the user wants to narrow down
