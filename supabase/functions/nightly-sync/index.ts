@@ -29,12 +29,14 @@ interface NightlySyncRun {
   started_at: string;
   completed_at: string | null;
   current_step: PipelineStep;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'completed_with_errors' | 'failed';
   account_ids: string[];
   account_states: Record<string, AccountState>;
   step_results: Record<string, any>;
   error_message: string | null;
   invocation_count: number;
+  retry_count?: number;
+  retry_of?: string;
 }
 
 interface Account {
@@ -52,6 +54,50 @@ const SELF_INVOKE_DELAY_MS = 15000; // 15 seconds between self-invocations
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Log timing for a step (start or end)
+async function logStepTiming(
+  supabase: any,
+  runId: string,
+  stepName: string,
+  action: 'start' | 'end',
+  additionalData?: Record<string, any>
+): Promise<void> {
+  try {
+    const { data: run } = await supabase
+      .from('nightly_sync_runs')
+      .select('step_results')
+      .eq('id', runId)
+      .single();
+
+    const stepResults = run?.step_results || {};
+    const stepData = stepResults[stepName] || {};
+    
+    if (action === 'start') {
+      stepData.started_at = new Date().toISOString();
+      console.log(`[TIMING] ${stepName} started at ${stepData.started_at}`);
+    } else {
+      stepData.completed_at = new Date().toISOString();
+      if (stepData.started_at) {
+        stepData.duration_seconds = Math.round(
+          (Date.now() - new Date(stepData.started_at).getTime()) / 1000
+        );
+        console.log(`[TIMING] ${stepName} completed in ${stepData.duration_seconds}s`);
+      }
+    }
+
+    // Merge any additional data
+    if (additionalData) {
+      Object.assign(stepData, additionalData);
+    }
+
+    await supabase.from('nightly_sync_runs').update({
+      step_results: { ...stepResults, [stepName]: stepData }
+    }).eq('id', runId);
+  } catch (err) {
+    console.error(`Failed to log step timing for ${stepName}:`, err);
+  }
 }
 
 // Check if a sync job is complete for an account/sync_type
@@ -140,12 +186,33 @@ function isRateLimitError(message: string | null): boolean {
   return patterns.some(p => message.toLowerCase().includes(p.toLowerCase()));
 }
 
+// Check step_results for any partial failures
+function hasPartialFailures(stepResults: Record<string, any>): string[] {
+  const failures: string[] = [];
+  for (const [step, result] of Object.entries(stepResults)) {
+    if (step === 'accounts' || step === 'summary') continue; // Skip metadata
+    if (result && typeof result === 'object') {
+      if (result.success === false) {
+        failures.push(`${step}: ${result.error || 'failed'}`);
+      }
+      if (result.error && result.success !== true) {
+        failures.push(`${step}: ${result.error}`);
+      }
+    }
+  }
+  return failures;
+}
+
 // Handle verification mode - check if previous run completed and retry if needed
 async function handleVerification(
   supabase: any,
   supabaseInvoke: any
 ): Promise<Response> {
-  console.log('=== Nightly Sync: VERIFICATION MODE ===');
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║         NIGHTLY SYNC VERIFICATION MODE - 5:30 AM UTC         ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log('');
   
   const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
   
@@ -158,7 +225,7 @@ async function handleVerification(
     .limit(1);
     
   if (fetchError) {
-    console.error('Failed to fetch recent runs:', fetchError);
+    console.error('❌ Failed to fetch recent runs:', fetchError);
     return new Response(
       JSON.stringify({ success: false, error: fetchError.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -167,7 +234,8 @@ async function handleVerification(
   
   // No run found in the last 3 hours - start a new sync
   if (!recentRuns || recentRuns.length === 0) {
-    console.log('No run found in last 3 hours - starting new sync');
+    console.log('⚠️  No run found in last 3 hours - starting new sync');
+    console.log('   This could mean the 3 AM cron job failed to trigger.');
     await supabaseInvoke.functions.invoke('nightly-sync', { body: {} });
     return new Response(
       JSON.stringify({ 
@@ -179,32 +247,62 @@ async function handleVerification(
     );
   }
   
-  const run = recentRuns[0];
-  console.log(`Found run ${run.id} with status: ${run.status}`);
+  const run = recentRuns[0] as NightlySyncRun;
+  
+  // Print detailed verification report
+  console.log('=== VERIFICATION REPORT ===');
+  console.log(`Run ID: ${run.id}`);
+  console.log(`Status: ${run.status}`);
+  console.log(`Started: ${run.started_at}`);
+  console.log(`Current Step: ${run.current_step}`);
+  console.log(`Invocations: ${run.invocation_count}/${MAX_INVOCATIONS}`);
+  console.log(`Retry Count: ${run.retry_count || 0}`);
+  if (run.retry_of) console.log(`Retry Of: ${run.retry_of}`);
+  console.log('');
+  console.log('Account States:');
+  console.log(JSON.stringify(run.account_states, null, 2));
+  console.log('');
+  console.log('Step Results:');
+  console.log(JSON.stringify(run.step_results, null, 2));
+  console.log('');
   
   // Run still in progress - do nothing
   if (run.status === 'running') {
-    console.log('Run still in progress - no action needed');
+    const runningFor = Math.round((Date.now() - new Date(run.started_at).getTime()) / 60000);
+    console.log(`ℹ️  Run still in progress (running for ${runningFor} minutes)`);
+    console.log('   No action needed - letting it complete.');
     return new Response(
       JSON.stringify({ 
         success: true, 
         action: 'none',
         reason: 'run_still_running',
-        run_id: run.id 
+        run_id: run.id,
+        running_for_minutes: runningFor
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
   
-  // Run completed successfully - log and exit
-  if (run.status === 'completed') {
-    console.log('Run completed successfully - no action needed');
+  // Run completed - check for partial failures
+  if (run.status === 'completed' || run.status === 'completed_with_errors') {
+    const partialFailures = hasPartialFailures(run.step_results || {});
+    
+    if (partialFailures.length > 0) {
+      console.log('⚠️  Run completed but with partial failures:');
+      partialFailures.forEach(f => console.log(`   - ${f}`));
+      console.log('');
+      console.log('   Manual review may be needed for failed steps.');
+    } else {
+      console.log('✅ Run completed successfully - no action needed');
+    }
+    
     return new Response(
       JSON.stringify({ 
         success: true, 
         action: 'none',
-        reason: 'run_completed_successfully',
-        run_id: run.id 
+        reason: run.status === 'completed_with_errors' ? 'completed_with_errors' : 'run_completed_successfully',
+        run_id: run.id,
+        partial_failures: partialFailures
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -212,10 +310,18 @@ async function handleVerification(
   
   // Run failed - check if we should retry
   if (run.status === 'failed') {
-    // Check retry count (max 2 retries)
     const retryCount = run.retry_count || 0;
+    
+    console.log('❌ Run FAILED');
+    console.log(`   Error: ${run.error_message}`);
+    console.log(`   Retry count: ${retryCount}/2`);
+    console.log('');
+    
     if (retryCount >= 2) {
-      console.log(`Run failed but already retried ${retryCount} times - not retrying`);
+      console.log('=== NOT RETRYING: MAX RETRIES EXCEEDED ===');
+      console.log(`The sync has already been retried ${retryCount} times.`);
+      console.log('Manual intervention is required to investigate the failure.');
+      console.log('');
       return new Response(
         JSON.stringify({ 
           success: true, 
@@ -230,8 +336,12 @@ async function handleVerification(
     
     // Check if it's a rate limit error
     if (isRateLimitError(run.error_message)) {
-      console.log('Run failed due to rate limit - not retrying');
-      console.log('Error message:', run.error_message);
+      console.log('=== NOT RETRYING: RATE LIMIT ===');
+      console.log('The Guesty API returned rate limit errors.');
+      console.log('This is typically a temporary issue that resolves within a few hours.');
+      console.log('Manual intervention may be needed if this persists.');
+      console.log('Consider checking: https://app.guesty.com for API status');
+      console.log('');
       return new Response(
         JSON.stringify({ 
           success: true, 
@@ -245,40 +355,17 @@ async function handleVerification(
     }
     
     // Not a rate limit error - start a retry
-    console.log(`Run failed with non-rate-limit error - starting retry #${retryCount + 1}`);
-    console.log('Original error:', run.error_message);
+    console.log('=== STARTING RETRY ===');
+    console.log(`Initiating retry #${retryCount + 1} for failed run ${run.id}`);
+    console.log('');
     
-    // Create a new run marked as a retry
-    const { data: newRun, error: createError } = await supabase
-      .from('nightly_sync_runs')
-      .insert({
-        current_step: 'INIT',
-        status: 'running',
-        account_ids: [],
-        account_states: {},
-        step_results: { retry_of_run: run.id, retry_reason: run.error_message },
-        invocation_count: 0,
-        retry_count: retryCount + 1,
-        retry_of: run.id,
-      })
-      .select()
-      .single();
-      
-    if (createError) {
-      console.error('Failed to create retry run:', createError);
-      return new Response(
-        JSON.stringify({ success: false, error: createError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    // Start the retry by invoking without run_id (will pick up the new run and initialize it properly)
-    // But first, mark the new run so we can delete it and let the normal flow create one
-    await supabase.from('nightly_sync_runs').delete().eq('id', newRun.id);
-    
-    // Now invoke without run_id - it will create a proper run
-    // We'll update the retry tracking after
-    const { data: invokeResult } = await supabaseInvoke.functions.invoke('nightly-sync', { body: {} });
+    // Invoke with retry context - the new run will pick up retry tracking
+    await supabaseInvoke.functions.invoke('nightly-sync', { 
+      body: { 
+        retry_of_run_id: run.id, 
+        retry_number: retryCount + 1 
+      } 
+    });
     
     return new Response(
       JSON.stringify({ 
@@ -294,7 +381,7 @@ async function handleVerification(
   }
   
   // Unknown status
-  console.log(`Unknown run status: ${run.status}`);
+  console.log(`⚠️  Unknown run status: ${run.status}`);
   return new Response(
     JSON.stringify({ 
       success: true, 
@@ -333,12 +420,23 @@ Deno.serve(async (req) => {
     }
     
     const runId: string | undefined = body.run_id;
+    const retryOfRunId: string | undefined = body.retry_of_run_id;
+    const retryNumber: number | undefined = body.retry_number;
 
     let run: NightlySyncRun;
 
     if (!runId) {
       // === INIT: Start a new run ===
-      console.log('=== Nightly Sync: Starting new run ===');
+      console.log('');
+      console.log('╔══════════════════════════════════════════════════════════════╗');
+      console.log('║             NIGHTLY SYNC: STARTING NEW RUN                   ║');
+      console.log('╚══════════════════════════════════════════════════════════════╝');
+      console.log('');
+      console.log(`Timestamp: ${new Date().toISOString()}`);
+      if (retryOfRunId) {
+        console.log(`This is RETRY #${retryNumber} of run ${retryOfRunId}`);
+      }
+      console.log('');
 
       // Check for any already running syncs (prevent duplicates)
       const { data: existingRuns } = await supabase
@@ -348,7 +446,7 @@ Deno.serve(async (req) => {
         .gte('started_at', new Date(Date.now() - MAX_RUN_TIME_MS).toISOString());
 
       if (existingRuns && existingRuns.length > 0) {
-        console.log('Another nightly sync is already running:', existingRuns[0].id);
+        console.log('⚠️  Another nightly sync is already running:', existingRuns[0].id);
         return new Response(
           JSON.stringify({ 
             success: false, 
@@ -370,12 +468,16 @@ Deno.serve(async (req) => {
       }
 
       if (!accounts || accounts.length === 0) {
-        console.log('No accounts with automated sync enabled');
+        console.log('ℹ️  No accounts with automated sync enabled');
         return new Response(
           JSON.stringify({ success: true, message: 'No accounts with automated sync enabled' }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      console.log(`Found ${accounts.length} account(s) with automated sync enabled:`);
+      accounts.forEach(a => console.log(`  - ${a.account_name} (${a.id})`));
+      console.log('');
 
       // Initialize account states
       const accountStates: Record<string, AccountState> = {};
@@ -386,17 +488,33 @@ Deno.serve(async (req) => {
         };
       }
 
-      // Create run record
+      // Create run record with retry tracking if applicable
+      const runData: any = {
+        current_step: 'ACCOUNT_SYNCS',
+        status: 'running',
+        account_ids: accounts.map(a => a.id),
+        account_states: accountStates,
+        step_results: { 
+          accounts: accounts.map(a => ({ id: a.id, name: a.account_name })),
+          account_syncs: { started_at: new Date().toISOString() }
+        },
+        invocation_count: 1,
+      };
+
+      // Add retry tracking if this is a retry
+      if (retryOfRunId && retryNumber) {
+        runData.retry_of = retryOfRunId;
+        runData.retry_count = retryNumber;
+        runData.step_results.retry_context = {
+          retry_of: retryOfRunId,
+          retry_number: retryNumber,
+          started_at: new Date().toISOString()
+        };
+      }
+
       const { data: newRun, error: createError } = await supabase
         .from('nightly_sync_runs')
-        .insert({
-          current_step: 'ACCOUNT_SYNCS',
-          status: 'running',
-          account_ids: accounts.map(a => a.id),
-          account_states: accountStates,
-          step_results: { accounts: accounts.map(a => ({ id: a.id, name: a.account_name })) },
-          invocation_count: 1,
-        })
+        .insert(runData)
         .select()
         .single();
 
@@ -405,22 +523,26 @@ Deno.serve(async (req) => {
       }
 
       run = newRun as NightlySyncRun;
-      console.log(`Created run ${run.id} with ${accounts.length} accounts`);
+      console.log(`✓ Created run ${run.id}`);
+      console.log('');
 
       // Fire off initial listings sync for ALL accounts in parallel
-      console.log('Firing off listings sync for all accounts in parallel...');
+      console.log('Firing listings sync for all accounts in parallel...');
       const syncPromises = accounts.map(account => 
         supabaseInvoke.functions.invoke('sync-guesty-data', {
           body: { accountId: account.id, syncType: 'listings' }
+        }).then(() => {
+          console.log(`  ✓ Listings sync started for ${account.account_name}`);
         }).catch(err => {
-          console.error(`Failed to invoke listings sync for ${account.account_name}:`, err);
+          console.error(`  ✗ Failed to invoke listings sync for ${account.account_name}:`, err.message);
           return { error: err };
         })
       );
       await Promise.all(syncPromises);
 
       // Self-invoke to check progress
-      console.log('Self-invoking to check progress...');
+      console.log('');
+      console.log(`Waiting ${SELF_INVOKE_DELAY_MS/1000}s before checking progress...`);
       await sleep(SELF_INVOKE_DELAY_MS);
       await supabaseInvoke.functions.invoke('nightly-sync', {
         body: { run_id: run.id }
@@ -430,15 +552,15 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           success: true, 
           message: 'Nightly sync started',
-          run_id: run.id 
+          run_id: run.id,
+          accounts_count: accounts.length,
+          is_retry: !!retryOfRunId
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
 
     } else {
       // === CONTINUATION: Process existing run ===
-      console.log(`=== Nightly Sync: Continuing run ${runId} ===`);
-
       const { data: existingRun, error: fetchError } = await supabase
         .from('nightly_sync_runs')
         .select('*')
@@ -450,6 +572,9 @@ Deno.serve(async (req) => {
       }
 
       run = existingRun as NightlySyncRun;
+      
+      console.log(`=== Nightly Sync: Continuing run ${runId} ===`);
+      console.log(`Step: ${run.current_step} | Invocation: ${run.invocation_count + 1}/${MAX_INVOCATIONS}`);
 
       // Safety checks
       if (run.status !== 'running') {
@@ -461,7 +586,7 @@ Deno.serve(async (req) => {
       }
 
       if (run.invocation_count >= MAX_INVOCATIONS) {
-        console.error(`Run ${runId} exceeded max invocations (${MAX_INVOCATIONS})`);
+        console.error(`❌ Run ${runId} exceeded max invocations (${MAX_INVOCATIONS})`);
         await supabase.from('nightly_sync_runs').update({
           status: 'failed',
           error_message: `Exceeded maximum invocations (${MAX_INVOCATIONS})`,
@@ -475,7 +600,7 @@ Deno.serve(async (req) => {
 
       const runStartTime = new Date(run.started_at).getTime();
       if (Date.now() - runStartTime > MAX_RUN_TIME_MS) {
-        console.error(`Run ${runId} exceeded max run time (2 hours)`);
+        console.error(`❌ Run ${runId} exceeded max run time (2 hours)`);
         await supabase.from('nightly_sync_runs').update({
           status: 'failed',
           error_message: 'Exceeded maximum run time (2 hours)',
@@ -491,8 +616,6 @@ Deno.serve(async (req) => {
       await supabase.from('nightly_sync_runs').update({
         invocation_count: run.invocation_count + 1,
       }).eq('id', runId);
-
-      console.log(`Current step: ${run.current_step}, invocation: ${run.invocation_count + 1}`);
 
       // Process based on current step
       switch (run.current_step) {
@@ -523,7 +646,7 @@ Deno.serve(async (req) => {
     }
 
   } catch (error: any) {
-    console.error('Nightly sync error:', error);
+    console.error('❌ Nightly sync error:', error);
     return new Response(
       JSON.stringify({ success: false, error: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -541,12 +664,16 @@ async function processAccountSyncs(
   console.log('Processing ACCOUNT_SYNCS step...');
 
   const accountStates = { ...run.account_states };
+  const accounts = (run.step_results.accounts || []) as Account[];
   let allDone = true;
   let anyProgress = false;
 
   // Check each account's current phase
   for (const accountId of run.account_ids) {
     const state = accountStates[accountId];
+    const accountInfo = accounts.find(a => a.id === accountId);
+    const accountName = accountInfo?.name || accountId.substring(0, 8);
+    
     if (!state || state.currentPhase === 'done') continue;
 
     allDone = false;
@@ -554,17 +681,16 @@ async function processAccountSyncs(
     
     // Special handling for owners sync (doesn't use sync_jobs table)
     if (state.currentPhase === 'owners') {
-      // Owners sync completes quickly, just move to next phase
-      console.log(`[${accountId}] Owners sync assumed complete, moving to calendar`);
+      console.log(`[${accountName}] Owners sync assumed complete, moving to calendar`);
       state.phasesCompleted.push('owners');
       state.currentPhase = 'calendar';
       anyProgress = true;
 
       // Fire off calendar sync
-      console.log(`[${accountId}] Firing calendar sync...`);
+      console.log(`[${accountName}] Firing calendar sync...`);
       await supabaseInvoke.functions.invoke('sync-bulk-calendar', {
         body: { guestyAccountId: accountId }
-      }).catch((err: any) => console.error(`Failed to invoke calendar sync:`, err));
+      }).catch((err: any) => console.error(`[${accountName}] Failed to invoke calendar sync:`, err.message));
       continue;
     }
 
@@ -572,37 +698,37 @@ async function processAccountSyncs(
     
     if (result.complete) {
       if (result.success) {
-        console.log(`[${accountId}] ${state.currentPhase} completed successfully`);
+        console.log(`[${accountName}] ✓ ${state.currentPhase} completed successfully`);
         state.phasesCompleted.push(state.currentPhase);
         state.currentPhase = getNextPhase(state.currentPhase);
         anyProgress = true;
 
         // Fire off next phase if not done
         if (state.currentPhase !== 'done') {
-          console.log(`[${accountId}] Firing ${state.currentPhase} sync...`);
+          console.log(`[${accountName}] Firing ${state.currentPhase} sync...`);
           if (state.currentPhase === 'reservations') {
             await supabaseInvoke.functions.invoke('sync-new-reservations', {
               body: { accountId }
-            }).catch((err: any) => console.error(`Failed to invoke reservations sync:`, err));
+            }).catch((err: any) => console.error(`[${accountName}] Failed to invoke reservations sync:`, err.message));
           } else if (state.currentPhase === 'owners') {
             await supabaseInvoke.functions.invoke('sync-owners', {
               body: { accountId }
-            }).catch((err: any) => console.error(`Failed to invoke owners sync:`, err));
+            }).catch((err: any) => console.error(`[${accountName}] Failed to invoke owners sync:`, err.message));
           } else if (state.currentPhase === 'calendar') {
             await supabaseInvoke.functions.invoke('sync-bulk-calendar', {
               body: { guestyAccountId: accountId }
-            }).catch((err: any) => console.error(`Failed to invoke calendar sync:`, err));
+            }).catch((err: any) => console.error(`[${accountName}] Failed to invoke calendar sync:`, err.message));
           }
         }
       } else {
-        console.error(`[${accountId}] ${state.currentPhase} failed: ${result.error}`);
+        console.error(`[${accountName}] ✗ ${state.currentPhase} failed: ${result.error}`);
         state.error = result.error;
         // Skip to done on failure
         state.currentPhase = 'done';
         anyProgress = true;
       }
     } else {
-      console.log(`[${accountId}] ${state.currentPhase} still running...`);
+      console.log(`[${accountName}] ${state.currentPhase} still running...`);
     }
   }
 
@@ -617,7 +743,42 @@ async function processAccountSyncs(
   const accountsDone = run.account_ids.every(id => accountStates[id]?.currentPhase === 'done');
 
   if (accountsDone) {
-    console.log('All account syncs complete, transitioning to AIRBNB_RATINGS');
+    console.log('');
+    console.log('All account syncs complete, building summary...');
+
+    // Build account summary for step_results
+    const accountSummary: Record<string, any> = {};
+    let successfulAccounts = 0;
+    let failedAccounts = 0;
+
+    for (const accountId of run.account_ids) {
+      const state = accountStates[accountId];
+      const accountInfo = accounts.find(a => a.id === accountId);
+      const isSuccess = !state?.error && state?.phasesCompleted?.includes('calendar');
+      
+      accountSummary[accountId] = {
+        name: accountInfo?.name || accountId,
+        phases_completed: state?.phasesCompleted || [],
+        success: isSuccess,
+        error: state?.error
+      };
+
+      if (isSuccess) successfulAccounts++;
+      else failedAccounts++;
+    }
+
+    console.log(`Account sync summary: ${successfulAccounts} successful, ${failedAccounts} failed`);
+
+    // Log step timing end and update step_results
+    await logStepTiming(supabase, run.id, 'account_syncs', 'end', {
+      success: failedAccounts === 0,
+      summary: {
+        total_accounts: run.account_ids.length,
+        successful: successfulAccounts,
+        failed: failedAccounts,
+        accounts: accountSummary
+      }
+    });
 
     // Update last_automated_sync for all accounts
     for (const accountId of run.account_ids) {
@@ -626,25 +787,26 @@ async function processAccountSyncs(
       }).eq('id', accountId);
     }
 
+    console.log('Transitioning to AIRBNB_RATINGS');
     await supabase.from('nightly_sync_runs').update({
       current_step: 'AIRBNB_RATINGS',
       account_states: accountStates,
     }).eq('id', run.id);
 
     // Fire off Airbnb ratings scrape
-    const accounts = run.step_results.accounts as Account[];
     const airbnbEnabled = accounts?.some(a => a.airbnb_scrape_enabled !== false);
     
     if (airbnbEnabled) {
       console.log('Firing Airbnb ratings scrape...');
+      await logStepTiming(supabase, run.id, 'airbnb_ratings', 'start');
       await supabaseInvoke.functions.invoke('bulk-scrape-airbnb-ratings', {
         body: {}
-      }).catch((err: any) => console.error('Failed to invoke Airbnb scrape:', err));
+      }).catch((err: any) => console.error('Failed to invoke Airbnb scrape:', err.message));
     }
   }
 
   // Self-invoke to continue
-  console.log('Self-invoking to continue...');
+  console.log(`Waiting ${SELF_INVOKE_DELAY_MS/1000}s before next check...`);
   await sleep(SELF_INVOKE_DELAY_MS);
   await supabaseInvoke.functions.invoke('nightly-sync', {
     body: { run_id: run.id }
@@ -663,9 +825,9 @@ async function processAirbnbRatings(
 
   if (!airbnbEnabled) {
     console.log('Airbnb scraping disabled, skipping to PROBABILITIES');
+    await logStepTiming(supabase, run.id, 'airbnb_ratings', 'end', { skipped: true, reason: 'disabled' });
     await supabase.from('nightly_sync_runs').update({
       current_step: 'PROBABILITIES',
-      step_results: { ...run.step_results, airbnb_ratings: { skipped: true } },
     }).eq('id', run.id);
   } else {
     // Check if scrape is complete
@@ -673,10 +835,13 @@ async function processAirbnbRatings(
     const result = await isSyncComplete(supabase, firstAccountId, 'airbnb_ratings');
 
     if (result.complete) {
-      console.log(`Airbnb ratings scrape complete (success: ${result.success})`);
+      console.log(`✓ Airbnb ratings scrape complete (success: ${result.success})`);
+      await logStepTiming(supabase, run.id, 'airbnb_ratings', 'end', { 
+        success: result.success, 
+        error: result.error 
+      });
       await supabase.from('nightly_sync_runs').update({
         current_step: 'PROBABILITIES',
-        step_results: { ...run.step_results, airbnb_ratings: { success: result.success, error: result.error } },
       }).eq('id', run.id);
     } else {
       console.log('Airbnb ratings still running...');
@@ -689,10 +854,11 @@ async function processAirbnbRatings(
     const probEnabled = accounts?.some(a => a.probability_calculation_enabled !== false);
     if (probEnabled) {
       console.log('Firing probability calculation...');
+      await logStepTiming(supabase, run.id, 'probabilities', 'start');
       const { data: probResponse } = await supabaseInvoke.functions.invoke('calculate-all-probabilities', {
         body: {}
       }).catch((err: any) => {
-        console.error('Failed to invoke probability calculation:', err);
+        console.error('Failed to invoke probability calculation:', err.message);
         return { data: null };
       });
 
@@ -705,7 +871,7 @@ async function processAirbnbRatings(
   }
 
   // Self-invoke to continue
-  console.log('Self-invoking to continue...');
+  console.log(`Waiting ${SELF_INVOKE_DELAY_MS/1000}s before next check...`);
   await sleep(SELF_INVOKE_DELAY_MS);
   await supabaseInvoke.functions.invoke('nightly-sync', {
     body: { run_id: run.id }
@@ -724,19 +890,22 @@ async function processProbabilities(
 
   if (!probEnabled) {
     console.log('Probability calculation disabled, skipping to FORECASTS');
+    await logStepTiming(supabase, run.id, 'probabilities', 'end', { skipped: true, reason: 'disabled' });
     await supabase.from('nightly_sync_runs').update({
       current_step: 'FORECASTS',
-      step_results: { ...run.step_results, probabilities: { skipped: true } },
     }).eq('id', run.id);
   } else {
     const progressId = run.step_results.probability_progress_id;
     if (progressId) {
       const result = await isProgressComplete(supabase, progressId);
       if (result.complete) {
-        console.log(`Probability calculation complete (success: ${result.success})`);
+        console.log(`✓ Probability calculation complete (success: ${result.success})`);
+        await logStepTiming(supabase, run.id, 'probabilities', 'end', {
+          success: result.success,
+          error: result.error
+        });
         await supabase.from('nightly_sync_runs').update({
           current_step: 'FORECASTS',
-          step_results: { ...run.step_results, probabilities: { success: result.success, error: result.error } },
         }).eq('id', run.id);
       } else {
         console.log('Probability calculation still running...');
@@ -744,9 +913,12 @@ async function processProbabilities(
     } else {
       // No progress ID, might have failed to start
       console.log('No probability progress ID, moving to FORECASTS');
+      await logStepTiming(supabase, run.id, 'probabilities', 'end', { 
+        skipped: true, 
+        reason: 'no_progress_id' 
+      });
       await supabase.from('nightly_sync_runs').update({
         current_step: 'FORECASTS',
-        step_results: { ...run.step_results, probabilities: { skipped: true, reason: 'no_progress_id' } },
       }).eq('id', run.id);
     }
   }
@@ -757,10 +929,11 @@ async function processProbabilities(
     const forecastEnabled = accounts?.some(a => a.forecast_generation_enabled !== false);
     if (forecastEnabled) {
       console.log('Firing forecast generation...');
+      await logStepTiming(supabase, run.id, 'forecasts', 'start');
       const { data: forecastResponse } = await supabaseInvoke.functions.invoke('generate-all-forecasts', {
         body: {}
       }).catch((err: any) => {
-        console.error('Failed to invoke forecast generation:', err);
+        console.error('Failed to invoke forecast generation:', err.message);
         return { data: null };
       });
 
@@ -773,7 +946,7 @@ async function processProbabilities(
   }
 
   // Self-invoke to continue
-  console.log('Self-invoking to continue...');
+  console.log(`Waiting ${SELF_INVOKE_DELAY_MS/1000}s before next check...`);
   await sleep(SELF_INVOKE_DELAY_MS);
   await supabaseInvoke.functions.invoke('nightly-sync', {
     body: { run_id: run.id }
@@ -792,28 +965,34 @@ async function processForecasts(
 
   if (!forecastEnabled) {
     console.log('Forecast generation disabled, skipping to ACTIONABLES');
+    await logStepTiming(supabase, run.id, 'forecasts', 'end', { skipped: true, reason: 'disabled' });
     await supabase.from('nightly_sync_runs').update({
       current_step: 'ACTIONABLES',
-      step_results: { ...run.step_results, forecasts: { skipped: true } },
     }).eq('id', run.id);
   } else {
     const progressId = run.step_results.forecast_progress_id;
     if (progressId) {
       const result = await isProgressComplete(supabase, progressId);
       if (result.complete) {
-        console.log(`Forecast generation complete (success: ${result.success})`);
+        console.log(`✓ Forecast generation complete (success: ${result.success})`);
+        await logStepTiming(supabase, run.id, 'forecasts', 'end', {
+          success: result.success,
+          error: result.error
+        });
         await supabase.from('nightly_sync_runs').update({
           current_step: 'ACTIONABLES',
-          step_results: { ...run.step_results, forecasts: { success: result.success, error: result.error } },
         }).eq('id', run.id);
       } else {
         console.log('Forecast generation still running...');
       }
     } else {
       console.log('No forecast progress ID, moving to ACTIONABLES');
+      await logStepTiming(supabase, run.id, 'forecasts', 'end', { 
+        skipped: true, 
+        reason: 'no_progress_id' 
+      });
       await supabase.from('nightly_sync_runs').update({
         current_step: 'ACTIONABLES',
-        step_results: { ...run.step_results, forecasts: { skipped: true, reason: 'no_progress_id' } },
       }).eq('id', run.id);
     }
   }
@@ -824,14 +1003,15 @@ async function processForecasts(
     const actionablesEnabled = accounts?.some(a => a.actionables_generation_enabled !== false);
     if (actionablesEnabled) {
       console.log('Firing actionables generation...');
+      await logStepTiming(supabase, run.id, 'actionables', 'start');
       await supabaseInvoke.functions.invoke('generate-actionables', {
         body: {}
-      }).catch((err: any) => console.error('Failed to invoke actionables generation:', err));
+      }).catch((err: any) => console.error('Failed to invoke actionables generation:', err.message));
     }
   }
 
   // Self-invoke to continue
-  console.log('Self-invoking to continue...');
+  console.log(`Waiting ${SELF_INVOKE_DELAY_MS/1000}s before next check...`);
   await sleep(SELF_INVOKE_DELAY_MS);
   await supabaseInvoke.functions.invoke('nightly-sync', {
     body: { run_id: run.id }
@@ -849,19 +1029,20 @@ async function processActionables(
   const actionablesEnabled = accounts?.some(a => a.actionables_generation_enabled !== false);
 
   if (!actionablesEnabled) {
-    console.log('Actionables generation disabled, moving to COMPLETED');
+    console.log('Actionables generation disabled');
+    await logStepTiming(supabase, run.id, 'actionables', 'end', { skipped: true, reason: 'disabled' });
   } else {
     // Actionables is a quick operation, assume complete after one invocation
-    console.log('Actionables generation assumed complete');
+    console.log('✓ Actionables generation assumed complete');
+    await logStepTiming(supabase, run.id, 'actionables', 'end', { success: true });
   }
 
   await supabase.from('nightly_sync_runs').update({
     current_step: 'COMPLETED',
-    step_results: { ...run.step_results, actionables: { success: true } },
   }).eq('id', run.id);
 
   // Self-invoke to finalize
-  console.log('Self-invoking to finalize...');
+  console.log('Moving to COMPLETED...');
   await sleep(1000);
   await supabaseInvoke.functions.invoke('nightly-sync', {
     body: { run_id: run.id }
@@ -872,24 +1053,102 @@ async function completeRun(
   supabase: any,
   run: NightlySyncRun
 ): Promise<void> {
-  console.log('=== Nightly Sync: Completing run ===');
+  console.log('');
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║             NIGHTLY SYNC: COMPLETING RUN                     ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log('');
+
+  // Refetch to get latest step_results
+  const { data: latestRun } = await supabase
+    .from('nightly_sync_runs')
+    .select('*')
+    .eq('id', run.id)
+    .single();
+
+  const stepResults = latestRun?.step_results || run.step_results;
+  const accountStates = latestRun?.account_states || run.account_states;
 
   const duration = Math.round((Date.now() - new Date(run.started_at).getTime()) / 1000);
+  const durationMinutes = Math.round(duration / 60);
   
+  // Build account summary
+  const accountSummary: Record<string, any> = {};
+  let successfulAccounts = 0;
+  let failedAccounts = 0;
+  const accounts = stepResults.accounts as Account[] || [];
+
+  for (const accountId of run.account_ids) {
+    const state = accountStates[accountId];
+    const accountInfo = accounts.find(a => a.id === accountId);
+    const isSuccess = state?.currentPhase === 'done' && !state?.error;
+    
+    accountSummary[accountId] = {
+      name: accountInfo?.name || accountId,
+      phases_completed: state?.phasesCompleted || [],
+      final_phase: state?.currentPhase,
+      success: isSuccess,
+      error: state?.error
+    };
+
+    if (isSuccess) successfulAccounts++;
+    else failedAccounts++;
+  }
+
+  // Check for partial failures in steps
+  const partialFailures = hasPartialFailures(stepResults);
+
+  // Determine final status
+  const hasErrors = failedAccounts > 0 || partialFailures.length > 0;
+  const finalStatus = hasErrors ? 'completed_with_errors' : 'completed';
+
+  // Print completion summary
+  console.log('=== NIGHTLY SYNC COMPLETE ===');
+  console.log(`Run ID: ${run.id}`);
+  console.log(`Status: ${finalStatus}`);
+  console.log(`Duration: ${duration} seconds (${durationMinutes} minutes)`);
+  console.log(`Accounts: ${successfulAccounts} successful, ${failedAccounts} failed`);
+  console.log(`Invocations used: ${run.invocation_count}/${MAX_INVOCATIONS}`);
+  if (run.retry_of) {
+    console.log(`This was retry #${run.retry_count} of run ${run.retry_of}`);
+  }
+  console.log('');
+  
+  if (partialFailures.length > 0) {
+    console.log('Partial failures detected:');
+    partialFailures.forEach(f => console.log(`  - ${f}`));
+    console.log('');
+  }
+
+  console.log('Account details:');
+  console.log(JSON.stringify(accountSummary, null, 2));
+  console.log('');
+  console.log('Step results:');
+  console.log(JSON.stringify(stepResults, null, 2));
+
+  // Save final summary
   await supabase.from('nightly_sync_runs').update({
-    status: 'completed',
+    status: finalStatus,
     completed_at: new Date().toISOString(),
     step_results: {
-      ...run.step_results,
+      ...stepResults,
       summary: {
         duration_seconds: duration,
-        accounts_processed: run.account_ids.length,
+        duration_minutes: durationMinutes,
+        accounts_total: run.account_ids.length,
+        accounts_successful: successfulAccounts,
+        accounts_failed: failedAccounts,
+        invocations_used: run.invocation_count,
         completed_at: new Date().toISOString(),
+        account_details: accountSummary,
+        partial_failures: partialFailures.length > 0 ? partialFailures : undefined,
+        is_retry: !!run.retry_of,
+        retry_of: run.retry_of,
+        retry_number: run.retry_count
       }
     },
   }).eq('id', run.id);
 
-  console.log(`Run ${run.id} completed in ${duration} seconds`);
-  console.log(`Accounts processed: ${run.account_ids.length}`);
-  console.log('Step results:', JSON.stringify(run.step_results, null, 2));
+  console.log('');
+  console.log('═══════════════════════════════════════════════════════════════');
 }
