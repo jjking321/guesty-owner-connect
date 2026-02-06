@@ -368,7 +368,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
         </SheetHeader>
 
         <ScrollArea className="h-[calc(100vh-120px)]">
-          <div className="space-y-6 py-4 pr-10">
+          <div className="space-y-6 py-4 pr-10 overflow-hidden">
             {/* Review Header */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1">
@@ -570,7 +570,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
 
               {messages.length > 0 ? (
                 <ScrollArea className="h-60 rounded-md border p-3">
-                  <div className="space-y-3 pr-4">
+                  <div className="space-y-3 pr-4 overflow-hidden">
                     {messages.map((msg: any, idx: number) => (
                       <div
                         key={idx}
@@ -611,7 +611,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                   </DialogTitle>
                 </DialogHeader>
                 <ScrollArea className="h-[60vh] pr-4">
-                  <div className="space-y-4">
+                  <div className="space-y-4 overflow-hidden">
                     {messages.map((msg: any, idx: number) => (
                       <div
                         key={idx}
@@ -630,7 +630,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                             {msg.timestamp ? new Date(msg.timestamp).toLocaleString() : ''}
                           </span>
                         </div>
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                       </div>
                     ))}
                   </div>
@@ -714,7 +714,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                       </div>
 
                       {/* Overall Assessment */}
-                      <p className="text-sm bg-muted/50 p-3 rounded-lg">
+                      <p className="text-sm bg-muted/50 p-3 rounded-lg break-words">
                         {review.dispute_conversation_redflags.overallAssessment}
                       </p>
 
@@ -727,7 +727,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                               <div
                                 key={idx}
                                 className={cn(
-                                  "p-3 rounded-lg border-l-4 relative",
+                                  "p-3 rounded-lg border-l-4 relative overflow-hidden",
                                   isExcluded && "opacity-50",
                                   flag.severity === 'high' && "border-l-destructive bg-destructive/10",
                                   flag.severity === 'medium' && "border-l-amber-500 bg-amber-50 dark:bg-amber-950/20",
