@@ -1640,6 +1640,21 @@ export type Database = {
       reviews: {
         Row: {
           category_ratings: Json | null
+          dispute_analyzed_at: string | null
+          dispute_case_file: Json | null
+          dispute_conversation_summary: string | null
+          dispute_has_pressure: boolean | null
+          dispute_has_refund_demands: boolean | null
+          dispute_has_threats: boolean | null
+          dispute_is_high_priority: boolean | null
+          dispute_likelihood_score: number | null
+          dispute_message_history: Json | null
+          dispute_notes: string | null
+          dispute_resolution: string | null
+          dispute_resolved_at: string | null
+          dispute_status: string | null
+          dispute_submitted_at: string | null
+          dispute_violation_category: string | null
           guest_name: string | null
           guesty_account_id: string
           id: string
@@ -1659,6 +1674,21 @@ export type Database = {
         }
         Insert: {
           category_ratings?: Json | null
+          dispute_analyzed_at?: string | null
+          dispute_case_file?: Json | null
+          dispute_conversation_summary?: string | null
+          dispute_has_pressure?: boolean | null
+          dispute_has_refund_demands?: boolean | null
+          dispute_has_threats?: boolean | null
+          dispute_is_high_priority?: boolean | null
+          dispute_likelihood_score?: number | null
+          dispute_message_history?: Json | null
+          dispute_notes?: string | null
+          dispute_resolution?: string | null
+          dispute_resolved_at?: string | null
+          dispute_status?: string | null
+          dispute_submitted_at?: string | null
+          dispute_violation_category?: string | null
           guest_name?: string | null
           guesty_account_id: string
           id: string
@@ -1678,6 +1708,21 @@ export type Database = {
         }
         Update: {
           category_ratings?: Json | null
+          dispute_analyzed_at?: string | null
+          dispute_case_file?: Json | null
+          dispute_conversation_summary?: string | null
+          dispute_has_pressure?: boolean | null
+          dispute_has_refund_demands?: boolean | null
+          dispute_has_threats?: boolean | null
+          dispute_is_high_priority?: boolean | null
+          dispute_likelihood_score?: number | null
+          dispute_message_history?: Json | null
+          dispute_notes?: string | null
+          dispute_resolution?: string | null
+          dispute_resolved_at?: string | null
+          dispute_status?: string | null
+          dispute_submitted_at?: string | null
+          dispute_violation_category?: string | null
           guest_name?: string | null
           guesty_account_id?: string
           id?: string

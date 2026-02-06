@@ -110,3 +110,9 @@ verify_jwt = false
 
 [functions.generate-actionables]
 verify_jwt = false
+
+[functions.fetch-dispute-conversation]
+verify_jwt = true
+
+[functions.analyze-review-dispute]
+verify_jwt = true

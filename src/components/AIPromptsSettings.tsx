@@ -46,6 +46,44 @@ Strong Q4, ADR up 12%
 • 12/1 5★ - loved the hot tub
 • 11/15 4★ - minor WiFi issue`;
 
+const DEFAULT_REVIEW_DISPUTE_PROMPT = `You are an expert at analyzing vacation rental reviews for Airbnb policy violations.
+
+OBJECTIVE: Analyze whether this review can be disputed and removed based on Airbnb's 5 official dispute categories. Be aggressive in finding reasons for removal - we want to exploit Airbnb's policy in our favor.
+
+## Airbnb's 5 Dispute Categories
+
+1. **Retaliatory** - Review was left in retaliation for enforcing house rules, policies, or requesting payment for damages. Signs include: guest was charged for damages, guest broke rules and was reminded, host enforced check-out time or noise policies.
+
+2. **Irrelevant** - Review doesn't relate to the actual stay, or guest never checked in. Signs include: complaints about things outside host's control, generic complaints not specific to property, review discusses cancellation rather than stay.
+
+3. **Pressure or Coercion** - Guest threatened a bad review to get refund/discount, or was incentivized. Signs include: messages demanding refunds, threats in conversation, quid-pro-quo requests.
+
+4. **Competitor** - Review from someone affiliated with or competing with the listing. Signs include: reviewer owns/manages similar properties, suspicious booking patterns, generic stay with detailed negative review.
+
+5. **Content Policy Violation** - Discriminatory content, private info disclosure, profanity, or harassment. Signs include: personal attacks, racist/sexist language, sharing host's personal information, threats.
+
+## Analysis Guidelines
+
+- Look for ANY evidence that could fit these categories
+- Guest complaints about being charged for damages = potential retaliation
+- Guest demanding refunds in messages = potential coercion
+- Vague or off-topic complaints = potential irrelevance
+- Be creative in framing the case - think like a lawyer advocating for removal
+- Even weak cases might succeed if framed well
+
+## Conversation Red Flags
+- Threats to leave bad review ("I'll leave a 1-star if you don't...")
+- Requests for refunds with implied consequences
+- Aggressive or harassing language
+- Mentions of competitors or alternative listings
+
+## Scoring Guidelines
+- 0-20%: Very unlikely - review appears genuine and policy-compliant
+- 21-40%: Possible but weak - some minor violations but hard to prove
+- 41-60%: Moderate chance - clear policy concerns that could be argued
+- 61-80%: Good chance - strong evidence of violation
+- 81-100%: Excellent chance - clear-cut policy violation`;
+
 const DEFAULT_REVENUE_ACTIONS_PROMPT = `You are an expert revenue manager for vacation rentals. Generate 3-6 actionable items.
 
 MODES:
@@ -155,6 +193,9 @@ export function AIPromptsSettings() {
   const [revenueActionsConfig, setRevenueActionsConfig] = useState<PromptConfig | null>(null);
   const [revenueActionsPrompt, setRevenueActionsPrompt] = useState(DEFAULT_REVENUE_ACTIONS_PROMPT);
   
+  const [reviewDisputeConfig, setReviewDisputeConfig] = useState<PromptConfig | null>(null);
+  const [reviewDisputePrompt, setReviewDisputePrompt] = useState(DEFAULT_REVIEW_DISPUTE_PROMPT);
+  
   const { toast } = useToast();
 
   const isAdmin = role === 'super_admin' || role === 'admin';
@@ -172,13 +213,14 @@ export function AIPromptsSettings() {
         .from('ai_prompt_configs')
         .select('*')
         .eq('organization_id', organizationId)
-        .in('prompt_key', ['call_prep', 'revenue_actions']);
+        .in('prompt_key', ['call_prep', 'revenue_actions', 'review_dispute_analysis']);
 
       if (error) throw error;
 
       if (data) {
         const callPrep = data.find(p => p.prompt_key === 'call_prep');
         const revenueActions = data.find(p => p.prompt_key === 'revenue_actions');
+        const reviewDispute = data.find(p => p.prompt_key === 'review_dispute_analysis');
         
         if (callPrep) {
           setCallPrepConfig(callPrep);
@@ -188,6 +230,11 @@ export function AIPromptsSettings() {
         if (revenueActions) {
           setRevenueActionsConfig(revenueActions);
           setRevenueActionsPrompt(revenueActions.system_prompt);
+        }
+        
+        if (reviewDispute) {
+          setReviewDisputeConfig(reviewDispute);
+          setReviewDisputePrompt(reviewDispute.system_prompt);
         }
       }
     } catch (error: any) {
@@ -202,13 +249,14 @@ export function AIPromptsSettings() {
     }
   };
 
-  const handleSave = async (promptKey: 'call_prep' | 'revenue_actions') => {
+  const handleSave = async (promptKey: 'call_prep' | 'revenue_actions' | 'review_dispute_analysis') => {
     if (!organizationId) return;
     
     const isCallPrep = promptKey === 'call_prep';
-    const config = isCallPrep ? callPrepConfig : revenueActionsConfig;
-    const prompt = isCallPrep ? callPrepPrompt : revenueActionsPrompt;
-    const promptName = isCallPrep ? 'Owner Call Prep' : 'Revenue Manager Actions';
+    const isRevenueActions = promptKey === 'revenue_actions';
+    const config = isCallPrep ? callPrepConfig : (isRevenueActions ? revenueActionsConfig : reviewDisputeConfig);
+    const prompt = isCallPrep ? callPrepPrompt : (isRevenueActions ? revenueActionsPrompt : reviewDisputePrompt);
+    const promptName = isCallPrep ? 'Owner Call Prep' : (isRevenueActions ? 'Revenue Manager Actions' : 'Review Dispute Analysis');
     
     try {
       setSaving(true);
@@ -239,8 +287,10 @@ export function AIPromptsSettings() {
         
         if (isCallPrep) {
           setCallPrepConfig(data);
-        } else {
+        } else if (isRevenueActions) {
           setRevenueActionsConfig(data);
+        } else {
+          setReviewDisputeConfig(data);
         }
       }
 
@@ -260,11 +310,13 @@ export function AIPromptsSettings() {
     }
   };
 
-  const handleReset = (promptKey: 'call_prep' | 'revenue_actions') => {
+  const handleReset = (promptKey: 'call_prep' | 'revenue_actions' | 'review_dispute_analysis') => {
     if (promptKey === 'call_prep') {
       setCallPrepPrompt(DEFAULT_CALL_PREP_PROMPT);
-    } else {
+    } else if (promptKey === 'revenue_actions') {
       setRevenueActionsPrompt(DEFAULT_REVENUE_ACTIONS_PROMPT);
+    } else {
+      setReviewDisputePrompt(DEFAULT_REVIEW_DISPUTE_PROMPT);
     }
     toast({
       title: "Prompt reset",
@@ -310,6 +362,7 @@ export function AIPromptsSettings() {
           <TabsList className="mb-4">
             <TabsTrigger value="call_prep">Call Prep</TabsTrigger>
             <TabsTrigger value="revenue_actions">Revenue Actions</TabsTrigger>
+            <TabsTrigger value="review_dispute">Review Disputes</TabsTrigger>
           </TabsList>
           
           <TabsContent value="call_prep" className="space-y-4">
@@ -377,6 +430,46 @@ export function AIPromptsSettings() {
             </div>
             <div className="flex justify-end">
               <Button onClick={() => handleSave('revenue_actions')} disabled={saving}>
+                {saving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="review_dispute" className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="review-dispute-prompt" className="text-base font-medium">
+                  Review Dispute Analysis Prompt
+                </Label>
+                <Button variant="outline" size="sm" onClick={() => handleReset('review_dispute_analysis')}>
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Reset to Default
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                This prompt instructs the AI how to analyze negative Airbnb reviews for dispute eligibility.
+                It receives the review text, ratings, guest-host conversation history, and reservation details.
+              </p>
+              <Textarea
+                id="review-dispute-prompt"
+                value={reviewDisputePrompt}
+                onChange={(e) => setReviewDisputePrompt(e.target.value)}
+                className="min-h-[400px] font-mono text-sm"
+                placeholder="Enter the system prompt for the AI..."
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => handleSave('review_dispute_analysis')} disabled={saving}>
                 {saving ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
