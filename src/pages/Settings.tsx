@@ -42,10 +42,14 @@ export default function Settings() {
   const [incompleteSyncJobs, setIncompleteSyncJobs] = useState<Record<string, any>>({});
   const [autoSyncFailures, setAutoSyncFailures] = useState<Record<string, string[]>>({});
   const [lastSyncCounts, setLastSyncCounts] = useState<Record<string, number>>({});
+  const [lastProbabilityCalc, setLastProbabilityCalc] = useState<{ date: string; count: number } | null>(null);
+  const [lastForecastGeneration, setLastForecastGeneration] = useState<{ date: string; count: number } | null>(null);
 
   useEffect(() => {
     loadAccounts();
     loadLastAirbnbScrape();
+    loadLastProbabilityCalc();
+    loadLastForecastGeneration();
   }, []);
 
   const loadLastAirbnbScrape = async () => {
@@ -84,6 +88,59 @@ export default function Settings() {
       }
     } catch (error) {
       console.error("Error loading last Airbnb scrape:", error);
+    }
+  };
+
+  const loadLastProbabilityCalc = async () => {
+    try {
+      const { data } = await supabase
+        .from("booking_probabilities")
+        .select("calculated_at, listing_id")
+        .not("calculated_at", "is", null)
+        .order("calculated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data?.calculated_at) {
+        // Get count of listings with recent calculations (last 24 hours)
+        const { count } = await supabase
+          .from("booking_probabilities")
+          .select("listing_id", { count: 'exact', head: true })
+          .gte("calculated_at", new Date(Date.now() - 24*60*60*1000).toISOString());
+        
+        setLastProbabilityCalc({
+          date: data.calculated_at,
+          count: count || 0
+        });
+      }
+    } catch (error) {
+      console.error("Error loading last probability calculation:", error);
+    }
+  };
+
+  const loadLastForecastGeneration = async () => {
+    try {
+      const { data } = await supabase
+        .from("revenue_forecasts")
+        .select("generated_at, listing_id")
+        .order("generated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (data?.generated_at) {
+        // Get count of listings with recent forecasts (last 24 hours)
+        const { count } = await supabase
+          .from("revenue_forecasts")
+          .select("listing_id", { count: 'exact', head: true })
+          .gte("generated_at", new Date(Date.now() - 24*60*60*1000).toISOString());
+        
+        setLastForecastGeneration({
+          date: data.generated_at,
+          count: count || 0
+        });
+      }
+    } catch (error) {
+      console.error("Error loading last forecast generation:", error);
     }
   };
 
@@ -951,6 +1008,17 @@ export default function Settings() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="text-sm text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {lastProbabilityCalc ? (
+                  <span>
+                    Last calculated: {new Date(lastProbabilityCalc.date).toLocaleString()}
+                    {lastProbabilityCalc.count > 0 && ` (${lastProbabilityCalc.count} listings)`}
+                  </span>
+                ) : (
+                  <span>Never calculated</span>
+                )}
+              </div>
               <div className="text-sm text-muted-foreground space-y-2">
                 <p>
                   Probabilities combine four signals to estimate booking likelihood for each open night:
@@ -996,6 +1064,17 @@ export default function Settings() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="text-sm text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {lastForecastGeneration ? (
+                  <span>
+                    Last generated: {new Date(lastForecastGeneration.date).toLocaleString()}
+                    {lastForecastGeneration.count > 0 && ` (${lastForecastGeneration.count} listings)`}
+                  </span>
+                ) : (
+                  <span>Never generated</span>
+                )}
+              </div>
               <div className="text-sm text-muted-foreground space-y-2">
                 <p>
                   Forecasts combine your booking pace, probability analysis, and compset market data 
