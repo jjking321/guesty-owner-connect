@@ -14,6 +14,7 @@ interface Review {
   rating: number | null;
   review_text?: string | null;
   response_text?: string | null;
+  private_note?: string | null;
   review_date: string | null;
   source: string | null;
   is_removed: boolean;
