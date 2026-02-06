@@ -355,14 +355,14 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
-        <SheetHeader>
+        <SheetHeader className="pr-8">
           <SheetTitle className="flex items-center gap-2">
             <span className="truncate">{review.property_name || 'Unknown Property'}</span>
             {review.dispute_is_high_priority && (
               <Badge variant="destructive">High Priority</Badge>
             )}
           </SheetTitle>
-          <SheetDescription>
+          <SheetDescription className="truncate">
             {review.guest_name || 'Unknown Guest'} • {review.review_date ? new Date(review.review_date).toLocaleDateString() : 'Unknown date'}
           </SheetDescription>
         </SheetHeader>
