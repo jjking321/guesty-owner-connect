@@ -1,180 +1,218 @@
 
 
-# Plan: Scrollable Conversation History with Expand Popup
+# Plan: Conversation Red Flag Analysis for Dispute Evidence
 
 ## Overview
 
-Enhance the conversation history section in the DisputeDetailSheet with:
-1. A proper ScrollArea component for smooth scrolling
-2. An "Expand" button to open the full conversation in a popup dialog
-3. Better visual styling for the message container
+Create a new edge function `analyze-conversation-redflags` that uses AI to perform a forensic analysis of guest-host conversation history to identify policy violations that support review removal. The analysis results will be displayed in the DisputeDetailSheet UI with extracted quotes highlighted.
 
-## Current Implementation
+## Database Changes
 
-The conversation history currently uses a basic `div` with `max-h-60 overflow-y-auto`:
+Add new columns to the `reviews` table to store conversation analysis results:
 
-```tsx
-<div className="space-y-3 max-h-60 overflow-y-auto">
-  {messages.map((msg: any, idx: number) => (
-    // ... message bubbles
-  ))}
-</div>
+| Column | Type | Description |
+|--------|------|-------------|
+| `dispute_conversation_redflags` | JSONB | Array of identified red flags with quotes |
+| `dispute_conversation_analyzed_at` | TIMESTAMPTZ | When conversation was analyzed |
+
+## New Edge Function
+
+### File: `supabase/functions/analyze-conversation-redflags/index.ts`
+
+This function will:
+1. Accept a `reviewId` and fetch the stored `dispute_message_history`
+2. Include the review text for cross-referencing
+3. Call Lovable AI with a policy compliance analysis prompt
+4. Use tool calling to extract structured red flag data
+5. Store results back to the reviews table
+
+### AI System Prompt
+
+```
+Role: You are a Senior Policy Compliance Auditor specializing in Airbnb's Terms of Service. 
+Your goal is to conduct a forensic analysis of guest communications to identify any specific 
+violations of Airbnb's Content Policy that warrant a review removal.
+
+Task: Analyze the message_history and review_text to identify evidentiary support for removal. 
+You are looking for high-confidence matches in the following categories:
+
+1. Policy-Violating Financial Inducement (Extortion): Identify any instance where a guest 
+   mentions a financial outcome (refunds, discounts, extra services) in connection with 
+   their feedback or review status. Document these as potential violations of the Extortion Policy.
+
+2. Conflict of Interest (Retaliatory): Identify if the review was submitted following the 
+   host's enforcement of House Rules (e.g., smoking, unauthorized guests, noise) or the 
+   filing of a reimbursement claim. Document the timeline to establish a retaliatory pattern.
+
+3. Inauthentic/Irrelevant (Third-Party): Identify if the guest indicates they were not 
+   the primary person experiencing the stay (e.g., booking for others). Flag references 
+   to issues outside the host's control (e.g., local infrastructure, weather).
+
+4. Evidence Extraction: Extract and quote the exact snippets from the message history 
+   that provide the strongest evidence for these violations. These quotes will be used 
+   to provide factual documentation to Airbnb Support agents.
 ```
 
-## Proposed Changes
+### Tool Schema for Structured Output
 
-### 1. Add State for Popup Dialog
-
-Add a new state variable to control the expanded conversation dialog:
-
-```tsx
-const [conversationExpanded, setConversationExpanded] = useState(false);
+```typescript
+{
+  name: "submit_conversation_analysis",
+  parameters: {
+    type: "object",
+    properties: {
+      redflags: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            category: {
+              type: "string",
+              enum: ["Extortion", "Retaliatory", "Third-Party", "Irrelevant", "None"]
+            },
+            severity: {
+              type: "string",
+              enum: ["high", "medium", "low"]
+            },
+            quote: {
+              type: "string",
+              description: "Exact quote from conversation"
+            },
+            context: {
+              type: "string",
+              description: "Brief explanation of why this is a red flag"
+            },
+            sender: {
+              type: "string",
+              enum: ["guest", "host"]
+            },
+            timestamp: {
+              type: "string",
+              description: "When this message was sent"
+            }
+          },
+          required: ["category", "severity", "quote", "context", "sender"]
+        }
+      },
+      overallAssessment: {
+        type: "string",
+        description: "1-2 sentence summary of conversation red flags"
+      },
+      evidenceStrength: {
+        type: "string",
+        enum: ["strong", "moderate", "weak", "none"]
+      }
+    }
+  }
+}
 ```
 
-### 2. Import Dialog Components
+## Frontend Changes
 
-Add Dialog imports to the existing imports:
+### File: `src/components/dispute/DisputeDetailSheet.tsx`
 
-```tsx
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Maximize2 } from "lucide-react";
-```
+Add a new section between "Conversation History" and "Case File" to display red flag analysis:
 
-### 3. Create Reusable Message Component
+**New UI Elements:**
+- "Analyze Conversation" button (only shown when messages exist)
+- Red flag cards showing:
+  - Category badge (color-coded by severity)
+  - Quoted text in a blockquote style
+  - Context explanation
+  - Timestamp of the message
+- Overall assessment summary
+- Evidence strength indicator
 
-Extract the message rendering into a reusable component to avoid duplication:
+**Visual Design:**
+- High severity: Red border and background tint
+- Medium severity: Orange/amber styling
+- Low severity: Yellow styling
+- Quotes displayed in italics with quotation marks
 
-```tsx
-const MessageBubble = ({ msg, showFullTimestamp = false }: { msg: any; showFullTimestamp?: boolean }) => (
-  <div
-    className={cn(
-      "p-3 rounded-lg text-sm",
-      msg.sender === 'guest' 
-        ? "bg-muted ml-4" 
-        : "bg-primary/10 mr-4"
-    )}
-  >
-    <div className="flex items-center justify-between mb-1">
-      <span className="font-medium text-xs">
-        {msg.sender === 'guest' ? 'Guest' : 'Host'}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        {msg.timestamp 
-          ? (showFullTimestamp 
-              ? new Date(msg.timestamp).toLocaleString() 
-              : new Date(msg.timestamp).toLocaleDateString())
-          : ''}
-      </span>
-    </div>
-    <p className="whitespace-pre-wrap">{msg.content}</p>
-  </div>
-);
-```
-
-### 4. Update Conversation History Section
-
-Replace the current implementation with a proper ScrollArea and add an Expand button:
+### Component Structure
 
 ```tsx
-{/* Conversation History */}
-<div>
-  <div className="flex items-center justify-between mb-3">
-    <Label className="text-sm font-medium flex items-center gap-2">
-      <MessageSquare className="h-4 w-4" />
-      Conversation History ({messages.length} messages)
-    </Label>
-    <div className="flex gap-2">
-      {messages.length > 0 && (
-        <Button 
-          size="sm" 
-          variant="ghost"
-          onClick={() => setConversationExpanded(true)}
-        >
-          <Maximize2 className="h-4 w-4 mr-1" />
-          Expand
-        </Button>
-      )}
-      <Button 
-        size="sm" 
-        variant="outline" 
-        onClick={handleFetchConversation} 
-        disabled={fetchingConversation}
-      >
-        {fetchingConversation ? (
-          <Loader2 className="h-4 w-4 animate-spin mr-2" />
-        ) : (
-          <RefreshCw className="h-4 w-4 mr-2" />
-        )}
-        {messages.length > 0 ? 'Refresh' : 'Fetch'}
+{/* Conversation Red Flags */}
+{messages.length > 0 && (
+  <div>
+    <div className="flex items-center justify-between mb-3">
+      <Label className="text-sm font-medium flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4" />
+        Conversation Red Flags
+      </Label>
+      <Button onClick={handleAnalyzeConversation}>
+        Analyze for Red Flags
       </Button>
     </div>
+    
+    {review.dispute_conversation_redflags ? (
+      <div className="space-y-3">
+        {/* Evidence Strength Badge */}
+        <Badge variant="...">Evidence: {evidenceStrength}</Badge>
+        
+        {/* Overall Assessment */}
+        <p className="text-sm">{overallAssessment}</p>
+        
+        {/* Red Flag Cards */}
+        {redflags.map((flag, idx) => (
+          <Card className={severityStyles[flag.severity]}>
+            <Badge>{flag.category}</Badge>
+            <blockquote className="italic">"{flag.quote}"</blockquote>
+            <p>{flag.context}</p>
+            <span>{flag.sender} - {flag.timestamp}</span>
+          </Card>
+        ))}
+      </div>
+    ) : (
+      <p>Click "Analyze" to scan conversation for policy violations.</p>
+    )}
   </div>
-
-  {messages.length > 0 ? (
-    <ScrollArea className="h-60 rounded-md border p-3">
-      <div className="space-y-3 pr-4">
-        {messages.map((msg: any, idx: number) => (
-          <MessageBubble key={idx} msg={msg} />
-        ))}
-      </div>
-    </ScrollArea>
-  ) : (
-    <p className="text-sm text-muted-foreground">
-      No conversation history available. Click "Fetch" to retrieve messages.
-    </p>
-  )}
-</div>
+)}
 ```
 
-### 5. Add Expanded Conversation Dialog
+## Implementation Flow
 
-Add a Dialog component after the conversation history section for the expanded view:
-
-```tsx
-{/* Expanded Conversation Dialog */}
-<Dialog open={conversationExpanded} onOpenChange={setConversationExpanded}>
-  <DialogContent className="max-w-3xl max-h-[80vh]">
-    <DialogHeader>
-      <DialogTitle className="flex items-center gap-2">
-        <MessageSquare className="h-5 w-5" />
-        Conversation History - {review.guest_name || 'Guest'}
-      </DialogTitle>
-    </DialogHeader>
-    <ScrollArea className="h-[60vh] pr-4">
-      <div className="space-y-4">
-        {messages.map((msg: any, idx: number) => (
-          <MessageBubble key={idx} msg={msg} showFullTimestamp />
-        ))}
-      </div>
-    </ScrollArea>
-  </DialogContent>
-</Dialog>
+```text
+User clicks "Analyze for Red Flags"
+        |
+        v
+Frontend calls edge function
+        |
+        v
+Edge function fetches review + messages from DB
+        |
+        v
+Builds prompt with conversation history
+        |
+        v
+Calls Lovable AI with tool calling
+        |
+        v
+Parses structured red flag response
+        |
+        v
+Saves results to reviews table
+        |
+        v
+Returns results to frontend
+        |
+        v
+UI displays color-coded red flag cards
 ```
 
-## Visual Design
+## Files to Create/Modify
 
-### Inline View (in Sheet)
-- Height: 240px (h-60)
-- Bordered container with rounded corners
-- Visible scrollbar for easy navigation
-- "Expand" button in header
+| File | Action |
+|------|--------|
+| `supabase/functions/analyze-conversation-redflags/index.ts` | Create new edge function |
+| `src/components/dispute/DisputeDetailSheet.tsx` | Add red flags UI section |
+| Database migration | Add `dispute_conversation_redflags` and `dispute_conversation_analyzed_at` columns |
 
-### Expanded Popup View
-- Large dialog (max-w-3xl)
-- Maximum height of 80vh
-- Full timestamps shown
-- More breathing room between messages
+## Technical Notes
 
-## File to Modify
-
-| File | Changes |
-|------|---------|
-| `src/components/dispute/DisputeDetailSheet.tsx` | Add Dialog import, state, MessageBubble component, ScrollArea wrapper, and expanded dialog |
-
-## Technical Details
-
-- The `MessageBubble` component will be defined inside the main component to access the `cn` utility
-- ScrollArea from shadcn provides a styled scrollbar that matches the design system
-- The Dialog opens on top of the Sheet (both use portals with proper z-index)
-- `showFullTimestamp` prop allows the expanded view to show date AND time
+- The edge function follows the existing Guesty rate limit pattern for robustness
+- Tool calling ensures structured, parseable output from the AI
+- Red flags are stored as JSONB for flexible querying
+- Analysis is separate from the main dispute analysis to allow independent re-runs
+- Quotes can be copied directly for use in Airbnb dispute submission
 
