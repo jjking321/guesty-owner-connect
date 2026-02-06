@@ -411,12 +411,12 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
             {review.category_ratings && Object.keys(review.category_ratings).length > 0 && (
               <div>
                 <Label className="text-sm font-medium">Category Ratings</Label>
-                <div className="mt-2 flex flex-wrap bg-muted/50 rounded-lg p-4">
+                <div className="mt-2 flex bg-muted/50 rounded-lg p-4 justify-between">
                   {Object.entries(review.category_ratings).map(([key, value], index, array) => {
                     const IconComponent = getCategoryIcon(key);
                     return (
-                      <div key={key} className="flex items-center">
-                        <div className="flex flex-col items-center px-4 text-center">
+                      <div key={key} className="flex items-center flex-1">
+                        <div className="flex flex-col items-center flex-1 text-center">
                           <span className="text-sm font-medium text-foreground">
                             {formatCategoryName(key)}
                           </span>
