@@ -1,218 +1,138 @@
 
 
-# Plan: Conversation Red Flag Analysis for Dispute Evidence
+# Plan: Integrate Red Flags into Dispute Analysis
 
 ## Overview
 
-Create a new edge function `analyze-conversation-redflags` that uses AI to perform a forensic analysis of guest-host conversation history to identify policy violations that support review removal. The analysis results will be displayed in the DisputeDetailSheet UI with extracted quotes highlighted.
+The red flags UI is already fully implemented and working. The main issue is that the `analyze-review-dispute` edge function doesn't include the previously analyzed red flags when generating the dispute case. This means the AI dispute analysis works independently from the red flag analysis, missing valuable evidence.
 
-## Database Changes
+## Current State
 
-Add new columns to the `reviews` table to store conversation analysis results:
+### Red Flags UI (Already Complete)
+The `DisputeDetailSheet.tsx` already has:
+- Evidence strength badge (strong/moderate/weak)
+- Overall assessment summary
+- Color-coded red flag cards (high=red, medium=amber, low=yellow)
+- Quoted evidence in blockquote style
+- Context explanations
+- Sender and timestamp info
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `dispute_conversation_redflags` | JSONB | Array of identified red flags with quotes |
-| `dispute_conversation_analyzed_at` | TIMESTAMPTZ | When conversation was analyzed |
+### Missing Integration
+The `analyze-review-dispute` function builds context for AI but only includes:
+- Property info
+- Review text and ratings
+- Reservation details
+- Raw conversation history
 
-## New Edge Function
+It does **not** include the structured red flags from `dispute_conversation_redflags`.
 
-### File: `supabase/functions/analyze-conversation-redflags/index.ts`
+## Changes Required
 
-This function will:
-1. Accept a `reviewId` and fetch the stored `dispute_message_history`
-2. Include the review text for cross-referencing
-3. Call Lovable AI with a policy compliance analysis prompt
-4. Use tool calling to extract structured red flag data
-5. Store results back to the reviews table
+### File: `supabase/functions/analyze-review-dispute/index.ts`
 
-### AI System Prompt
+#### 1. Include Red Flags in Database Query (Line 79)
 
-```
-Role: You are a Senior Policy Compliance Auditor specializing in Airbnb's Terms of Service. 
-Your goal is to conduct a forensic analysis of guest communications to identify any specific 
-violations of Airbnb's Content Policy that warrant a review removal.
-
-Task: Analyze the message_history and review_text to identify evidentiary support for removal. 
-You are looking for high-confidence matches in the following categories:
-
-1. Policy-Violating Financial Inducement (Extortion): Identify any instance where a guest 
-   mentions a financial outcome (refunds, discounts, extra services) in connection with 
-   their feedback or review status. Document these as potential violations of the Extortion Policy.
-
-2. Conflict of Interest (Retaliatory): Identify if the review was submitted following the 
-   host's enforcement of House Rules (e.g., smoking, unauthorized guests, noise) or the 
-   filing of a reimbursement claim. Document the timeline to establish a retaliatory pattern.
-
-3. Inauthentic/Irrelevant (Third-Party): Identify if the guest indicates they were not 
-   the primary person experiencing the stay (e.g., booking for others). Flag references 
-   to issues outside the host's control (e.g., local infrastructure, weather).
-
-4. Evidence Extraction: Extract and quote the exact snippets from the message history 
-   that provide the strongest evidence for these violations. These quotes will be used 
-   to provide factual documentation to Airbnb Support agents.
-```
-
-### Tool Schema for Structured Output
+Add `dispute_conversation_redflags` to the select query:
 
 ```typescript
-{
-  name: "submit_conversation_analysis",
-  parameters: {
-    type: "object",
-    properties: {
-      redflags: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            category: {
-              type: "string",
-              enum: ["Extortion", "Retaliatory", "Third-Party", "Irrelevant", "None"]
-            },
-            severity: {
-              type: "string",
-              enum: ["high", "medium", "low"]
-            },
-            quote: {
-              type: "string",
-              description: "Exact quote from conversation"
-            },
-            context: {
-              type: "string",
-              description: "Brief explanation of why this is a red flag"
-            },
-            sender: {
-              type: "string",
-              enum: ["guest", "host"]
-            },
-            timestamp: {
-              type: "string",
-              description: "When this message was sent"
-            }
-          },
-          required: ["category", "severity", "quote", "context", "sender"]
-        }
-      },
-      overallAssessment: {
-        type: "string",
-        description: "1-2 sentence summary of conversation red flags"
-      },
-      evidenceStrength: {
-        type: "string",
-        enum: ["strong", "moderate", "weak", "none"]
-      }
-    }
+const { data: review, error: reviewError } = await supabase
+  .from('reviews')
+  .select(`
+    *,
+    listings:listing_id (
+      id,
+      nickname,
+      address,
+      guesty_account_id
+    )
+  `)
+  .eq('id', reviewId)
+  .single();
+```
+
+This already selects `*` so all columns are included, but we need to use the data.
+
+#### 2. Add Red Flags to AI Context (After Line 200)
+
+Insert a new section in the context that includes any previously analyzed red flags:
+
+```typescript
+// After conversation history section, before the final "---" line
+
+if (review.dispute_conversation_redflags) {
+  const redflags = review.dispute_conversation_redflags;
+  context += `
+## Pre-Analyzed Conversation Red Flags
+Evidence Strength: ${redflags.evidenceStrength?.toUpperCase() || 'UNKNOWN'}
+Assessment: ${redflags.overallAssessment || 'No assessment available'}
+
+`;
+  if (redflags.redflags && redflags.redflags.length > 0) {
+    context += `### Identified Violations:\n`;
+    redflags.redflags.forEach((flag: any, idx: number) => {
+      context += `
+**${idx + 1}. ${flag.category} (${flag.severity} severity)**
+- Quote: "${flag.quote}"
+- Context: ${flag.context}
+- From: ${flag.sender === 'guest' ? 'Guest' : 'Host'}
+`;
+    });
   }
+  context += `
+IMPORTANT: Use these pre-analyzed red flags as supporting evidence in your dispute case. Reference the specific quotes when building your argument.
+`;
 }
 ```
 
-## Frontend Changes
+#### 3. Update System Prompt to Reference Red Flags
 
-### File: `src/components/dispute/DisputeDetailSheet.tsx`
+Add a note to the system prompt about using pre-analyzed evidence (add after line 37):
 
-Add a new section between "Conversation History" and "Case File" to display red flag analysis:
-
-**New UI Elements:**
-- "Analyze Conversation" button (only shown when messages exist)
-- Red flag cards showing:
-  - Category badge (color-coded by severity)
-  - Quoted text in a blockquote style
-  - Context explanation
-  - Timestamp of the message
-- Overall assessment summary
-- Evidence strength indicator
-
-**Visual Design:**
-- High severity: Red border and background tint
-- Medium severity: Orange/amber styling
-- Low severity: Yellow styling
-- Quotes displayed in italics with quotation marks
-
-### Component Structure
-
-```tsx
-{/* Conversation Red Flags */}
-{messages.length > 0 && (
-  <div>
-    <div className="flex items-center justify-between mb-3">
-      <Label className="text-sm font-medium flex items-center gap-2">
-        <AlertTriangle className="h-4 w-4" />
-        Conversation Red Flags
-      </Label>
-      <Button onClick={handleAnalyzeConversation}>
-        Analyze for Red Flags
-      </Button>
-    </div>
-    
-    {review.dispute_conversation_redflags ? (
-      <div className="space-y-3">
-        {/* Evidence Strength Badge */}
-        <Badge variant="...">Evidence: {evidenceStrength}</Badge>
-        
-        {/* Overall Assessment */}
-        <p className="text-sm">{overallAssessment}</p>
-        
-        {/* Red Flag Cards */}
-        {redflags.map((flag, idx) => (
-          <Card className={severityStyles[flag.severity]}>
-            <Badge>{flag.category}</Badge>
-            <blockquote className="italic">"{flag.quote}"</blockquote>
-            <p>{flag.context}</p>
-            <span>{flag.sender} - {flag.timestamp}</span>
-          </Card>
-        ))}
-      </div>
-    ) : (
-      <p>Click "Analyze" to scan conversation for policy violations.</p>
-    )}
-  </div>
-)}
+```typescript
+## Using Pre-Analyzed Evidence
+If pre-analyzed conversation red flags are provided, incorporate them directly into your case:
+- Reference the exact quotes identified
+- Use the category classifications to strengthen your argument
+- High-severity flags should be prominently featured in the case description
+- Build your argument around the strongest evidence first
 ```
 
 ## Implementation Flow
 
 ```text
-User clicks "Analyze for Red Flags"
-        |
-        v
-Frontend calls edge function
-        |
-        v
-Edge function fetches review + messages from DB
-        |
-        v
-Builds prompt with conversation history
-        |
-        v
-Calls Lovable AI with tool calling
-        |
-        v
-Parses structured red flag response
-        |
-        v
-Saves results to reviews table
-        |
-        v
-Returns results to frontend
-        |
-        v
-UI displays color-coded red flag cards
+1. User clicks "Analyze for Red Flags"
+   ↓
+2. analyze-conversation-redflags runs
+   ↓
+3. Red flags stored in dispute_conversation_redflags
+   ↓
+4. UI displays red flags (already working)
+   ↓
+5. User clicks "Analyze" (main dispute analysis)
+   ↓
+6. analyze-review-dispute includes red flags in context ← NEW
+   ↓
+7. AI generates stronger case using pre-analyzed evidence
 ```
 
-## Files to Create/Modify
+## Summary of Changes
+
+| Line Range | Current | Change |
+|------------|---------|--------|
+| ~37 | System prompt ends | Add "Using Pre-Analyzed Evidence" section |
+| ~200 | Context ends with conversation | Add red flags section to context |
+
+## Files to Modify
 
 | File | Action |
 |------|--------|
-| `supabase/functions/analyze-conversation-redflags/index.ts` | Create new edge function |
-| `src/components/dispute/DisputeDetailSheet.tsx` | Add red flags UI section |
-| Database migration | Add `dispute_conversation_redflags` and `dispute_conversation_analyzed_at` columns |
+| `supabase/functions/analyze-review-dispute/index.ts` | Add red flags to AI context and update system prompt |
 
-## Technical Notes
+## Expected Outcome
 
-- The edge function follows the existing Guesty rate limit pattern for robustness
-- Tool calling ensures structured, parseable output from the AI
-- Red flags are stored as JSONB for flexible querying
-- Analysis is separate from the main dispute analysis to allow independent re-runs
-- Quotes can be copied directly for use in Airbnb dispute submission
+After this change:
+1. User fetches conversation → Messages appear
+2. User analyzes for red flags → Red flags appear with quotes
+3. User runs main dispute analysis → AI sees red flags and creates stronger case referencing the specific quotes
+4. Case file includes evidence from conversation analysis
 
