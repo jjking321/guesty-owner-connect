@@ -1,129 +1,95 @@
 
 
-# Plan: Update Category Ratings Display
+# Plan: Fix Guesty Conversation API Response Parsing
 
-## Current Implementation
+## Problem
 
-The category ratings are currently displayed as simple badges:
-```tsx
-<div className="mt-1 flex flex-wrap gap-2">
-  {Object.entries(review.category_ratings).map(([key, value]) => (
-    <Badge key={key} variant="secondary">
-      {key}: {value}/5
-    </Badge>
-  ))}
-</div>
+The current implementation parses Guesty API responses incorrectly. The actual response structure nests data under `data.conversations` and `data.posts`, not at the top level.
+
+## Changes Required
+
+### File: `supabase/functions/fetch-dispute-conversation/index.ts`
+
+### 1. Update Conversations URL (Line 347)
+
+Add `&limit=1` to the query since we only need the first matching conversation:
+
+```typescript
+// Current
+const conversationsUrl = `...?filters=${encodeURIComponent(filters)}`;
+
+// Fixed
+const conversationsUrl = `...?filters=${encodeURIComponent(filters)}&limit=1`;
 ```
 
-## Desired Design (from reference image)
+### 2. Fix Conversations Response Parsing (Lines 350-351)
 
-A horizontal layout with:
-- Category name on top (e.g., "Cleanliness", "Accuracy")
-- Rating number below (e.g., 4.6)
-- Icon at the bottom
-- Separated by vertical dividers
-- Light gray background
+```typescript
+// Current (wrong)
+const conversations = conversationsData.results || conversationsData.data || [];
 
-## Implementation
-
-### Icon Mapping
-
-Map each Airbnb category to an appropriate Lucide icon:
-
-| Category | Icon |
-|----------|------|
-| Cleanliness | `SprayBottle` or `Sparkles` |
-| Accuracy | `CheckCircle` |
-| Check-in | `KeyRound` |
-| Communication | `MessageSquare` |
-| Location | `Map` |
-| Value | `Tag` |
-
-### Updated Component Structure
-
-Replace lines 272-284 in `DisputeDetailSheet.tsx`:
-
-```tsx
-{/* Category Ratings */}
-{review.category_ratings && Object.keys(review.category_ratings).length > 0 && (
-  <div>
-    <Label className="text-sm font-medium">Category Ratings</Label>
-    <div className="mt-2 flex bg-muted/50 rounded-lg p-4">
-      {Object.entries(review.category_ratings).map(([key, value], index, array) => {
-        const IconComponent = getCategoryIcon(key);
-        return (
-          <div key={key} className="flex items-center">
-            <div className="flex flex-col items-center px-4 text-center">
-              <span className="text-sm font-medium text-foreground">
-                {formatCategoryName(key)}
-              </span>
-              <span className="text-sm text-muted-foreground mt-1">
-                {value}
-              </span>
-              <IconComponent className="h-5 w-5 mt-2 text-foreground" />
-            </div>
-            {index < array.length - 1 && (
-              <div className="h-16 w-px bg-border" />
-            )}
-          </div>
-        );
-      })}
-    </div>
-  </div>
-)}
+// Fixed (correct nested structure)
+const conversations = conversationsData?.data?.conversations || [];
 ```
 
-### Helper Functions
+### 3. Update Posts URL (Line 374)
 
-Add these helper functions to the component:
+Add `?limit=100` to fetch more messages:
 
-```tsx
-import { 
-  SprayCanIcon, // or Sparkles for cleanliness
-  CheckCircle,
-  KeyRound,
-  MessageSquare,
-  Map,
-  Tag,
-  HelpCircle
-} from "lucide-react";
+```typescript
+// Current
+const postsUrl = `.../${conversationId}/posts`;
 
-const getCategoryIcon = (category: string) => {
-  const iconMap: Record<string, any> = {
-    'cleanliness': SprayCanIcon,
-    'accuracy': CheckCircle,
-    'check-in': KeyRound,
-    'checkin': KeyRound,
-    'communication': MessageSquare,
-    'location': Map,
-    'value': Tag,
+// Fixed
+const postsUrl = `.../${conversationId}/posts?limit=100`;
+```
+
+### 4. Fix Posts Response Parsing (Lines 377-378)
+
+```typescript
+// Current (wrong)
+const posts = postsData.results || postsData.data || postsData || [];
+
+// Fixed (correct nested structure)
+const posts = postsData?.data?.posts || [];
+```
+
+### 5. Update Message Transformation (Lines 381-396)
+
+Align with the correct field names from your reference:
+
+```typescript
+const messages = posts.map((post: any) => {
+  const isGuest = post.sender?.type === 'guest' || post.sentBy === 'guest';
+  const text = post.body || post.message || post.content || '';
+  
+  return {
+    id: post._id || post.id,
+    timestamp: post.createdAt || post.sentAt || new Date().toISOString(),
+    sender: isGuest ? 'guest' : 'host',
+    senderName: post.sender?.name || post.sender?.fullName || (isGuest ? 'Guest' : 'Host'),
+    content: text,
+    source: post.source || 'unknown',
   };
-  return iconMap[category.toLowerCase()] || HelpCircle;
-};
-
-const formatCategoryName = (key: string) => {
-  // Convert snake_case or camelCase to Title Case
-  return key
-    .replace(/[-_]/g, ' ')
-    .replace(/([A-Z])/g, ' $1')
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ')
-    .trim();
-};
+}).filter((m: any) => m.content.trim().length > 0)
+  .sort((a: any, b: any) => 
+    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
 ```
 
-## File to Modify
+## Summary of Changes
 
-| File | Change |
+| Line | Current | Fixed |
+|------|---------|-------|
+| 347 | `?filters=...` | `?filters=...&limit=1` |
+| 350 | `conversationsData.results \|\| conversationsData.data` | `conversationsData?.data?.conversations` |
+| 374 | `/posts` | `/posts?limit=100` |
+| 377 | `postsData.results \|\| postsData.data` | `postsData?.data?.posts` |
+| 381-396 | Complex sender detection | Simplified with `sentBy` check and empty message filter |
+
+## Files to Modify
+
+| File | Action |
 |------|--------|
-| `src/components/dispute/DisputeDetailSheet.tsx` | Update category ratings display with icons and vertical layout |
-
-## Visual Result
-
-The category ratings will display as a horizontal row with:
-- Light gray background (`bg-muted/50`)
-- Each category showing name, rating, and icon vertically stacked
-- Vertical dividers between categories
-- Responsive padding and spacing
+| `supabase/functions/fetch-dispute-conversation/index.ts` | Fix API URL params and response parsing |
 
