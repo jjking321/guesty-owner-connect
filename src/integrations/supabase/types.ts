@@ -734,6 +734,8 @@ export type Database = {
           error_message: string | null
           id: string
           invocation_count: number
+          retry_count: number | null
+          retry_of: string | null
           started_at: string
           status: string
           step_results: Json
@@ -748,6 +750,8 @@ export type Database = {
           error_message?: string | null
           id?: string
           invocation_count?: number
+          retry_count?: number | null
+          retry_of?: string | null
           started_at?: string
           status?: string
           step_results?: Json
@@ -762,12 +766,22 @@ export type Database = {
           error_message?: string | null
           id?: string
           invocation_count?: number
+          retry_count?: number | null
+          retry_of?: string | null
           started_at?: string
           status?: string
           step_results?: Json
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "nightly_sync_runs_retry_of_fkey"
+            columns: ["retry_of"]
+            isOneToOne: false
+            referencedRelation: "nightly_sync_runs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       organization_invitations: {
         Row: {
