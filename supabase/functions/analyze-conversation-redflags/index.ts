@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const systemPrompt = `Role: You are a Senior Policy Compliance Auditor specializing in Airbnb's Terms of Service. Your goal is to conduct a forensic analysis of guest communications to identify any specific violations of Airbnb's Content Policy that warrant a review removal.
+const DEFAULT_SYSTEM_PROMPT = `Role: You are a Senior Policy Compliance Auditor specializing in Airbnb's Terms of Service. Your goal is to conduct a forensic analysis of guest communications to identify any specific violations of Airbnb's Content Policy that warrant a review removal.
 
 ## Official Airbnb Policy Framework
 
@@ -65,7 +65,7 @@ serve(async (req) => {
     // Fetch the review with conversation history
     const { data: review, error: fetchError } = await supabase
       .from("reviews")
-      .select("id, review_text, dispute_message_history, guest_name, review_date")
+      .select("id, listing_id, review_text, dispute_message_history, guest_name, review_date")
       .eq("id", reviewId)
       .single();
 
@@ -86,6 +86,39 @@ serve(async (req) => {
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Get the listing to find organization
+    const { data: listing } = await supabase
+      .from("listings")
+      .select("guesty_account_id")
+      .eq("id", review.listing_id)
+      .single();
+
+    let orgId = null;
+    if (listing?.guesty_account_id) {
+      const { data: guestyAccount } = await supabase
+        .from("guesty_accounts")
+        .select("organization_id")
+        .eq("id", listing.guesty_account_id)
+        .single();
+      orgId = guestyAccount?.organization_id;
+    }
+
+    // Fetch custom prompt if configured
+    let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    if (orgId) {
+      const { data: promptConfig } = await supabase
+        .from("ai_prompt_configs")
+        .select("system_prompt")
+        .eq("organization_id", orgId)
+        .eq("prompt_key", "conversation_redflags_analysis")
+        .single();
+
+      if (promptConfig?.system_prompt) {
+        systemPrompt = promptConfig.system_prompt;
+        console.log("Using custom conversation red flags prompt");
+      }
     }
 
     // Format conversation for analysis
