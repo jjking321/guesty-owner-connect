@@ -772,11 +772,11 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                                   </span>
                                 </div>
                                 
-                                <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-sm text-muted-foreground mb-2">
+                                <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-sm text-muted-foreground mb-2 break-words">
                                   "{flag.quote}"
                                 </blockquote>
                                 
-                                <p className="text-sm">{flag.context}</p>
+                                <p className="text-sm break-words">{flag.context}</p>
                                 
                                 <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                                   <span className="font-medium">{flag.sender === 'guest' ? 'Guest' : 'Host'}</span>
