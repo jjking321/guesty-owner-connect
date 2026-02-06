@@ -338,7 +338,13 @@ Deno.serve(async (req) => {
     );
 
     // Step 1: Find conversation for this reservation
-    const conversationsUrl = `https://open-api.guesty.com/v1/communication/conversations?reservation._id=${targetReservationId}`;
+    // Guesty API requires a filters parameter with JSON-encoded filter array
+    const filters = JSON.stringify([{
+      field: 'reservation._id',
+      operator: '$eq',
+      value: targetReservationId
+    }]);
+    const conversationsUrl = `https://open-api.guesty.com/v1/communication/conversations?filters=${encodeURIComponent(filters)}`;
     const conversationsData = await fetchWithRetry(conversationsUrl, accessToken, 'conversations');
 
     const conversations = conversationsData.results || conversationsData.data || [];
