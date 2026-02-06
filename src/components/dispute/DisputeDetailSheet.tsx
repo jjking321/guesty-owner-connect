@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,7 +24,8 @@ import {
   KeyRound,
   MapPin,
   Tag,
-  HelpCircle
+  HelpCircle,
+  Maximize2
 } from "lucide-react";
 
 const getCategoryIcon = (category: string) => {
@@ -93,6 +95,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
   const [copied, setCopied] = useState(false);
   const [editedCaseFile, setEditedCaseFile] = useState<any>(null);
   const [notes, setNotes] = useState('');
+  const [conversationExpanded, setConversationExpanded] = useState(false);
 
   // Initialize state when review changes
   useState(() => {
@@ -432,51 +435,102 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                   <MessageSquare className="h-4 w-4" />
                   Conversation History ({messages.length} messages)
                 </Label>
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={handleFetchConversation} 
-                  disabled={fetchingConversation}
-                >
-                  {fetchingConversation ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 mr-2" />
+                <div className="flex gap-2">
+                  {messages.length > 0 && (
+                    <Button 
+                      size="sm" 
+                      variant="ghost"
+                      onClick={() => setConversationExpanded(true)}
+                    >
+                      <Maximize2 className="h-4 w-4 mr-1" />
+                      Expand
+                    </Button>
                   )}
-                  {messages.length > 0 ? 'Refresh' : 'Fetch'}
-                </Button>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={handleFetchConversation} 
+                    disabled={fetchingConversation}
+                  >
+                    {fetchingConversation ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    {messages.length > 0 ? 'Refresh' : 'Fetch'}
+                  </Button>
+                </div>
               </div>
 
               {messages.length > 0 ? (
-                <div className="space-y-3 max-h-60 overflow-y-auto">
-                  {messages.map((msg: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "p-3 rounded-lg text-sm",
-                        msg.sender === 'guest' 
-                          ? "bg-muted ml-4" 
-                          : "bg-primary/10 mr-4"
-                      )}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium text-xs">
-                          {msg.sender === 'guest' ? 'Guest' : 'Host'}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {msg.timestamp ? new Date(msg.timestamp).toLocaleDateString() : ''}
-                        </span>
+                <ScrollArea className="h-60 rounded-md border p-3">
+                  <div className="space-y-3 pr-4">
+                    {messages.map((msg: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className={cn(
+                          "p-3 rounded-lg text-sm",
+                          msg.sender === 'guest' 
+                            ? "bg-muted ml-4" 
+                            : "bg-primary/10 mr-4"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-medium text-xs">
+                            {msg.sender === 'guest' ? 'Guest' : 'Host'}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {msg.timestamp ? new Date(msg.timestamp).toLocaleDateString() : ''}
+                          </span>
+                        </div>
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
                       </div>
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </ScrollArea>
               ) : (
                 <p className="text-sm text-muted-foreground">
                   No conversation history available. Click "Fetch" to retrieve messages.
                 </p>
               )}
             </div>
+
+            {/* Expanded Conversation Dialog */}
+            <Dialog open={conversationExpanded} onOpenChange={setConversationExpanded}>
+              <DialogContent className="max-w-3xl max-h-[80vh]">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5" />
+                    Conversation History - {review.guest_name || 'Guest'}
+                  </DialogTitle>
+                </DialogHeader>
+                <ScrollArea className="h-[60vh] pr-4">
+                  <div className="space-y-4">
+                    {messages.map((msg: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className={cn(
+                          "p-3 rounded-lg text-sm",
+                          msg.sender === 'guest' 
+                            ? "bg-muted ml-4" 
+                            : "bg-primary/10 mr-4"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-medium text-xs">
+                            {msg.sender === 'guest' ? 'Guest' : 'Host'}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {msg.timestamp ? new Date(msg.timestamp).toLocaleString() : ''}
+                          </span>
+                        </div>
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </DialogContent>
+            </Dialog>
 
             <Separator />
 
