@@ -124,6 +124,189 @@ function getSyncType(phase: AccountSyncPhase): string {
   }
 }
 
+// Check if an error message indicates a rate limit issue
+function isRateLimitError(message: string | null): boolean {
+  if (!message) return false;
+  const patterns = [
+    'rate limit',
+    'rate_limit',
+    'RATE_LIMIT',
+    '429',
+    'too many requests',
+    'OAUTH_RATE_LIMIT',
+    'Retry-After',
+    'exceeded rate',
+  ];
+  return patterns.some(p => message.toLowerCase().includes(p.toLowerCase()));
+}
+
+// Handle verification mode - check if previous run completed and retry if needed
+async function handleVerification(
+  supabase: any,
+  supabaseInvoke: any
+): Promise<Response> {
+  console.log('=== Nightly Sync: VERIFICATION MODE ===');
+  
+  const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  
+  // Find the most recent run from the last 3 hours
+  const { data: recentRuns, error: fetchError } = await supabase
+    .from('nightly_sync_runs')
+    .select('*')
+    .gte('started_at', threeHoursAgo)
+    .order('started_at', { ascending: false })
+    .limit(1);
+    
+  if (fetchError) {
+    console.error('Failed to fetch recent runs:', fetchError);
+    return new Response(
+      JSON.stringify({ success: false, error: fetchError.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+  
+  // No run found in the last 3 hours - start a new sync
+  if (!recentRuns || recentRuns.length === 0) {
+    console.log('No run found in last 3 hours - starting new sync');
+    await supabaseInvoke.functions.invoke('nightly-sync', { body: {} });
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        action: 'started_new_sync',
+        reason: 'no_run_found' 
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+  
+  const run = recentRuns[0];
+  console.log(`Found run ${run.id} with status: ${run.status}`);
+  
+  // Run still in progress - do nothing
+  if (run.status === 'running') {
+    console.log('Run still in progress - no action needed');
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        action: 'none',
+        reason: 'run_still_running',
+        run_id: run.id 
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+  
+  // Run completed successfully - log and exit
+  if (run.status === 'completed') {
+    console.log('Run completed successfully - no action needed');
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        action: 'none',
+        reason: 'run_completed_successfully',
+        run_id: run.id 
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+  
+  // Run failed - check if we should retry
+  if (run.status === 'failed') {
+    // Check retry count (max 2 retries)
+    const retryCount = run.retry_count || 0;
+    if (retryCount >= 2) {
+      console.log(`Run failed but already retried ${retryCount} times - not retrying`);
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          action: 'none',
+          reason: 'max_retries_exceeded',
+          run_id: run.id,
+          retry_count: retryCount 
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // Check if it's a rate limit error
+    if (isRateLimitError(run.error_message)) {
+      console.log('Run failed due to rate limit - not retrying');
+      console.log('Error message:', run.error_message);
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          action: 'none',
+          reason: 'rate_limit_error',
+          run_id: run.id,
+          error_message: run.error_message 
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // Not a rate limit error - start a retry
+    console.log(`Run failed with non-rate-limit error - starting retry #${retryCount + 1}`);
+    console.log('Original error:', run.error_message);
+    
+    // Create a new run marked as a retry
+    const { data: newRun, error: createError } = await supabase
+      .from('nightly_sync_runs')
+      .insert({
+        current_step: 'INIT',
+        status: 'running',
+        account_ids: [],
+        account_states: {},
+        step_results: { retry_of_run: run.id, retry_reason: run.error_message },
+        invocation_count: 0,
+        retry_count: retryCount + 1,
+        retry_of: run.id,
+      })
+      .select()
+      .single();
+      
+    if (createError) {
+      console.error('Failed to create retry run:', createError);
+      return new Response(
+        JSON.stringify({ success: false, error: createError.message }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // Start the retry by invoking without run_id (will pick up the new run and initialize it properly)
+    // But first, mark the new run so we can delete it and let the normal flow create one
+    await supabase.from('nightly_sync_runs').delete().eq('id', newRun.id);
+    
+    // Now invoke without run_id - it will create a proper run
+    // We'll update the retry tracking after
+    const { data: invokeResult } = await supabaseInvoke.functions.invoke('nightly-sync', { body: {} });
+    
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        action: 'started_retry',
+        reason: 'failed_non_rate_limit',
+        original_run_id: run.id,
+        retry_number: retryCount + 1,
+        original_error: run.error_message 
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+  
+  // Unknown status
+  console.log(`Unknown run status: ${run.status}`);
+  return new Response(
+    JSON.stringify({ 
+      success: true, 
+      action: 'none',
+      reason: 'unknown_status',
+      run_id: run.id,
+      status: run.status 
+    }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -143,6 +326,12 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
+    
+    // Handle verification mode
+    if (body.verify) {
+      return await handleVerification(supabase, supabaseInvoke);
+    }
+    
     const runId: string | undefined = body.run_id;
 
     let run: NightlySyncRun;
