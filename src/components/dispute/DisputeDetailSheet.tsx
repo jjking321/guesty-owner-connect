@@ -54,6 +54,21 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
+interface RedFlag {
+  category: "Extortion" | "Retaliatory" | "Third-Party" | "Irrelevant";
+  severity: "high" | "medium" | "low";
+  quote: string;
+  context: string;
+  sender: "guest" | "host";
+  timestamp?: string;
+}
+
+interface ConversationRedFlags {
+  redflags: RedFlag[];
+  overallAssessment: string;
+  evidenceStrength: "strong" | "moderate" | "weak" | "none";
+}
+
 interface DisputeReview {
   id: string;
   listing_id: string;
@@ -76,6 +91,8 @@ interface DisputeReview {
   dispute_has_pressure: boolean | null;
   dispute_has_refund_demands: boolean | null;
   dispute_notes: string | null;
+  dispute_conversation_redflags?: ConversationRedFlags | null;
+  dispute_conversation_analyzed_at?: string | null;
   property_name?: string;
   reservation_id?: string | null;
 }
@@ -90,6 +107,7 @@ interface DisputeDetailSheetProps {
 export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: DisputeDetailSheetProps) {
   const { toast } = useToast();
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzingRedFlags, setAnalyzingRedFlags] = useState(false);
   const [fetchingConversation, setFetchingConversation] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -154,6 +172,31 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
       });
     } finally {
       setFetchingConversation(false);
+    }
+  };
+
+  const handleAnalyzeRedFlags = async () => {
+    setAnalyzingRedFlags(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('analyze-conversation-redflags', {
+        body: { reviewId: review.id },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Red flag analysis complete",
+        description: data.message || `Found ${data.analysis?.redflags?.length || 0} red flags`,
+      });
+      onUpdate();
+    } catch (error: any) {
+      toast({
+        title: "Analysis failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setAnalyzingRedFlags(false);
     }
   };
 
@@ -531,6 +574,128 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
                 </ScrollArea>
               </DialogContent>
             </Dialog>
+
+            {/* Conversation Red Flags Analysis */}
+            {messages.length > 0 && (
+              <>
+                <Separator />
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <Label className="text-sm font-medium flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      Conversation Red Flags
+                    </Label>
+                    <Button 
+                      size="sm" 
+                      variant={review.dispute_conversation_analyzed_at ? "outline" : "default"}
+                      onClick={handleAnalyzeRedFlags} 
+                      disabled={analyzingRedFlags}
+                    >
+                      {analyzingRedFlags ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : review.dispute_conversation_analyzed_at ? (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 mr-2" />
+                      )}
+                      {review.dispute_conversation_analyzed_at ? 'Re-analyze' : 'Analyze for Red Flags'}
+                    </Button>
+                  </div>
+
+                  {review.dispute_conversation_redflags ? (
+                    <div className="space-y-4">
+                      {/* Evidence Strength Badge */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">Evidence Strength:</span>
+                        <Badge 
+                          variant={
+                            review.dispute_conversation_redflags.evidenceStrength === 'strong' ? 'default' :
+                            review.dispute_conversation_redflags.evidenceStrength === 'moderate' ? 'secondary' :
+                            'outline'
+                          }
+                          className={cn(
+                            review.dispute_conversation_redflags.evidenceStrength === 'strong' && "bg-green-600 hover:bg-green-600",
+                            review.dispute_conversation_redflags.evidenceStrength === 'moderate' && "bg-amber-500 hover:bg-amber-500 text-white"
+                          )}
+                        >
+                          {review.dispute_conversation_redflags.evidenceStrength?.toUpperCase()}
+                        </Badge>
+                      </div>
+
+                      {/* Overall Assessment */}
+                      <p className="text-sm bg-muted/50 p-3 rounded-lg">
+                        {review.dispute_conversation_redflags.overallAssessment}
+                      </p>
+
+                      {/* Red Flag Cards */}
+                      {review.dispute_conversation_redflags.redflags?.length > 0 ? (
+                        <div className="space-y-3">
+                          {review.dispute_conversation_redflags.redflags.map((flag: RedFlag, idx: number) => (
+                            <div
+                              key={idx}
+                              className={cn(
+                                "p-3 rounded-lg border-l-4",
+                                flag.severity === 'high' && "border-l-destructive bg-destructive/10",
+                                flag.severity === 'medium' && "border-l-amber-500 bg-amber-50 dark:bg-amber-950/20",
+                                flag.severity === 'low' && "border-l-yellow-400 bg-yellow-50 dark:bg-yellow-950/20"
+                              )}
+                            >
+                              <div className="flex items-center gap-2 mb-2">
+                                <Badge 
+                                  variant={flag.severity === 'high' ? 'destructive' : 'secondary'}
+                                  className={cn(
+                                    flag.severity === 'medium' && "bg-amber-500 text-white hover:bg-amber-500",
+                                    flag.severity === 'low' && "bg-yellow-400 text-black hover:bg-yellow-400"
+                                  )}
+                                >
+                                  {flag.category}
+                                </Badge>
+                                <span className={cn(
+                                  "text-xs font-medium px-2 py-0.5 rounded",
+                                  flag.severity === 'high' && "bg-destructive/20 text-destructive",
+                                  flag.severity === 'medium' && "bg-amber-500/20 text-amber-700 dark:text-amber-400",
+                                  flag.severity === 'low' && "bg-yellow-400/20 text-yellow-700 dark:text-yellow-400"
+                                )}>
+                                  {flag.severity.toUpperCase()}
+                                </span>
+                              </div>
+                              
+                              <blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-sm text-muted-foreground mb-2">
+                                "{flag.quote}"
+                              </blockquote>
+                              
+                              <p className="text-sm">{flag.context}</p>
+                              
+                              <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                                <span className="font-medium">{flag.sender === 'guest' ? 'Guest' : 'Host'}</span>
+                                {flag.timestamp && (
+                                  <>
+                                    <span>•</span>
+                                    <span>{flag.timestamp}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          No policy violations detected in the conversation.
+                        </p>
+                      )}
+
+                      <span className="text-xs text-muted-foreground">
+                        Analyzed: {new Date(review.dispute_conversation_analyzed_at!).toLocaleString()}
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Click "Analyze for Red Flags" to scan the conversation for policy violations that could support your dispute.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
 
             <Separator />
 
