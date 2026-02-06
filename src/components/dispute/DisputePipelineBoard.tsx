@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { DisputeCard } from "./DisputeCard";
 import { DisputeDetailSheet } from "./DisputeDetailSheet";
+import { BatchAnalysisProgress } from "./BatchAnalysisProgress";
 import { cn } from "@/lib/utils";
 import { StripeDateRangePicker, DateRange } from "@/components/StripeDateRangePicker";
 import { Input } from "@/components/ui/input";
@@ -58,6 +59,7 @@ export function DisputePipelineBoard() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [analyzingBatch, setAnalyzingBatch] = useState(false);
+  const [batchProgressId, setBatchProgressId] = useState<string | null>(null);
   
   // New filter state
   const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
@@ -274,31 +276,49 @@ export function DisputePipelineBoard() {
 
     setAnalyzingBatch(true);
     
-    // Analyze up to 5 at a time
-    const batch = triageReviews.slice(0, 5);
-    let successCount = 0;
+    try {
+      const { data, error } = await supabase.functions.invoke('batch-analyze-disputes', {
+        body: { 
+          limit: Math.min(triageReviews.length, 20), // Process up to 20 at a time
+          maxAgeDays: 30,
+        },
+      });
 
-    for (const review of batch) {
-      try {
-        const { error } = await supabase.functions.invoke('analyze-review-dispute', {
-          body: { reviewId: review.id, includeConversation: true },
-        });
-
-        if (!error) {
-          successCount++;
-        }
-      } catch (error) {
-        console.error(`Failed to analyze ${review.id}:`, error);
+      if (error) {
+        throw error;
       }
-    }
 
+      if (data?.progressId) {
+        setBatchProgressId(data.progressId);
+      } else {
+        // No progress ID means no reviews to process
+        setAnalyzingBatch(false);
+        toast({
+          title: data?.message || "No reviews to analyze",
+        });
+      }
+    } catch (error) {
+      console.error('Failed to start batch analysis:', error);
+      setAnalyzingBatch(false);
+      toast({
+        title: "Failed to start analysis",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleBatchComplete = () => {
+    setBatchProgressId(null);
     setAnalyzingBatch(false);
     queryClient.invalidateQueries({ queryKey: ['dispute-reviews'] });
-    
-    toast({
-      title: "Batch analysis complete",
-      description: `Analyzed ${successCount} of ${batch.length} reviews`,
-    });
+  };
+
+  const handleBatchCancel = () => {
+    setBatchProgressId(null);
+    setAnalyzingBatch(false);
+    queryClient.invalidateQueries({ queryKey: ['dispute-reviews'] });
+    toast({ title: "Analysis cancelled" });
   };
 
   const handleCardClick = (review: DisputeReview) => {
@@ -412,6 +432,15 @@ export function DisputePipelineBoard() {
           </div>
         </div>
       </div>
+
+      {/* Batch Analysis Progress */}
+      {batchProgressId && (
+        <BatchAnalysisProgress
+          progressId={batchProgressId}
+          onComplete={handleBatchComplete}
+          onCancel={handleBatchCancel}
+        />
+      )}
 
       {/* Kanban Board */}
       <ScrollArea className="w-full">

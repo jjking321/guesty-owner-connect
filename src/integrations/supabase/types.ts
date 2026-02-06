@@ -337,6 +337,48 @@ export type Database = {
           },
         ]
       }
+      dispute_analysis_progress: {
+        Row: {
+          completed_at: string | null
+          completed_reviews: number
+          created_by: string | null
+          current_guest_name: string | null
+          error_message: string | null
+          failed_reviews: number
+          id: string
+          skipped_reviews: number
+          started_at: string
+          status: string
+          total_reviews: number
+        }
+        Insert: {
+          completed_at?: string | null
+          completed_reviews?: number
+          created_by?: string | null
+          current_guest_name?: string | null
+          error_message?: string | null
+          failed_reviews?: number
+          id?: string
+          skipped_reviews?: number
+          started_at?: string
+          status?: string
+          total_reviews?: number
+        }
+        Update: {
+          completed_at?: string | null
+          completed_reviews?: number
+          created_by?: string | null
+          current_guest_name?: string | null
+          error_message?: string | null
+          failed_reviews?: number
+          id?: string
+          skipped_reviews?: number
+          started_at?: string
+          status?: string
+          total_reviews?: number
+        }
+        Relationships: []
+      }
       forecast_accuracy: {
         Row: {
           absolute_error: number | null
