@@ -1,60 +1,59 @@
 
-
-# Fix: Red Flag Cards Text Cutoff
+# Fix: Guest Name/Date Cut Off in Dispute Detail Sheet
 
 ## Problem
 
-The "Conversation Red Flags" cards (Irrelevant, Retaliatory) are being cut off on the right side. The quote text and context explanation run past the visible area of the card.
+In the Dispute Detail Sheet header, the guest name and date line (e.g., "Nick Boroughf • 1/27/2026") is being cut off. This happens because:
+1. The close button (X) is positioned at `right-4 top-4`, overlapping the header area
+2. The `SheetDescription` has no width constraint or text overflow handling
+3. Longer guest names collide with the close button
 
-## Root Cause
-
-The text elements inside the red flag cards don't have proper text wrapping classes applied:
-- The `blockquote` element (showing the quoted message) lacks `break-words`
-- The context `p` element lacks `break-words`
-- The parent container has no overflow handling
+Meanwhile, shorter names like "Soner Keser" fit fine.
 
 ## Solution
 
-Add `break-words` class to both text elements to ensure long text wraps properly within the card boundaries.
+Add right padding to the `SheetHeader` in the DisputeDetailSheet to make room for the close button, and add text overflow handling to prevent clipping.
 
 ## Changes Required
 
 **File:** `src/components/dispute/DisputeDetailSheet.tsx`
 
-| Line | Element | Change |
-|------|---------|--------|
-| 775 | blockquote | Add `break-words` class |
-| 779 | p (context) | Add `break-words` class |
+### 1. Add padding to SheetHeader (line 356)
 
-### Code Changes
-
-**Line 775 - Quote blockquote:**
 ```typescript
 // Before:
-<blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-sm text-muted-foreground mb-2">
+<SheetHeader>
 
 // After:
-<blockquote className="border-l-2 border-muted-foreground/30 pl-3 italic text-sm text-muted-foreground mb-2 break-words">
+<SheetHeader className="pr-8">
 ```
 
-**Line 779 - Context paragraph:**
+This adds 32px of right padding to keep the header content clear of the close button.
+
+### 2. Add truncate class to SheetDescription content (line 365-367)
+
+Wrap the description text to ensure it truncates gracefully if still too long:
+
 ```typescript
 // Before:
-<p className="text-sm">{flag.context}</p>
+<SheetDescription>
+  {review.guest_name || 'Unknown Guest'} • {review.review_date ? new Date(review.review_date).toLocaleDateString() : 'Unknown date'}
+</SheetDescription>
 
 // After:
-<p className="text-sm break-words">{flag.context}</p>
+<SheetDescription className="truncate">
+  {review.guest_name || 'Unknown Guest'} • {review.review_date ? new Date(review.review_date).toLocaleDateString() : 'Unknown date'}
+</SheetDescription>
 ```
 
 ## Visual Result
 
-- Quote text will wrap within the card instead of extending past the edge
-- Context explanation will wrap properly
-- All content will be fully visible within the card boundaries
+- The guest name and date will have proper clearance from the close button
+- If the combined text is still too long, it will truncate with an ellipsis rather than being abruptly cut off
+- All guest names will display consistently without overlapping the X button
 
 ## File to Modify
 
 | File | Change |
 |------|--------|
-| `src/components/dispute/DisputeDetailSheet.tsx` | Add `break-words` to blockquote (line 775) and context paragraph (line 779) |
-
+| `src/components/dispute/DisputeDetailSheet.tsx` | Add `pr-8` to SheetHeader (line 356), add `truncate` class to SheetDescription (line 365) |
