@@ -19,19 +19,24 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { limit = 10, skipWithoutReservation = false } = await req.json().catch(() => ({}));
+    const { limit = 10, skipWithoutReservation = false, maxAgeDays = 7 } = await req.json().catch(() => ({}));
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    console.log(`Starting batch dispute analysis. Limit: ${limit}, skipWithoutReservation: ${skipWithoutReservation}`);
+    console.log(`Starting batch dispute analysis. Limit: ${limit}, maxAgeDays: ${maxAgeDays}, skipWithoutReservation: ${skipWithoutReservation}`);
 
-    // Fetch reviews in triage status
+    // Calculate cutoff date for recent reviews only
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays);
+
+    // Fetch reviews in triage status from past maxAgeDays
     let query = supabase
       .from('reviews')
-      .select('id, guest_name, reservation_id, listing_id')
+      .select('id, guest_name, reservation_id, listing_id, review_date')
       .eq('dispute_status', 'triage')
+      .gte('review_date', cutoffDate.toISOString())
       .order('review_date', { ascending: false })
       .limit(limit);
 
