@@ -368,7 +368,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
         </SheetHeader>
 
         <ScrollArea className="h-[calc(100vh-120px)]">
-          <div className="space-y-6 py-4 pr-10 overflow-hidden">
+          <div className="space-y-6 py-4 pr-10 overflow-hidden min-w-0">
             {/* Review Header */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1">
@@ -390,7 +390,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
             {/* Review Text */}
             <div>
               <Label className="text-sm font-medium">Review Text</Label>
-              <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap">
+              <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap break-words">
                 {review.review_text || 'No review text available'}
               </p>
             </div>
@@ -400,7 +400,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
               <div>
                 <Label className="text-sm font-medium">Private Feedback</Label>
                 <div className="mt-1 p-3 bg-muted/50 rounded-lg border border-border">
-                  <p className="text-sm whitespace-pre-wrap text-muted-foreground italic">
+                  <p className="text-sm whitespace-pre-wrap break-words text-muted-foreground italic">
                     {review.private_note}
                   </p>
                 </div>
@@ -411,7 +411,7 @@ export function DisputeDetailSheet({ review, open, onOpenChange, onUpdate }: Dis
             {review.category_ratings && Object.keys(review.category_ratings).length > 0 && (
               <div>
                 <Label className="text-sm font-medium">Category Ratings</Label>
-                <div className="mt-2 flex bg-muted/50 rounded-lg p-4">
+                <div className="mt-2 flex flex-wrap bg-muted/50 rounded-lg p-4">
                   {Object.entries(review.category_ratings).map(([key, value], index, array) => {
                     const IconComponent = getCategoryIcon(key);
                     return (
