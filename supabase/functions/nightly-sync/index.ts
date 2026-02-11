@@ -108,7 +108,7 @@ async function isSyncComplete(
 ): Promise<{ complete: boolean; success: boolean; error?: string }> {
   const { data: jobs, error } = await supabase
     .from('sync_jobs')
-    .select('status, error_message')
+    .select('status, error_message, started_at')
     .eq('guesty_account_id', accountId)
     .eq('sync_type', syncType)
     .order('started_at', { ascending: false })
@@ -125,6 +125,17 @@ async function isSyncComplete(
   if (job.status === 'failed') {
     return { complete: true, success: false, error: job.error_message };
   }
+  
+  // Treat jobs running > 30 minutes as stale/failed
+  if (job.status === 'running' && job.started_at) {
+    const runningMs = Date.now() - new Date(job.started_at).getTime();
+    const STALE_JOB_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+    if (runningMs > STALE_JOB_THRESHOLD_MS) {
+      console.warn(`Job for ${syncType} has been running for ${Math.round(runningMs/60000)}min - treating as stale/failed`);
+      return { complete: true, success: false, error: `Job stale - running for ${Math.round(runningMs/60000)} minutes` };
+    }
+  }
+  
   return { complete: false, success: false };
 }
 
@@ -844,7 +855,26 @@ async function processAirbnbRatings(
         current_step: 'PROBABILITIES',
       }).eq('id', run.id);
     } else {
-      console.log('Airbnb ratings still running...');
+      // Check if we've been stuck on this step too long (25 min escape hatch)
+      const airbnbStepData = (run.step_results as Record<string, any>)?.airbnb_ratings;
+      if (airbnbStepData?.started_at) {
+        const stepRunningMs = Date.now() - new Date(airbnbStepData.started_at).getTime();
+        if (stepRunningMs > 25 * 60 * 1000) { // 25 minutes
+          console.warn(`Airbnb ratings step has been running for ${Math.round(stepRunningMs/60000)}min - forcing transition to PROBABILITIES`);
+          await logStepTiming(supabase, run.id, 'airbnb_ratings', 'end', {
+            success: false,
+            error: 'Timed out waiting for completion',
+            forced: true
+          });
+          await supabase.from('nightly_sync_runs').update({
+            current_step: 'PROBABILITIES',
+          }).eq('id', run.id);
+        } else {
+          console.log(`Airbnb ratings still running (${Math.round(stepRunningMs/60000)}min elapsed)...`);
+        }
+      } else {
+        console.log('Airbnb ratings still running...');
+      }
     }
   }
 
