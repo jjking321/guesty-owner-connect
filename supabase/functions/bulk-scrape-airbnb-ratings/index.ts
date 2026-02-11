@@ -7,7 +7,8 @@ const corsHeaders = {
 };
 
 // Constants for batch processing
-const BATCH_SIZE = 15; // Process 15 listings per invocation (~45s with 3s delay)
+const BATCH_SIZE = 10; // Hard cap; time-based cutoff below is the real guardrail
+const MAX_INVOCATION_DURATION_MS = 35_000; // Keep well under ~45s client/gateway timeouts
 const DELAY_BETWEEN_REQUESTS = 3000; // 3 seconds between requests
 const SKIP_IF_SCRAPED_WITHIN_HOURS = 24;
 
@@ -373,6 +374,8 @@ Deno.serve(async (req) => {
     let succeeded = 0;
     let failed = 0;
 
+    const invocationStartedAt = Date.now();
+
     // Process listings starting from offset
     for (let i = startOffset; i < totalListings; i++) {
       // Check if job was cancelled
@@ -448,10 +451,17 @@ Deno.serve(async (req) => {
 
       processed++;
 
-      // Check if we've processed enough for this batch (leave buffer before 60s timeout)
-      if (processed >= BATCH_SIZE && i < totalListings - 1) {
+      // Hand off to a new invocation before HTTP clients/gateways time out
+      const elapsedMs = Date.now() - invocationStartedAt;
+      const shouldHandoff =
+        (processed >= BATCH_SIZE || elapsedMs >= MAX_INVOCATION_DURATION_MS) &&
+        i < totalListings - 1;
+
+      if (shouldHandoff) {
         const nextOffset = i + 1;
-        console.log(`Batch complete. Processed ${processed}. Self-invoking from offset ${nextOffset}`);
+        console.log(
+          `Handing off after ${processed} processed (${Math.round(elapsedMs / 1000)}s). Self-invoking from offset ${nextOffset}`
+        );
 
         // Update job with current progress
         await supabaseAdmin
