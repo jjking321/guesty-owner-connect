@@ -16,7 +16,7 @@ type PipelineStep =
   | 'COMPLETED';
 
 // Per-account sync phases
-type AccountSyncPhase = 'listings' | 'reservations' | 'owners' | 'calendar' | 'done';
+type AccountSyncPhase = 'listings' | 'reservations' | 'owners' | 'calendar' | 'reviews' | 'done';
 
 interface AccountState {
   currentPhase: AccountSyncPhase;
@@ -165,7 +165,7 @@ async function isProgressComplete(
 
 // Get next sync phase for an account
 function getNextPhase(currentPhase: AccountSyncPhase): AccountSyncPhase {
-  const order: AccountSyncPhase[] = ['listings', 'reservations', 'owners', 'calendar', 'done'];
+  const order: AccountSyncPhase[] = ['listings', 'reservations', 'owners', 'calendar', 'reviews', 'done'];
   const currentIndex = order.indexOf(currentPhase);
   return order[Math.min(currentIndex + 1, order.length - 1)];
 }
@@ -177,6 +177,7 @@ function getSyncType(phase: AccountSyncPhase): string {
     case 'reservations': return 'new_reservations';
     case 'owners': return 'owners';
     case 'calendar': return 'capacity_calendar';
+    case 'reviews': return 'new_reviews';
     default: return phase;
   }
 }
@@ -729,6 +730,11 @@ async function processAccountSyncs(
             await supabaseInvoke.functions.invoke('sync-bulk-calendar', {
               body: { guestyAccountId: accountId }
             }).catch((err: any) => console.error(`[${accountName}] Failed to invoke calendar sync:`, err.message));
+          } else if (state.currentPhase === 'reviews') {
+            console.log(`[${accountName}] Firing reviews sync...`);
+            await supabaseInvoke.functions.invoke('sync-new-reviews', {
+              body: { guestyAccountId: accountId }
+            }).catch((err: any) => console.error(`[${accountName}] Failed to invoke reviews sync:`, err.message));
           }
         }
       } else {
@@ -765,7 +771,7 @@ async function processAccountSyncs(
     for (const accountId of run.account_ids) {
       const state = accountStates[accountId];
       const accountInfo = accounts.find(a => a.id === accountId);
-      const isSuccess = !state?.error && state?.phasesCompleted?.includes('calendar');
+      const isSuccess = !state?.error && (state?.phasesCompleted?.includes('reviews') || state?.phasesCompleted?.includes('calendar'));
       
       accountSummary[accountId] = {
         name: accountInfo?.name || accountId,
