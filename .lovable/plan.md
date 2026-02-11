@@ -1,77 +1,126 @@
 
-# Add Sort Options to Dispute Pipeline Board
 
-## Overview
-Add a dropdown to sort reviews within each Kanban column by either **Review Date** or **Removal Likelihood Score** (default).
+# Fix Nightly Sync Pipeline: Stale Job Detection + Data Cleanup
 
-## Changes
+## Problem Summary
 
-### File: `src/components/dispute/DisputePipelineBoard.tsx`
+Every nightly sync since Feb 7 has been failing in a loop. The root cause is a chain reaction:
 
-**1. Add sort state (after line 69)**
+1. **Two Airbnb ratings jobs from Feb 7 are permanently stuck** in `running` status (IDs: `bb85facf...` and `08049b0f...`)
+2. The `isSyncComplete()` function only checks for `completed` or `failed` -- a `running` job returns `{ complete: false }`, so the orchestrator polls forever
+3. The orchestrator burns through all 200 invocations polling these stuck jobs, then fails
+4. The 5:30 AM verification triggers a retry, which also gets stuck on the same jobs
+5. This has been repeating every night since Feb 7
+
+## Fixes (3 parts)
+
+### Part 1: Add Stale Job Detection to `isSyncComplete()`
+
+**File:** `supabase/functions/nightly-sync/index.ts` (lines 104-129)
+
+Update `isSyncComplete()` to treat any job that has been running for more than 30 minutes as failed:
+
 ```typescript
-const [sortBy, setSortBy] = useState<string>('likelihood');
-```
+async function isSyncComplete(
+  supabase: any,
+  accountId: string,
+  syncType: string
+): Promise<{ complete: boolean; success: boolean; error?: string }> {
+  const { data: jobs, error } = await supabase
+    .from('sync_jobs')
+    .select('status, error_message, started_at')
+    .eq('guesty_account_id', accountId)
+    .eq('sync_type', syncType)
+    .order('started_at', { ascending: false })
+    .limit(1);
 
-**2. Add sort dropdown to filters row (after the Score filter, line 388)**
+  if (error || !jobs || jobs.length === 0) {
+    return { complete: false, success: false };
+  }
 
-Add a new Select component for sorting:
-```typescript
-<Select value={sortBy} onValueChange={setSortBy}>
-  <SelectTrigger className="w-[180px]">
-    <SelectValue placeholder="Sort by..." />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value="likelihood">Likelihood (High→Low)</SelectItem>
-    <SelectItem value="date">Date (Newest First)</SelectItem>
-  </SelectContent>
-</Select>
-```
-
-**3. Update the grouping logic to apply sorting (lines 211-214)**
-
-Replace the simple grouping with a sorted grouping:
-```typescript
-const reviewsByColumn = COLUMNS.reduce((acc, col) => {
-  const columnReviews = reviews.filter(r => r.dispute_status === col.id);
+  const job = jobs[0];
+  if (job.status === 'completed') {
+    return { complete: true, success: true };
+  }
+  if (job.status === 'failed') {
+    return { complete: true, success: false, error: job.error_message };
+  }
   
-  // Sort reviews within each column
-  columnReviews.sort((a, b) => {
-    if (sortBy === 'likelihood') {
-      // Sort by likelihood score descending (nulls last)
-      const scoreA = a.dispute_likelihood_score ?? -1;
-      const scoreB = b.dispute_likelihood_score ?? -1;
-      return scoreB - scoreA;
-    } else {
-      // Sort by date descending
-      const dateA = a.review_date ? new Date(a.review_date).getTime() : 0;
-      const dateB = b.review_date ? new Date(b.review_date).getTime() : 0;
-      return dateB - dateA;
+  // Treat jobs running > 30 minutes as stale/failed
+  if (job.status === 'running' && job.started_at) {
+    const runningMs = Date.now() - new Date(job.started_at).getTime();
+    const STALE_JOB_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+    if (runningMs > STALE_JOB_THRESHOLD_MS) {
+      console.warn(`Job for ${syncType} has been running for ${Math.round(runningMs/60000)}min - treating as stale/failed`);
+      return { complete: true, success: false, error: `Job stale - running for ${Math.round(runningMs/60000)} minutes` };
     }
-  });
+  }
   
-  acc[col.id] = columnReviews;
-  return acc;
-}, {} as Record<string, DisputeReview[]>);
+  return { complete: false, success: false };
+}
 ```
 
-**4. Add ArrowUpDown icon import (line 7)**
+This single change prevents future stuck jobs from blocking the entire pipeline.
+
+### Part 2: Add Same Stale Detection to `processAirbnbRatings()`
+
+**File:** `supabase/functions/nightly-sync/index.ts` (lines 832-848)
+
+The Airbnb ratings check also uses `isSyncComplete()`, so Part 1 already fixes it. But we should also add a fallback: if the orchestrator has been on the AIRBNB_RATINGS step for more than 25 minutes (based on step_results timing), skip ahead regardless.
+
+Add a time-based escape hatch in `processAirbnbRatings()`:
+
 ```typescript
-import { Loader2, Sparkles, RefreshCw, Search, ArrowUpDown } from "lucide-react";
+// Check if we've been stuck on this step too long
+const airbnbStepData = run.step_results?.airbnb_ratings;
+if (airbnbStepData?.started_at) {
+  const stepRunningMs = Date.now() - new Date(airbnbStepData.started_at).getTime();
+  if (stepRunningMs > 25 * 60 * 1000) { // 25 minutes
+    console.warn(`Airbnb ratings step has been running for ${Math.round(stepRunningMs/60000)}min - forcing transition`);
+    await logStepTiming(supabase, run.id, 'airbnb_ratings', 'end', {
+      success: false,
+      error: 'Timed out waiting for completion',
+      forced: true
+    });
+    await supabase.from('nightly_sync_runs').update({
+      current_step: 'PROBABILITIES',
+    }).eq('id', run.id);
+    // Continue to fire probabilities below...
+  }
+}
 ```
 
-## Summary of Changes
+### Part 3: Clean Up Stuck Data
 
-| Location | Change |
-|----------|--------|
-| Line 69 | Add `sortBy` state with default `'likelihood'` |
-| Line 7 | Import `ArrowUpDown` icon |
-| Line 388 | Add sort dropdown after score filter |
-| Lines 211-214 | Update grouping to sort within columns based on selected option |
+Run SQL to mark the two stuck Feb 7 jobs as failed, and also clean up stuck nightly_sync_runs:
 
-## Behavior
+```sql
+-- Mark stuck airbnb_ratings sync_jobs as failed
+UPDATE sync_jobs 
+SET status = 'failed', 
+    error_message = 'Marked as failed - job was stuck in running state', 
+    completed_at = now() 
+WHERE id IN ('bb85facf-92b4-44aa-865b-7283cbc47a49', '08049b0f-ad76-4520-a414-f23b4817ff5a');
 
-- **Default**: Reviews sorted by Removal Likelihood (highest first)
-- **Date option**: Reviews sorted by Review Date (newest first)
-- Reviews with no likelihood score appear at the bottom when sorting by likelihood
-- Sorting applies within each column independently
+-- Mark stuck nightly_sync_runs as failed  
+UPDATE nightly_sync_runs 
+SET status = 'failed', 
+    error_message = 'Marked as failed - was stuck due to stale airbnb_ratings jobs', 
+    completed_at = now() 
+WHERE status = 'running';
+```
+
+## Files to Change
+
+| File | Change |
+|------|--------|
+| `supabase/functions/nightly-sync/index.ts` | Add stale job detection (30min threshold) to `isSyncComplete()` and timeout escape hatch to `processAirbnbRatings()` |
+| Database (via insert tool) | Clean up 2 stuck sync_jobs + stuck nightly_sync_runs |
+
+## Expected Result
+
+- Tonight's 3 AM sync will proceed normally through all steps
+- Any future stuck jobs will be automatically detected and skipped after 30 minutes
+- The Airbnb ratings step has an additional 25-minute safety timeout
+- Probabilities, forecasts, and actionables will run even if an earlier step gets stuck
+
