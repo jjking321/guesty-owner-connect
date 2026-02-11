@@ -97,13 +97,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.sync-new-reviews]
-verify_jwt = true
+verify_jwt = false
 
 [functions.scrape-airbnb-rating]
 verify_jwt = true
 
 [functions.bulk-scrape-airbnb-ratings]
-verify_jwt = true
+verify_jwt = false
 
 [functions.calculate-all-probabilities]
 verify_jwt = false

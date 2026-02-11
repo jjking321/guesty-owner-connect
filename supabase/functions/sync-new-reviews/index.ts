@@ -674,28 +674,35 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      {
-        global: {
-          headers: { Authorization: req.headers.get('Authorization')! },
-        },
-      }
-    );
-
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    // Check for service-role bypass (for automated nightly sync)
+    const isServiceRole = req.headers.get('x-service-role') === 'true';
 
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
+
+    if (!isServiceRole) {
+      const supabaseClient = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        {
+          global: {
+            headers: { Authorization: req.headers.get('Authorization')! },
+          },
+        }
+      );
+
+      const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+      if (authError || !user) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    } else {
+      console.log('Using service-role authentication for automated review sync');
+    }
 
     const { guestyAccountId } = await req.json();
 
@@ -724,6 +731,29 @@ Deno.serve(async (req) => {
     }
 
     if (!latestReview) {
+      if (isServiceRole) {
+        // For automated runs, create a completed job so orchestrator can detect completion
+        console.log('No existing reviews found for this account, skipping incremental sync');
+        await supabaseAdmin
+          .from('sync_jobs')
+          .insert({
+            guesty_account_id: guestyAccountId,
+            sync_type: 'new_reviews',
+            status: 'completed',
+            items_synced: 0,
+            last_synced_offset: 0,
+            progress_message: 'Skipped — no existing reviews for incremental sync',
+            completed_at: new Date().toISOString(),
+          });
+        return new Response(
+          JSON.stringify({ 
+            started: false,
+            message: 'No existing reviews — skipping incremental sync',
+            skipped: true
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
       return new Response(
         JSON.stringify({ 
           error: 'No existing reviews found. Please run a full review sync from Settings first.',
