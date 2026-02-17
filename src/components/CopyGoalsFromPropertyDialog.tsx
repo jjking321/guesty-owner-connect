@@ -58,6 +58,7 @@ export function CopyGoalsFromPropertyDialog({
         .eq("is_composite", false)
         .eq("archived", false)
         .neq("id", targetListingId)
+        .limit(5000)
         .order("nickname");
       if (error) throw error;
       return data || [];
@@ -72,7 +73,8 @@ export function CopyGoalsFromPropertyDialog({
       const { data, error } = await supabase
         .from("property_goals")
         .select("listing_id, month, projection_revenue, locked")
-        .eq("year", year);
+        .eq("year", year)
+        .limit(50000);
       if (error) throw error;
       return data || [];
     },
