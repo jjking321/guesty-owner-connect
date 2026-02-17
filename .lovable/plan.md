@@ -1,63 +1,28 @@
 
 
-# Add Reviews to Nightly Sync + Fix Airbnb Scrape 401
+# Fix Copy Goals Property List Truncation
 
-## Problem 1: Reviews Not in Nightly Pipeline
-The nightly sync pipeline runs: Listings -> Reservations -> Owners -> Calendar, then Airbnb Ratings -> Probabilities -> Forecasts -> Actionables. Reviews are never synced automatically.
+## Problem
+The "Copy Goals from Another Property" dialog in Property Settings has two queries hitting the default 1000-row limit:
 
-## Problem 2: Airbnb Scrape Self-Invocation Fails with 401
-The `bulk-scrape-airbnb-ratings` function has `verify_jwt = true` in config.toml. When it self-invokes to process the next batch, it only passes `x-service-role: true` (no JWT token), so the self-invocation gets rejected with a 401. This means only 15 of 198 listings get scraped before it dies.
+1. **Listings query** (line 55): Fetches all non-composite, non-archived listings. With ~200+ properties this is close to the limit and may clip.
+2. **Goals query** (line 72): Fetches all property_goals for a year. With ~200+ properties x 12 months = ~2400+ rows, this is definitely truncated at 1000, causing many properties to appear as having "no goals" and not show up as source options.
 
----
+## Solution
 
-## Fix 1: Add Reviews Phase to Account Syncs
+In `src/components/CopyGoalsFromPropertyDialog.tsx`, add explicit `.limit()` calls to both queries:
 
-### Changes to `supabase/functions/nightly-sync/index.ts`:
+- **Listings query**: Add `.limit(5000)` to ensure all properties are returned.
+- **Goals query**: Add `.limit(50000)` to cover all properties x 12 months.
 
-**Update the phase order** (line 19):
-```
-'listings' -> 'reservations' -> 'owners' -> 'calendar' -> 'reviews' -> 'done'
-```
+This follows the same pattern already used elsewhere in the codebase (documented in project memory as the standard fix for this recurring issue).
 
-**Update `getNextPhase()`** to include `reviews` after `calendar`.
+## Technical Details
 
-**Update `getSyncType()`** to map `reviews` -> `'new_reviews'` (matching the sync_type used by sync-new-reviews).
+| File | Lines | Change |
+|------|-------|--------|
+| `src/components/CopyGoalsFromPropertyDialog.tsx` | 61 | Add `.limit(5000)` before `.order("nickname")` |
+| `src/components/CopyGoalsFromPropertyDialog.tsx` | 75 | Add `.limit(50000)` after `.eq("year", year)` |
 
-**Update `processAccountSyncs()`** to fire `sync-new-reviews` when entering the reviews phase, similar to how it fires other syncs. Since owners is treated as "assumed complete", reviews will follow calendar.
-
-### Changes to `supabase/functions/sync-new-reviews/index.ts`:
-
-**Add service-role authentication support** (like other sync functions have). When invoked with `x-service-role: true` header, skip user auth and use the service role client directly. The function already creates a `supabaseAdmin` client with service role key, so the main change is the auth gate at the top of `Deno.serve`.
-
-### Changes to `supabase/config.toml`:
-
-Set `verify_jwt = false` for `sync-new-reviews` so the nightly orchestrator can invoke it without a user JWT. Auth will be validated in code.
-
----
-
-## Fix 2: Fix Airbnb Scrape Self-Invocation Auth
-
-### Changes to `supabase/config.toml`:
-
-Set `verify_jwt = false` for `bulk-scrape-airbnb-ratings`. Auth is already validated in code (it checks for service-role header or user auth).
-
-### Changes to `supabase/functions/bulk-scrape-airbnb-ratings/index.ts`:
-
-Update the self-invocation to include the `Authorization` header with the service role key when running in service-role mode, so it passes JWT validation. Actually, since we're setting `verify_jwt = false`, the existing `x-service-role` header approach will work. No code changes needed here -- the config.toml change is sufficient.
-
----
-
-## Summary of Changes
-
-| File | Change |
-|------|--------|
-| `supabase/config.toml` | Set `verify_jwt = false` for `bulk-scrape-airbnb-ratings` and `sync-new-reviews` |
-| `supabase/functions/nightly-sync/index.ts` | Add `reviews` phase after `calendar` in account sync pipeline |
-| `supabase/functions/sync-new-reviews/index.ts` | Add service-role auth support for automated invocation |
-
-## Expected Result
-
-- Nightly sync will now automatically pull new reviews for each account after calendar sync completes
-- Airbnb scrape will successfully self-invoke through all 198 listings instead of stopping at 15
-- The orchestrator monitors review sync completion via `isSyncComplete()` checking for `new_reviews` sync_type (already used by the function)
+Two single-line additions. No other changes needed.
 
