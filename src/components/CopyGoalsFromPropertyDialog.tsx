@@ -66,19 +66,37 @@ export function CopyGoalsFromPropertyDialog({
     enabled: open,
   });
 
-  // Fetch goals for all listings for the selected year
+  // Derive listing IDs for batched fetching
+  const listingIds = useMemo(() => (listings || []).map(l => l.id), [listings]);
+
+  // Fetch goals in batches to avoid statement timeouts from RLS evaluation
   const { data: goalsData } = useQuery({
-    queryKey: ["copy-goals-all-data", year],
+    queryKey: ["copy-goals-all-data", year, listingIds],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("property_goals")
-        .select("listing_id, month, projection_revenue, locked")
-        .eq("year", year)
-        .limit(50000);
-      if (error) throw error;
-      return data || [];
+      const BATCH_SIZE = 60;
+      const chunks: string[][] = [];
+      for (let i = 0; i < listingIds.length; i += BATCH_SIZE) {
+        chunks.push(listingIds.slice(i, i + BATCH_SIZE));
+      }
+
+      const results = await Promise.all(
+        chunks.map((batchIds) =>
+          supabase
+            .from("property_goals")
+            .select("listing_id, month, projection_revenue, locked")
+            .eq("year", year)
+            .in("listing_id", batchIds)
+        )
+      );
+
+      const all: { listing_id: string; month: number; projection_revenue: number | null; locked: boolean }[] = [];
+      for (const res of results) {
+        if (res.error) throw res.error;
+        if (res.data) all.push(...res.data);
+      }
+      return all;
     },
-    enabled: open,
+    enabled: open && listingIds.length > 0,
   });
 
   // Calculate goals summary per listing
