@@ -1,77 +1,73 @@
 
 
-# Tax Reporting Module
+# Restructure Tax Report to Match Filing Format
 
-## Overview
-Build a new "Tax Report" page that lets you generate the Brevard Tourism Tax CSV from your reservation data. This involves storing tax permit numbers and platform tax-remittance settings per property, then computing the report by splitting revenue into "behalf platforms" vs "other" and breaking the combined tax field into county (5%) and state (7%) based on `total_paid`.
+## What's Changing
 
-## What You'll Get
-- A new `/tax-report` page accessible from the sidebar
-- A property tax settings section where you assign **permit numbers** and configure **which platforms remit taxes on your behalf** for each listing
-- A report generator that, for a selected month:
-  - Groups reservations by listing
-  - Splits revenue into two rows per property: "behalfPlatforms" and "other"
-  - Computes county tax (5% of `total_paid`) and state tax (7% of `total_paid`) from the combined `tax_amount`
-  - Breaks out tax-exempt reservations ($0 tax) into a separate section showing guest name and total accommodation
-- CSV export matching your existing Brevard Tourism Tax format
+The current report doesn't match your actual filing CSV. Here's what needs to be fixed:
 
-## Database Changes
+### 1. "Total Revenue" = Total Tax Collected (not accommodation revenue)
+The CSV column labeled "Total Revenue" actually contains the **tax amount collected**, not the property revenue. The current code shows `fare_accommodation_adjusted` in that column -- it needs to show the `tax_amount` instead.
 
-### New table: `listing_tax_settings`
-| Column | Type | Notes |
-|---|---|---|
-| id | uuid (PK) | auto-generated |
-| listing_id | text (unique) | references listings |
-| permit_number | text | e.g. "25-001764" |
-| property_address | text | formatted address for tax filing |
-| behalf_platforms | text[] | array of source values that remit taxes, e.g. `{"airbnb2"}` |
-| organization_id | uuid | for RLS scoping |
-| created_at / updated_at | timestamps | |
+### 2. Separate County and State Tabs
+Instead of one combined report with county/state columns, the filing requires **two separate reports** -- one for County (5%) and one for State (7%). Each produces its own CSV with the same format:
+- `Period, Permit Number, Property Address, Provider, Total Revenue, Allowable Deductions`
 
-RLS policies will mirror the existing listing-based org membership pattern.
+The "Total Revenue" in the County tab = `tax_amount * (5/12)`, and in the State tab = `tax_amount * (7/12)`.
+
+### 3. Every Property Gets Two Rows (Even if Empty)
+The CSV always shows two rows per property: one for `behalfPlatforms` and one for `other`. Even if there are no reservations, the rows appear with blank values. This means we need to iterate over **all listings with tax settings**, not just those with reservations.
+
+### 4. Provider Labels
+Use `behalfPlatforms` and `other` as the provider values (matching the CSV exactly), not "Behalf Platforms" and "Other".
+
+### 5. Period Column
+Add a "Period" column formatted as "January 2026" etc.
+
+### 6. Allowable Deductions Column
+Include this column (can be blank/0 for now).
+
+## Page Layout Changes
+
+The Report tab currently shows one table. It will be replaced with sub-tabs:
+
+- **County** -- County tax report (5/12 of tax_amount)
+- **State** -- State tax report (7/12 of tax_amount)
+
+Each sub-tab shows the same table format and has its own "Download CSV" button.
 
 ## Technical Details
 
-### Tax Calculation Logic
-The CSV `Total Revenue` column = `fare_accommodation_adjusted` (accommodation revenue for that provider category). The county/state split works like this:
-- For each reservation, the `tax_amount` field contains the combined tax
-- County share = `tax_amount * (5/12)` (5% out of 12% total)
-- State share = `tax_amount * (7/12)` (7% out of 12% total)
-- Tax-exempt reservations: where `tax_amount` is 0 or null, listed separately with guest name and `fare_accommodation_adjusted`
+### Files Modified
 
-### Platform Categorization
-Each reservation's `source` field is checked against the listing's `behalf_platforms` array:
-- If source matches -> revenue goes in the "behalfPlatforms" row
-- If source doesn't match -> revenue goes in the "other" row
+**`src/components/TaxReportGenerator.tsx`** -- Major rewrite:
+- Change `ReportRow` interface: remove `countyTax`, `stateTax`, `totalTax` columns; the single "Total Revenue" value will be the tax portion (county or state) for the active tab
+- Add a `taxType` prop or internal tab state to toggle between "county" and "state"
+- Generate rows for ALL listings that have tax settings (not just those with reservations), always producing both `behalfPlatforms` and `other` rows per listing
+- For county: `totalRevenue = sumTaxAmount * (5/12)`
+- For state: `totalRevenue = sumTaxAmount * (7/12)`
+- CSV columns: `Period, Permit Number, Property Address, Provider, Total Revenue, Allowable Deductions`
+- Sort by permit number (matching CSV order)
 
-### Page Layout
-1. **Settings tab**: Table of all listings with editable permit number, address override, and multi-select for behalf platforms (populated from the distinct sources in your reservations)
-2. **Report tab**: Month/year picker, preview table matching the CSV format, and "Download CSV" button
-3. **Exempt tab**: Table of $0-tax reservations for the selected period showing property, guest name, accommodation amount, platform
+**`src/pages/TaxReport.tsx`** -- Update tabs:
+- Replace the single "Report" tab with "County" and "State" tabs
+- Each renders `TaxReportGenerator` with a `taxType` prop ("county" or "state")
+- Keep "Tax Exempt" and "Settings" tabs as-is
 
-### New Files
-- `src/pages/TaxReport.tsx` - main page with tabs
-- `src/components/TaxSettingsTable.tsx` - permit number and platform config per listing
-- `src/components/TaxReportGenerator.tsx` - report preview and CSV export
-- `src/components/TaxExemptTable.tsx` - exempt reservation listing
-- Route added to `App.tsx` at `/tax-report`
-- Sidebar entry added to `AppSidebar.tsx`
-
-### Migration SQL
-```sql
-CREATE TABLE listing_tax_settings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  listing_id text UNIQUE NOT NULL,
-  permit_number text,
-  property_address text,
-  behalf_platforms text[] DEFAULT '{}',
-  organization_id uuid NOT NULL,
-  created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE listing_tax_settings ENABLE ROW LEVEL SECURITY;
-
--- Standard org-member policies for SELECT, INSERT, UPDATE, DELETE
+### Row Generation Logic
+```
+for each listing with tax_settings:
+  - behalfPlatforms row: sum tax_amount where source is in behalf_platforms
+  - other row: sum tax_amount where source is NOT in behalf_platforms
+  - apply county (5/12) or state (7/12) multiplier to get "Total Revenue"
+  - if no reservations exist, leave Total Revenue blank (not 0)
 ```
 
+### CSV Export Format
+```
+Period,Permit Number,Property Address,Provider,Total Revenue,Allowable Deductions
+January 2026,25-001764,241 S BREVARD AVE COCOA BEACH FL 32931,behalfPlatforms,8598.88,
+January 2026,25-001764,241 S BREVARD AVE COCOA BEACH FL 32931,other,0,
+```
+
+The filename will include the tax type: `Brevard_County_Tax_2026-01.csv` or `Brevard_State_Tax_2026-01.csv`.
