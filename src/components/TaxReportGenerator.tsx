@@ -36,6 +36,20 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   const startDate = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
   const endDate = new Date(selectedYear, selectedMonth, 0).toISOString().split("T")[0];
 
+  const { data: listings } = useQuery({
+    queryKey: ["tax-report-listings", organizationId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("listings")
+        .select("id, nickname, address")
+        .eq("archived", false)
+        .order("nickname");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!organizationId,
+  });
+
   const { data: taxSettings } = useQuery({
     queryKey: ["listing-tax-settings", organizationId],
     queryFn: async () => {
@@ -76,8 +90,14 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     enabled: !!organizationId,
   });
 
+  const getDefaultAddress = (listing: any): string => {
+    if (!listing.address) return "";
+    const addr = listing.address as any;
+    return [addr.street, addr.city, addr.state, addr.zipcode].filter(Boolean).join(", ");
+  };
+
   const generateReport = (): ReportRow[] => {
-    if (!taxSettings) return [];
+    if (!listings) return [];
 
     const rows: ReportRow[] = [];
 
@@ -90,22 +110,27 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       }
     }
 
-    // Sort settings by permit number
-    const sortedSettings = [...taxSettings].sort((a, b) =>
-      (a.permit_number || "").localeCompare(b.permit_number || "")
-    );
+    // Build a map of tax settings by listing_id
+    const settingsMap = new Map(taxSettings?.map((s) => [s.listing_id, s]) || []);
+
+    // Sort listings by permit number (from settings), then nickname
+    const sortedListings = [...listings].sort((a, b) => {
+      const permitA = settingsMap.get(a.id)?.permit_number || "";
+      const permitB = settingsMap.get(b.id)?.permit_number || "";
+      if (permitA !== permitB) return permitA.localeCompare(permitB);
+      return (a.nickname || "").localeCompare(b.nickname || "");
+    });
 
     const globalBehalfPlatforms = orgTaxSettings?.behalf_platforms || [];
 
-    for (const settings of sortedSettings) {
-      const listingId = settings.listing_id;
-      const behalfPlatforms = globalBehalfPlatforms;
-      const permitNumber = settings.permit_number || "";
-      const propertyAddress = settings.property_address || "";
-      const listingReservations = resByListing.get(listingId) || [];
+    for (const listing of sortedListings) {
+      const settings = settingsMap.get(listing.id);
+      const permitNumber = settings?.permit_number || "";
+      const propertyAddress = settings?.property_address || getDefaultAddress(listing);
+      const listingReservations = resByListing.get(listing.id) || [];
 
-      const behalf = listingReservations.filter((r) => behalfPlatforms.includes(r.source || ""));
-      const other = listingReservations.filter((r) => !behalfPlatforms.includes(r.source || ""));
+      const behalf = listingReservations.filter((r) => globalBehalfPlatforms.includes(r.source || ""));
+      const other = listingReservations.filter((r) => !globalBehalfPlatforms.includes(r.source || ""));
 
       const sumTax = (group: typeof listingReservations) => {
         let total = 0;
@@ -211,7 +236,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         </div>
       ) : reportRows.length === 0 ? (
         <p className="text-sm text-muted-foreground py-8 text-center">
-          No properties with tax settings found. Configure tax settings first.
+          No listings found for the selected period.
         </p>
       ) : (
         <div className="rounded-md border">
