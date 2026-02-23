@@ -1,73 +1,88 @@
 
 
-# Restructure Tax Report to Match Filing Format
+# Move "Platforms That Remit Taxes" to Organization Level
 
 ## What's Changing
 
-The current report doesn't match your actual filing CSV. Here's what needs to be fixed:
+Currently, the `behalf_platforms` setting (which platforms remit taxes on your behalf) is configured per property in the settings table. You want this to be a single global setting for the entire organization -- the same platforms apply to all properties.
 
-### 1. "Total Revenue" = Total Tax Collected (not accommodation revenue)
-The CSV column labeled "Total Revenue" actually contains the **tax amount collected**, not the property revenue. The current code shows `fare_accommodation_adjusted` in that column -- it needs to show the `tax_amount` instead.
+## Changes
 
-### 2. Separate County and State Tabs
-Instead of one combined report with county/state columns, the filing requires **two separate reports** -- one for County (5%) and one for State (7%). Each produces its own CSV with the same format:
-- `Period, Permit Number, Property Address, Provider, Total Revenue, Allowable Deductions`
+### 1. Database: New `organization_tax_settings` table
 
-The "Total Revenue" in the County tab = `tax_amount * (5/12)`, and in the State tab = `tax_amount * (7/12)`.
+Create a simple org-level table to store the global behalf platforms:
 
-### 3. Every Property Gets Two Rows (Even if Empty)
-The CSV always shows two rows per property: one for `behalfPlatforms` and one for `other`. Even if there are no reservations, the rows appear with blank values. This means we need to iterate over **all listings with tax settings**, not just those with reservations.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid (PK) | auto-generated |
+| organization_id | uuid (unique) | one row per org |
+| behalf_platforms | text[] | e.g. `{"airbnb2"}` |
+| created_at / updated_at | timestamps | |
 
-### 4. Provider Labels
-Use `behalfPlatforms` and `other` as the provider values (matching the CSV exactly), not "Behalf Platforms" and "Other".
+RLS policies scoped to org members (same pattern as other org tables). The `behalf_platforms` column will be removed from `listing_tax_settings` (but left in the DB for now to avoid data loss -- just ignored in code).
 
-### 5. Period Column
-Add a "Period" column formatted as "January 2026" etc.
+### 2. Settings page update (`TaxSettingsTable.tsx`)
 
-### 6. Allowable Deductions Column
-Include this column (can be blank/0 for now).
+- Remove the per-row platform checkboxes column from the property table
+- Add a separate section **above** the property table with a card titled "Platforms that remit taxes on your behalf"
+- Shows checkboxes for all distinct reservation sources, saved to `organization_tax_settings`
+- The property table keeps only: Property, Permit Number, Tax Address, Save button
 
-## Page Layout Changes
+### 3. Report generator update (`TaxReportGenerator.tsx`)
 
-The Report tab currently shows one table. It will be replaced with sub-tabs:
+- Instead of reading `behalf_platforms` from each `listing_tax_settings` row, read the single `organization_tax_settings` row for the org
+- Use that global list to split reservations into "behalfPlatforms" vs "other" for all properties
 
-- **County** -- County tax report (5/12 of tax_amount)
-- **State** -- State tax report (7/12 of tax_amount)
+### 4. Tax exempt table update (`TaxExemptTable.tsx`)
 
-Each sub-tab shows the same table format and has its own "Download CSV" button.
+- If it references `behalf_platforms` from listing settings, update to use the org-level setting instead
 
 ## Technical Details
 
+### Migration SQL
+
+```sql
+CREATE TABLE organization_tax_settings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid UNIQUE NOT NULL,
+  behalf_platforms text[] DEFAULT '{}',
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE organization_tax_settings ENABLE ROW LEVEL SECURITY;
+
+-- RLS: org members can view
+CREATE POLICY "Org members can view tax settings"
+  ON organization_tax_settings FOR SELECT
+  USING (is_organization_member(organization_id, auth.uid()));
+
+-- RLS: admins can insert/update
+CREATE POLICY "Admins can insert tax settings"
+  ON organization_tax_settings FOR INSERT
+  WITH CHECK (
+    has_organization_role(organization_id, auth.uid(), 'super_admin'::member_role)
+    OR has_organization_role(organization_id, auth.uid(), 'admin'::member_role)
+  );
+
+CREATE POLICY "Admins can update tax settings"
+  ON organization_tax_settings FOR UPDATE
+  USING (
+    has_organization_role(organization_id, auth.uid(), 'super_admin'::member_role)
+    OR has_organization_role(organization_id, auth.uid(), 'admin'::member_role)
+  );
+
+-- Seed from existing data (pick the most common behalf_platforms across listings)
+INSERT INTO organization_tax_settings (organization_id, behalf_platforms)
+SELECT DISTINCT organization_id, behalf_platforms
+FROM listing_tax_settings
+WHERE behalf_platforms != '{}'
+ON CONFLICT (organization_id) DO NOTHING;
+```
+
 ### Files Modified
 
-**`src/components/TaxReportGenerator.tsx`** -- Major rewrite:
-- Change `ReportRow` interface: remove `countyTax`, `stateTax`, `totalTax` columns; the single "Total Revenue" value will be the tax portion (county or state) for the active tab
-- Add a `taxType` prop or internal tab state to toggle between "county" and "state"
-- Generate rows for ALL listings that have tax settings (not just those with reservations), always producing both `behalfPlatforms` and `other` rows per listing
-- For county: `totalRevenue = sumTaxAmount * (5/12)`
-- For state: `totalRevenue = sumTaxAmount * (7/12)`
-- CSV columns: `Period, Permit Number, Property Address, Provider, Total Revenue, Allowable Deductions`
-- Sort by permit number (matching CSV order)
+- **`src/components/TaxSettingsTable.tsx`** -- Remove platform checkboxes from per-property rows; add global platform selector card above the table; save to `organization_tax_settings`
+- **`src/components/TaxReportGenerator.tsx`** -- Fetch `organization_tax_settings` instead of using per-listing `behalf_platforms`; use that single list for all properties
+- **`src/components/TaxExemptTable.tsx`** -- Same change if it references behalf_platforms
 
-**`src/pages/TaxReport.tsx`** -- Update tabs:
-- Replace the single "Report" tab with "County" and "State" tabs
-- Each renders `TaxReportGenerator` with a `taxType` prop ("county" or "state")
-- Keep "Tax Exempt" and "Settings" tabs as-is
-
-### Row Generation Logic
-```
-for each listing with tax_settings:
-  - behalfPlatforms row: sum tax_amount where source is in behalf_platforms
-  - other row: sum tax_amount where source is NOT in behalf_platforms
-  - apply county (5/12) or state (7/12) multiplier to get "Total Revenue"
-  - if no reservations exist, leave Total Revenue blank (not 0)
-```
-
-### CSV Export Format
-```
-Period,Permit Number,Property Address,Provider,Total Revenue,Allowable Deductions
-January 2026,25-001764,241 S BREVARD AVE COCOA BEACH FL 32931,behalfPlatforms,8598.88,
-January 2026,25-001764,241 S BREVARD AVE COCOA BEACH FL 32931,other,0,
-```
-
-The filename will include the tax type: `Brevard_County_Tax_2026-01.csv` or `Brevard_State_Tax_2026-01.csv`.
