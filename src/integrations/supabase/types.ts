@@ -941,6 +941,30 @@ export type Database = {
           },
         ]
       }
+      organization_tax_settings: {
+        Row: {
+          behalf_platforms: string[] | null
+          created_at: string | null
+          id: string
+          organization_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          behalf_platforms?: string[] | null
+          created_at?: string | null
+          id?: string
+          organization_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          behalf_platforms?: string[] | null
+          created_at?: string | null
+          id?: string
+          organization_id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       organizations: {
         Row: {
           created_at: string
