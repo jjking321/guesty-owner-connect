@@ -1,23 +1,34 @@
 
 
-# Fix Copy Goals Dialog - Statement Timeout
+# Add Tax Amount Tracking to Reservations
 
-## Problem
-The "Copy Goals from Another Property" dialog isn't loading all properties. The database logs show **statement timeouts** -- the query fetching all 5,500+ property goals with `.limit(50000)` is too slow because the RLS policy requires evaluating a join through `listings` and `guesty_accounts` for every row. The query times out before returning results, so most properties appear to have no goals and are hidden from the source list.
+## Overview
+Add a `tax_amount` column to the `reservations` table and update all three reservation sync functions to fetch and store `money.totalTaxes` from the Guesty API. This will be stored for reference only and will **not** affect any existing revenue calculations, forecasts, or night allocations.
 
-## Solution
-Replace the single large goals query with the **batched fetching pattern** already used on the Goals Review and Bulk Edit pages. This fetches the listings first, then queries goals in small batches of 60 listing IDs using `.in("listing_id", batchIds)`, keeping each individual query fast and within the default row limit.
+## Changes
 
-## Technical Details
+### 1. Database Migration
+Add a nullable `tax_amount` numeric column to the `reservations` table:
+```sql
+ALTER TABLE reservations ADD COLUMN tax_amount numeric;
+```
 
-**File:** `src/components/CopyGoalsFromPropertyDialog.tsx`
+### 2. Edge Function Updates (3 files)
 
-1. Make the goals query depend on the listings query results (use `listingIds` derived from the fetched listings).
-2. Replace the single `property_goals` query with batched fetching:
-   - Split listing IDs into chunks of 60
-   - Run parallel queries: `.from("property_goals").select(...).eq("year", year).in("listing_id", batchIds)`
-   - Merge all results
-3. Remove the `.limit(50000)` since batching keeps each query under the default 1000-row limit (60 listings x 12 months = 720 rows max per batch).
+All three Guesty sync functions need identical changes:
 
-This mirrors the exact pattern from `GoalsReview.tsx` (lines 46-78) and `PropertiesBulkEdit.tsx` (lines 165-195).
+**Files:**
+- `supabase/functions/sync-guesty-data/index.ts`
+- `supabase/functions/sync-new-reservations/index.ts`
+- `supabase/functions/sync-listing-reservations/index.ts`
+
+**In each file:**
+1. Add `totalTaxes?: number` to the `GuestyReservation.money` interface
+2. Add `money.totalTaxes` to the `fields` parameter in the API request
+3. Map `reservation.money?.totalTaxes` to `tax_amount` in the upsert object
+
+### What stays the same
+- `fare_accommodation_adjusted` remains the basis for revenue calculations, night allocations, forecasts, and goals
+- The `reservation_nights` trigger and `get_distributed_revenue` function are untouched
+- No UI changes in this phase (tax data will simply be stored for future use)
 
