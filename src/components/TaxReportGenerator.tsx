@@ -46,6 +46,21 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     enabled: !!organizationId,
   });
 
+  // Fetch org-level behalf platforms
+  const { data: orgTaxSettings } = useQuery({
+    queryKey: ["organization-tax-settings", organizationId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("organization_tax_settings")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!organizationId,
+  });
+
   const { data: reservations, isLoading } = useQuery({
     queryKey: ["tax-reservations", startDate, endDate],
     queryFn: async () => {
@@ -80,9 +95,11 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       (a.permit_number || "").localeCompare(b.permit_number || "")
     );
 
+    const globalBehalfPlatforms = orgTaxSettings?.behalf_platforms || [];
+
     for (const settings of sortedSettings) {
       const listingId = settings.listing_id;
-      const behalfPlatforms = settings.behalf_platforms || [];
+      const behalfPlatforms = globalBehalfPlatforms;
       const permitNumber = settings.permit_number || "";
       const propertyAddress = settings.property_address || "";
       const listingReservations = resByListing.get(listingId) || [];
