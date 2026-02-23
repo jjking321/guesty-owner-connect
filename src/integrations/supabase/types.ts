@@ -1539,6 +1539,7 @@ export type Database = {
           owner_revenue: number | null
           source: string | null
           status: string | null
+          tax_amount: number | null
           total_paid: number | null
           updated_at: string
         }
@@ -1560,6 +1561,7 @@ export type Database = {
           owner_revenue?: number | null
           source?: string | null
           status?: string | null
+          tax_amount?: number | null
           total_paid?: number | null
           updated_at?: string
         }
@@ -1581,6 +1583,7 @@ export type Database = {
           owner_revenue?: number | null
           source?: string | null
           status?: string | null
+          tax_amount?: number | null
           total_paid?: number | null
           updated_at?: string
         }
