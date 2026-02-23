@@ -673,6 +673,39 @@ export type Database = {
           },
         ]
       }
+      listing_tax_settings: {
+        Row: {
+          behalf_platforms: string[] | null
+          created_at: string | null
+          id: string
+          listing_id: string
+          organization_id: string
+          permit_number: string | null
+          property_address: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          behalf_platforms?: string[] | null
+          created_at?: string | null
+          id?: string
+          listing_id: string
+          organization_id: string
+          permit_number?: string | null
+          property_address?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          behalf_platforms?: string[] | null
+          created_at?: string | null
+          id?: string
+          listing_id?: string
+          organization_id?: string
+          permit_number?: string | null
+          property_address?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       listings: {
         Row: {
           accommodates: number | null

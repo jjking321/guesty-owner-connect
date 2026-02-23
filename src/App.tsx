@@ -20,6 +20,7 @@ import Reviews from "./pages/Reviews";
 import Comparables from "./pages/Comparables";
 import GoalsReview from "./pages/GoalsReview";
 import Actionables from "./pages/Actionables";
+import TaxReport from "./pages/TaxReport";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +54,7 @@ const App = () => (
           <Route path="/owners" element={<Owners />} />
           <Route path="/owners/:id" element={<OwnerDetail />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/tax-report" element={<TaxReport />} />
           <Route path="/forecast-admin" element={<ForecastAdmin />} />
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

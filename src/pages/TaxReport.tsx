@@ -1,0 +1,40 @@
+import { DashboardLayout } from "@/components/DashboardLayout";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TaxSettingsTable } from "@/components/TaxSettingsTable";
+import { TaxReportGenerator } from "@/components/TaxReportGenerator";
+import { TaxExemptTable } from "@/components/TaxExemptTable";
+
+export default function TaxReport() {
+  return (
+    <DashboardLayout>
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Tax Report</h1>
+          <p className="text-muted-foreground">
+            Generate tourism tax reports and CSV exports for filing.
+          </p>
+        </div>
+
+        <Tabs defaultValue="report" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="report">Report</TabsTrigger>
+            <TabsTrigger value="exempt">Tax Exempt</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="report">
+            <TaxReportGenerator />
+          </TabsContent>
+
+          <TabsContent value="exempt">
+            <TaxExemptTable />
+          </TabsContent>
+
+          <TabsContent value="settings">
+            <TaxSettingsTable />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </DashboardLayout>
+  );
+}
