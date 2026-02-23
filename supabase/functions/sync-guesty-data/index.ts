@@ -420,13 +420,24 @@ async function fetchAndSaveReservationsBatch(
           
           console.log(`Deduplication: ${reservationsToUpsert.length} -> ${uniqueReservations.length} unique reservations`);
 
-          const { error: reservationsError } = await supabase
-            .from('reservations')
-            .upsert(uniqueReservations, { onConflict: 'id' });
+          // Sub-batch upserts in chunks of 200 to prevent statement timeouts
+          // (each upsert triggers sync_reservation_nights_for_reservation)
+          const SUB_BATCH_SIZE = 200;
+          for (let i = 0; i < uniqueReservations.length; i += SUB_BATCH_SIZE) {
+            const subBatch = uniqueReservations.slice(i, i + SUB_BATCH_SIZE);
+            const { error: reservationsError } = await supabase
+              .from('reservations')
+              .upsert(subBatch, { onConflict: 'id' });
 
-          if (reservationsError) {
-            console.error('Error saving reservations batch:', reservationsError);
-            throw reservationsError;
+            if (reservationsError) {
+              console.error(`Error saving reservations sub-batch at index ${i}:`, reservationsError);
+              throw reservationsError;
+            }
+            
+            // Small delay between sub-batches to avoid overwhelming the database
+            if (i + SUB_BATCH_SIZE < uniqueReservations.length) {
+              await sleep(100);
+            }
           }
 
           totalSaved += uniqueReservations.length;
