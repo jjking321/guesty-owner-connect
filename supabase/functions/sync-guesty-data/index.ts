@@ -67,8 +67,8 @@ const LOCK_POLL_INTERVAL_MS = 1000;
 const LOCK_MAX_POLLS = 6;
 
 // Self-invocation constants for handling large datasets
-const RESERVATION_BATCH_LIMIT = 3000; // Process this many records before self-invoking
-const FUNCTION_TIMEOUT_BUFFER = 50000; // 50 seconds - leave 10s buffer before edge function timeout
+const RESERVATION_BATCH_LIMIT = 2000; // Process this many records before self-invoking
+const FUNCTION_TIMEOUT_BUFFER = 40000; // 40 seconds - leave 20s buffer before edge function timeout
 
 function parseRetryAfter(header: string | null): number {
   if (!header) return 0;
@@ -354,7 +354,7 @@ async function fetchAndSaveReservationsBatch(
 ): Promise<{ totalFetched: number; totalSaved: number; needsContinuation: boolean; nextOffset: number; cancelled: boolean }> {
   let skip = startOffset;
   const limit = 100;
-  const batchSize = 1000; // Save every 1000 records
+  const batchSize = 500; // Save every 500 records to avoid long blocking writes
   let totalFetched = 0;
   let totalSaved = 0;
   let batch: GuestyReservation[] = [];
@@ -420,9 +420,9 @@ async function fetchAndSaveReservationsBatch(
           
           console.log(`Deduplication: ${reservationsToUpsert.length} -> ${uniqueReservations.length} unique reservations`);
 
-          // Sub-batch upserts in chunks of 200 to prevent statement timeouts
+          // Sub-batch upserts in chunks of 100 to prevent statement timeouts
           // (each upsert triggers sync_reservation_nights_for_reservation)
-          const SUB_BATCH_SIZE = 200;
+          const SUB_BATCH_SIZE = 100;
           for (let i = 0; i < uniqueReservations.length; i += SUB_BATCH_SIZE) {
             const subBatch = uniqueReservations.slice(i, i + SUB_BATCH_SIZE);
             const { error: reservationsError } = await supabase
@@ -526,10 +526,12 @@ async function fetchAndSaveReservationsBatch(
             host_payout: reservation.money?.hostPayout,
             total_paid: reservation.money?.totalPaid,
             owner_revenue: reservation.money?.ownerRevenue,
+            tax_amount: reservation.money?.totalTaxes,
             source: reservation.source,
             confirmation_code: reservation.confirmationCode,
             created_at_guesty: reservation.createdAt,
             last_updated_at_guesty: reservation.lastUpdatedAt,
+            guest_name: reservation.guest?.fullName || null,
             updated_at: new Date().toISOString(),
           }));
 
@@ -537,9 +539,17 @@ async function fetchAndSaveReservationsBatch(
             new Map(reservationsToUpsert.map(item => [item.id, item])).values()
           );
 
-          await supabase
-            .from('reservations')
-            .upsert(uniqueReservations, { onConflict: 'id' });
+          const SUB_BATCH_SIZE = 100;
+          for (let i = 0; i < uniqueReservations.length; i += SUB_BATCH_SIZE) {
+            const subBatch = uniqueReservations.slice(i, i + SUB_BATCH_SIZE);
+            const { error: partialUpsertError } = await supabase
+              .from('reservations')
+              .upsert(subBatch, { onConflict: 'id' });
+
+            if (partialUpsertError) {
+              throw partialUpsertError;
+            }
+          }
 
           totalSaved += uniqueReservations.length;
           console.log(`Saved partial batch. Total saved before failure: ${totalSaved}`);
@@ -586,10 +596,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Extract auth token for self-invocation
-    const authHeader = req.headers.get('Authorization');
-    const authToken = authHeader?.replace('Bearer ', '') || '';
-    
     const { accountId, syncType, startDate, resumeJobId } = await req.json();
 
     if (!accountId) {
@@ -836,7 +842,6 @@ Deno.serve(async (req) => {
 
           // Self-invoke to continue processing
           const { error: invokeError } = await supabase.functions.invoke('sync-guesty-data', {
-            headers: { Authorization: `Bearer ${authToken}` },
             body: { accountId, syncType: 'reservations', startDate: defaultStartDate, resumeJobId: jobId },
           });
 
