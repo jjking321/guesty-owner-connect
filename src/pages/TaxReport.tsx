@@ -15,15 +15,20 @@ export default function TaxReport() {
           </p>
         </div>
 
-        <Tabs defaultValue="report" className="space-y-4">
+        <Tabs defaultValue="county" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="report">Report</TabsTrigger>
+            <TabsTrigger value="county">County</TabsTrigger>
+            <TabsTrigger value="state">State</TabsTrigger>
             <TabsTrigger value="exempt">Tax Exempt</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="report">
-            <TaxReportGenerator />
+          <TabsContent value="county">
+            <TaxReportGenerator taxType="county" />
+          </TabsContent>
+
+          <TabsContent value="state">
+            <TaxReportGenerator taxType="state" />
           </TabsContent>
 
           <TabsContent value="exempt">
