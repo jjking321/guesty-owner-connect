@@ -1,33 +1,21 @@
 
 
-# Add/Remove Units from Tax Report
+# One-Time Import: Permit Numbers and Addresses from CSV
 
-## Overview
-Add a toggle on each listing in the Tax Settings tab to include or exclude it from the tax report. This gives you control over which properties appear in the County/State reports and CSV exports.
+## What This Does
+Imports the permit numbers and property addresses from the Brevard Tourism Tax CSV into the `listing_tax_settings` table, matching each CSV row to a listing by nickname.
 
-## How It Works
-- A new checkbox column ("Include") appears in the Tax Settings table next to each property
-- All listings default to included
-- Unchecking a listing removes it from the County and State report tabs and CSV downloads
-- The setting persists via the database
+## Matching Results
+- **~180+ listings matched** by exact nickname
+- Nicknames with multiple CSV rows (e.g. "400 S Atlantic Full" has 8 permits, "505 Fillmore #15" has 15) will use the **first** permit number from the CSV
+- 2 CSV rows with empty nicknames will be skipped
+- A few CSV nicknames (like "214 Lucerne") that don't match any listing will be skipped
 
-## Technical Details
+## Technical Steps
+1. Run a series of SQL `INSERT ... ON CONFLICT` statements against `listing_tax_settings`
+2. Each statement maps a listing_id (looked up by nickname) to the CSV's permit_number and property_address
+3. Existing rows will be updated; new rows will be created
+4. Done in ~8 batches of ~25 rows each
 
-### 1. Database Migration
-Add a boolean column `excluded_from_tax` (default `false`) to the `listing_tax_settings` table. This avoids requiring a settings row for every listing just to be included -- only excluded listings need a row with the flag set.
-
-### 2. TaxSettingsTable.tsx
-- Add a "Include" checkbox column to the per-property table
-- When toggled off, upsert `listing_tax_settings` with `excluded_from_tax = true`
-- When toggled on, set `excluded_from_tax = false`
-- Save happens immediately on toggle (no need to click Save separately for this field)
-
-### 3. TaxReportGenerator.tsx
-- After fetching listings and tax settings, filter out any listing where `listing_tax_settings.excluded_from_tax = true`
-- This affects both the table display and CSV export
-
-### Files Modified
-- `listing_tax_settings` table (migration)
-- `src/components/TaxSettingsTable.tsx`
-- `src/components/TaxReportGenerator.tsx`
+No code changes needed -- this is purely a one-time database operation.
 
