@@ -183,7 +183,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "behalfPlatforms",
         totalPayout: behalfPayout,
         taxAmount: behalfTax,
-        allowableDeductions: exemptTotal,
+        allowableDeductions: null,
       });
 
       rows.push({
@@ -193,7 +193,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: otherPayout,
         taxAmount: otherTax,
-        allowableDeductions: null,
+        allowableDeductions: exemptTotal,
       });
     }
 
