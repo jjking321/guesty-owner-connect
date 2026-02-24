@@ -12,8 +12,8 @@ const LOCK_STALE_MS = 90000;
 const LOCK_POLL_INTERVAL_MS = 1000;
 const LOCK_MAX_POLLS = 6;
 
-const BATCH_SIZE = 10; // Guesty API calls per batch
-const BATCH_DELAY_MS = 500; // Delay between batches
+const BATCH_SIZE = 5; // Reduced from 10 to respect minute rate limits
+const BATCH_DELAY_MS = 1000; // Increased delay between batches
 const RECORDS_PER_INVOCATION = 500;
 const FUNCTION_TIMEOUT_BUFFER = 40000; // 40s, leave 20s buffer
 
@@ -155,13 +155,19 @@ async function fetchReservationTax(apiToken: string, reservationId: string): Pro
     if (response.status === 429) {
       if (attempt < 3) {
         const retryAfter = response.headers.get('Retry-After');
-        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 5000;
-        if (waitTime > 45000) throw new Error('Rate limit too long');
-        console.log(`Rate limited, waiting ${waitTime}ms...`);
+        const retryAfterMs = retryAfter ? parseInt(retryAfter) * 1000 : 0;
+        const backoffMs = Math.min(2000 * Math.pow(2, attempt), 30000);
+        const waitTime = Math.max(backoffMs, retryAfterMs);
+        if (waitTime > MAX_WAIT_TIME) {
+          console.log(`Rate limit wait ${waitTime}ms exceeds max, skipping reservation`);
+          return null; // Skip instead of throwing
+        }
+        console.log(`Rate limited, waiting ${waitTime}ms (attempt ${attempt + 1}/4)...`);
         await sleep(waitTime);
         continue;
       }
-      throw new Error('Rate limit exceeded');
+      console.log('Rate limit exceeded after retries, skipping reservation');
+      return null; // Skip instead of throwing
     }
 
     if (response.status === 404 || response.status === 410) {
@@ -315,10 +321,13 @@ Deno.serve(async (req) => {
         });
       }
 
-      const batch = missingTaxReservations.slice(i, i + BATCH_SIZE);
+    const batch = missingTaxReservations.slice(i, i + BATCH_SIZE);
 
-      // Fetch tax amounts for this batch
-      for (const reservation of batch) {
+      // Fetch tax amounts for this batch - with delay between each call
+      for (let j = 0; j < batch.length; j++) {
+        const reservation = batch[j];
+        // Add 200ms delay between individual requests to stay under per-minute limits
+        if (j > 0) await sleep(200);
         try {
           const taxAmount = await fetchReservationTax(apiToken, reservation.id);
 
