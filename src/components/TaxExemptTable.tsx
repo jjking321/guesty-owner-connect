@@ -39,6 +39,7 @@ export function TaxExemptTable() {
         .gte("check_out", startDate)
         .lte("check_out", endDate + "T23:59:59")
         .in("status", ["confirmed", "checked_in", "checked_out"])
+        .eq("source", "manual")
         .or("tax_amount.is.null,tax_amount.eq.0");
       if (error) throw error;
       return data;
