@@ -359,10 +359,16 @@ Deno.serve(async (req) => {
         processed++;
       }
 
-      // Update progress
+      // Update progress - read current items_synced first, then increment
+      const { data: currentProgress } = await supabaseAdmin
+        .from('sync_jobs')
+        .select('items_synced')
+        .eq('id', jobId)
+        .single();
+      const newItemsSynced = (currentProgress?.items_synced || 0) + batch.length;
       await supabaseAdmin.from('sync_jobs').update({
-        items_synced: (await supabaseAdmin.from('sync_jobs').select('items_synced').eq('id', jobId).single()).data?.items_synced + batch.length,
-        progress_message: `Updated ${updated} reservations (${errors} errors)...`,
+        items_synced: newItemsSynced,
+        progress_message: `Updated ${newItemsSynced} reservations (${errors} errors)...`,
       }).eq('id', jobId);
 
       // Delay between batches
