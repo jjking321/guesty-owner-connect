@@ -3,6 +3,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TaxSettingsTable } from "@/components/TaxSettingsTable";
 import { TaxReportGenerator } from "@/components/TaxReportGenerator";
 import { TaxExemptTable } from "@/components/TaxExemptTable";
+import { TaxTemplateFill } from "@/components/TaxTemplateFill";
 
 export default function TaxReport() {
   return (
@@ -21,6 +22,7 @@ export default function TaxReport() {
             <TabsTrigger value="state">State</TabsTrigger>
             <TabsTrigger value="exempt">Tax Exempt</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="template">Template Fill</TabsTrigger>
           </TabsList>
 
           <TabsContent value="county">
@@ -37,6 +39,10 @@ export default function TaxReport() {
 
           <TabsContent value="settings">
             <TaxSettingsTable />
+          </TabsContent>
+
+          <TabsContent value="template">
+            <TaxTemplateFill />
           </TabsContent>
         </Tabs>
       </div>
