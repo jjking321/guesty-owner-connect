@@ -228,8 +228,8 @@ export function TaxTemplateFill() {
       "Permit Number": r.permitNumber,
       "Property Address": r.propertyAddress,
       "Provider": r.provider,
-      "Total Revenue": r.totalRevenue !== null ? Math.round(r.totalRevenue * 100) / 100 : "",
-      "Allowable Deductions": r.allowableDeductions !== null ? Math.round(r.allowableDeductions * 100) / 100 : "",
+      "Total Revenue": r.totalRevenue !== null ? Math.round(r.totalRevenue * 100) / 100 : 0,
+      "Allowable Deductions": r.allowableDeductions !== null ? Math.round(r.allowableDeductions * 100) / 100 : 0,
     }));
     const ws = XLSX.utils.json_to_sheet(wsData);
 
@@ -244,7 +244,7 @@ export function TaxTemplateFill() {
   };
 
   const fmt = (n: number | null) =>
-    n !== null ? n.toLocaleString("en-US", { style: "currency", currency: "USD" }) : "";
+    (n !== null ? n : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
   const isReady = filledRows && !resLoading;
 
