@@ -14,7 +14,8 @@ interface ReportRow {
   permitNumber: string;
   propertyAddress: string;
   provider: string;
-  totalRevenue: number | null; // null = no reservations
+  totalPayout: number | null;
+  taxAmount: number | null;
   allowableDeductions: string;
 }
 
@@ -26,11 +27,12 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   const { organizationId } = useUserRole();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear().toString());
-  const [month, setMonth] = useState((now.getMonth()).toString()); // previous month default
+  const [month, setMonth] = useState((now.getMonth()).toString());
 
   const selectedYear = parseInt(year);
   const selectedMonth = parseInt(month);
   const multiplier = taxType === "county" ? 5 / 12 : 7 / 12;
+  const taxColumnLabel = taxType === "county" ? "County Tax" : "State Tax";
 
   const periodLabel = format(new Date(selectedYear, selectedMonth - 1, 1), "MMMM yyyy");
   const startDate = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
@@ -60,7 +62,6 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     enabled: !!organizationId,
   });
 
-  // Fetch org-level behalf platforms
   const { data: orgTaxSettings } = useQuery({
     queryKey: ["organization-tax-settings", organizationId],
     queryFn: async () => {
@@ -80,7 +81,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reservations")
-        .select("id, listing_id, source, tax_amount, status, check_out")
+        .select("id, listing_id, source, tax_amount, host_payout, status, check_out")
         .gte("check_out", startDate)
         .lte("check_out", endDate + "T23:59:59")
         .in("status", ["confirmed", "checked_in", "checked_out"]);
@@ -101,7 +102,6 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
     const rows: ReportRow[] = [];
 
-    // Group reservations by listing
     const resByListing = new Map<string, typeof reservations>();
     if (reservations) {
       for (const res of reservations) {
@@ -110,10 +110,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       }
     }
 
-    // Build a map of tax settings by listing_id
     const settingsMap = new Map(taxSettings?.map((s) => [s.listing_id, s]) || []);
 
-    // Sort listings by permit number (from settings), then nickname
     const sortedListings = [...listings].sort((a, b) => {
       const permitA = settingsMap.get(a.id)?.permit_number || "";
       const permitB = settingsMap.get(b.id)?.permit_number || "";
@@ -132,21 +130,24 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       const behalf = listingReservations.filter((r) => globalBehalfPlatforms.includes(r.source || ""));
       const other = listingReservations.filter((r) => !globalBehalfPlatforms.includes(r.source || ""));
 
-      const sumTax = (group: typeof listingReservations) => {
+      const sumField = (group: typeof listingReservations, field: "host_payout" | "tax_amount") => {
         let total = 0;
-        for (const r of group) total += r.tax_amount || 0;
+        for (const r of group) total += (r[field] as number) || 0;
         return total;
       };
 
-      const behalfTax = behalf.length > 0 ? sumTax(behalf) * multiplier : null;
-      const otherTax = other.length > 0 ? sumTax(other) * multiplier : null;
+      const behalfPayout = behalf.length > 0 ? sumField(behalf, "host_payout") : null;
+      const behalfTax = behalf.length > 0 ? sumField(behalf, "tax_amount") * multiplier : null;
+      const otherPayout = other.length > 0 ? sumField(other, "host_payout") : null;
+      const otherTax = other.length > 0 ? sumField(other, "tax_amount") * multiplier : null;
 
       rows.push({
         period: periodLabel,
         permitNumber,
         propertyAddress,
         provider: "behalfPlatforms",
-        totalRevenue: behalfTax,
+        totalPayout: behalfPayout,
+        taxAmount: behalfTax,
         allowableDeductions: "",
       });
 
@@ -155,7 +156,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         permitNumber,
         propertyAddress,
         provider: "other",
-        totalRevenue: otherTax,
+        totalPayout: otherPayout,
+        taxAmount: otherTax,
         allowableDeductions: "",
       });
     }
@@ -165,10 +167,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
   const reportRows = generateReport();
 
-  const totals = reportRows.reduce(
-    (acc, r) => acc + (r.totalRevenue || 0),
-    0
-  );
+  const payoutTotal = reportRows.reduce((acc, r) => acc + (r.totalPayout || 0), 0);
+  const taxTotal = reportRows.reduce((acc, r) => acc + (r.taxAmount || 0), 0);
 
   const downloadCSV = () => {
     const csvRows = reportRows.map((r) => ({
@@ -176,7 +176,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       "Permit Number": r.permitNumber,
       "Property Address": r.propertyAddress,
       "Provider": r.provider,
-      "Total Revenue": r.totalRevenue !== null ? r.totalRevenue.toFixed(2) : "",
+      "Total Payout": r.totalPayout !== null ? r.totalPayout.toFixed(2) : "",
+      [taxColumnLabel]: r.taxAmount !== null ? r.taxAmount.toFixed(2) : "",
       "Allowable Deductions": r.allowableDeductions,
     }));
 
@@ -247,7 +248,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                 <TableHead>Permit #</TableHead>
                 <TableHead>Property Address</TableHead>
                 <TableHead>Provider</TableHead>
-                <TableHead className="text-right">Total Revenue</TableHead>
+                <TableHead className="text-right">Total Payout</TableHead>
+                <TableHead className="text-right">{taxColumnLabel}</TableHead>
                 <TableHead className="text-right">Allowable Deductions</TableHead>
               </TableRow>
             </TableHeader>
@@ -258,13 +260,15 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                   <TableCell className="text-sm">{row.permitNumber}</TableCell>
                   <TableCell className="text-sm">{row.propertyAddress}</TableCell>
                   <TableCell className="text-sm">{row.provider}</TableCell>
-                  <TableCell className="text-right text-sm">{fmt(row.totalRevenue)}</TableCell>
+                  <TableCell className="text-right text-sm">{fmt(row.totalPayout)}</TableCell>
+                  <TableCell className="text-right text-sm">{fmt(row.taxAmount)}</TableCell>
                   <TableCell className="text-right text-sm">{row.allowableDeductions}</TableCell>
                 </TableRow>
               ))}
               <TableRow className="font-bold bg-muted/50">
                 <TableCell colSpan={4}>Totals</TableCell>
-                <TableCell className="text-right">{fmt(totals)}</TableCell>
+                <TableCell className="text-right">{fmt(payoutTotal)}</TableCell>
+                <TableCell className="text-right">{fmt(taxTotal)}</TableCell>
                 <TableCell />
               </TableRow>
             </TableBody>
