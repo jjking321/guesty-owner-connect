@@ -5,6 +5,7 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Download, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import Papa from "papaparse";
@@ -18,6 +19,7 @@ interface ReportRow {
   totalPayout: number | null;
   taxAmount: number | null;
   allowableDeductions: number | null;
+  groupedUnits?: string[]; // for tooltip on grouped rows
 }
 
 interface TaxReportGeneratorProps {
@@ -58,6 +60,19 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     queryKey: ["listing-tax-settings", organizationId],
     queryFn: async () => {
       const { data, error } = await supabase.from("listing_tax_settings").select("*");
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!organizationId,
+  });
+
+  const { data: taxGroups } = useQuery({
+    queryKey: ["tax-groups", organizationId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tax_groups")
+        .select("*")
+        .eq("organization_id", organizationId!);
       if (error) throw error;
       return data;
     },
@@ -128,7 +143,14 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   const generateReport = (): ReportRow[] => {
     if (!listings) return [];
 
-    const rows: ReportRow[] = [];
+    const settingsMap = new Map(taxSettings?.map((s) => [s.listing_id, s]) || []);
+    const groupsMap = new Map(taxGroups?.map((g) => [g.id, g]) || []);
+
+    // Filter out excluded listings
+    const includedListings = listings.filter((l) => {
+      const s = settingsMap.get(l.id);
+      return !s?.excluded_from_tax;
+    });
 
     const resByListing = new Map<string, typeof reservations>();
     if (reservations) {
@@ -138,29 +160,11 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       }
     }
 
-    const settingsMap = new Map(taxSettings?.map((s) => [s.listing_id, s]) || []);
-
-    // Filter out excluded listings
-    const includedListings = listings.filter((l) => {
-      const s = settingsMap.get(l.id);
-      return !s?.excluded_from_tax;
-    });
-
-    const sortedListings = [...includedListings].sort((a, b) => {
-      const permitA = settingsMap.get(a.id)?.permit_number || "";
-      const permitB = settingsMap.get(b.id)?.permit_number || "";
-      if (permitA !== permitB) return permitA.localeCompare(permitB);
-      return (a.nickname || "").localeCompare(b.nickname || "");
-    });
-
     const globalBehalfPlatforms = orgTaxSettings?.behalf_platforms || [];
 
-    for (const listing of sortedListings) {
-      const settings = settingsMap.get(listing.id);
-      const permitNumber = settings?.permit_number || "";
-      const propertyAddress = settings?.property_address || getDefaultAddress(listing);
+    // Helper to compute per-listing data
+    const computeListingData = (listing: typeof includedListings[0]) => {
       const listingReservations = resByListing.get(listing.id) || [];
-
       const behalf = listingReservations.filter((r) => globalBehalfPlatforms.includes(r.source || ""));
       const other = listingReservations.filter((r) => !globalBehalfPlatforms.includes(r.source || ""));
 
@@ -170,12 +174,91 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         return total;
       };
 
-      const behalfPayout = behalf.length > 0 ? sumField(behalf, "host_payout") : null;
-      const behalfTax = behalf.length > 0 ? sumField(behalf, "tax_amount") * multiplier : null;
-      const otherPayout = other.length > 0 ? sumField(other, "host_payout") : null;
-      const otherTax = other.length > 0 ? sumField(other, "tax_amount") * multiplier : null;
+      return {
+        behalfPayout: behalf.length > 0 ? sumField(behalf, "host_payout") : 0,
+        behalfTax: behalf.length > 0 ? sumField(behalf, "tax_amount") * multiplier : 0,
+        otherPayout: other.length > 0 ? sumField(other, "host_payout") : 0,
+        otherTax: other.length > 0 ? sumField(other, "tax_amount") * multiplier : 0,
+        exemptTotal: exemptByListing.get(listing.id) || 0,
+        hasBehalf: behalf.length > 0,
+        hasOther: other.length > 0,
+      };
+    };
 
-      const exemptTotal = exemptByListing.get(listing.id) || null;
+    // Separate grouped vs ungrouped listings
+    const groupedByGroupId = new Map<string, typeof includedListings>();
+    const ungrouped: typeof includedListings = [];
+
+    for (const listing of includedListings) {
+      const s = settingsMap.get(listing.id);
+      const groupId = s?.tax_group_id;
+      if (groupId && groupsMap.has(groupId)) {
+        if (!groupedByGroupId.has(groupId)) groupedByGroupId.set(groupId, []);
+        groupedByGroupId.get(groupId)!.push(listing);
+      } else {
+        ungrouped.push(listing);
+      }
+    }
+
+    const rows: ReportRow[] = [];
+
+    // Process grouped listings
+    for (const [groupId, groupListings] of groupedByGroupId) {
+      const group = groupsMap.get(groupId)!;
+      let totalBehalfPayout = 0, totalBehalfTax = 0, totalOtherPayout = 0, totalOtherTax = 0, totalExempt = 0;
+      let anyBehalf = false, anyOther = false;
+
+      for (const listing of groupListings) {
+        const data = computeListingData(listing);
+        totalBehalfPayout += data.behalfPayout;
+        totalBehalfTax += data.behalfTax;
+        totalOtherPayout += data.otherPayout;
+        totalOtherTax += data.otherTax;
+        totalExempt += data.exemptTotal;
+        if (data.hasBehalf) anyBehalf = true;
+        if (data.hasOther) anyOther = true;
+      }
+
+      const unitNames = groupListings.map((l) => l.nickname || l.id);
+
+      rows.push({
+        period: periodLabel,
+        nickname: group.name,
+        permitNumber: group.permit_number || "",
+        propertyAddress: group.property_address || "",
+        provider: "behalfPlatforms",
+        totalPayout: anyBehalf ? totalBehalfPayout : null,
+        taxAmount: anyBehalf ? totalBehalfTax : null,
+        allowableDeductions: null,
+        groupedUnits: unitNames,
+      });
+
+      rows.push({
+        period: periodLabel,
+        nickname: group.name,
+        permitNumber: group.permit_number || "",
+        propertyAddress: group.property_address || "",
+        provider: "other",
+        totalPayout: anyOther ? totalOtherPayout : null,
+        taxAmount: anyOther ? totalOtherTax : null,
+        allowableDeductions: totalExempt || null,
+        groupedUnits: unitNames,
+      });
+    }
+
+    // Process ungrouped listings
+    const sortedUngrouped = [...ungrouped].sort((a, b) => {
+      const permitA = settingsMap.get(a.id)?.permit_number || "";
+      const permitB = settingsMap.get(b.id)?.permit_number || "";
+      if (permitA !== permitB) return permitA.localeCompare(permitB);
+      return (a.nickname || "").localeCompare(b.nickname || "");
+    });
+
+    for (const listing of sortedUngrouped) {
+      const settings = settingsMap.get(listing.id);
+      const permitNumber = settings?.permit_number || "";
+      const propertyAddress = settings?.property_address || getDefaultAddress(listing);
+      const data = computeListingData(listing);
 
       rows.push({
         period: periodLabel,
@@ -183,8 +266,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         permitNumber,
         propertyAddress,
         provider: "behalfPlatforms",
-        totalPayout: behalfPayout,
-        taxAmount: behalfTax,
+        totalPayout: data.hasBehalf ? data.behalfPayout : null,
+        taxAmount: data.hasBehalf ? data.behalfTax : null,
         allowableDeductions: null,
       });
 
@@ -194,9 +277,9 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         permitNumber,
         propertyAddress,
         provider: "other",
-        totalPayout: otherPayout,
-        taxAmount: otherTax,
-        allowableDeductions: exemptTotal,
+        totalPayout: data.hasOther ? data.otherPayout : null,
+        taxAmount: data.hasOther ? data.otherTax : null,
+        allowableDeductions: data.exemptTotal || null,
       });
     }
 
@@ -237,6 +320,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
   const fmtNum = (n: number) =>
     n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
   const months = Array.from({ length: 12 }, (_, i) => ({
     value: (i + 1).toString(),
     label: format(new Date(2000, i, 1), "MMMM"),
@@ -298,42 +382,57 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
           No listings found for the selected period.
         </p>
       ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Period</TableHead>
-                 <TableHead>Nickname</TableHead>
-                 <TableHead>Permit #</TableHead>
-                 <TableHead>Property Address</TableHead>
-                <TableHead>Provider</TableHead>
-                <TableHead className="text-right">Total Payout</TableHead>
-                <TableHead className="text-right">{taxColumnLabel}</TableHead>
-                <TableHead className="text-right">Allowable Deductions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {reportRows.map((row, i) => (
-                <TableRow key={i}>
-                  <TableCell className="text-sm">{row.period}</TableCell>
-                   <TableCell className="text-sm">{row.nickname}</TableCell>
-                   <TableCell className="text-sm">{row.permitNumber}</TableCell>
-                  <TableCell className="text-sm">{row.propertyAddress}</TableCell>
-                  <TableCell className="text-sm">{row.provider}</TableCell>
-                  <TableCell className="text-right text-sm">{fmt(row.totalPayout)}</TableCell>
-                  <TableCell className="text-right text-sm">{fmt(row.taxAmount)}</TableCell>
-                  <TableCell className="text-right text-sm">{fmt(row.allowableDeductions)}</TableCell>
+        <TooltipProvider>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Period</TableHead>
+                  <TableHead>Nickname</TableHead>
+                  <TableHead>Permit #</TableHead>
+                  <TableHead>Property Address</TableHead>
+                  <TableHead>Provider</TableHead>
+                  <TableHead className="text-right">Total Payout</TableHead>
+                  <TableHead className="text-right">{taxColumnLabel}</TableHead>
+                  <TableHead className="text-right">Allowable Deductions</TableHead>
                 </TableRow>
-              ))}
-              <TableRow className="font-bold bg-muted/50">
-                <TableCell colSpan={5}>Totals</TableCell>
-                <TableCell className="text-right">{fmt(payoutTotal)}</TableCell>
-                <TableCell className="text-right">{fmt(taxTotal)}</TableCell>
-                <TableCell className="text-right">{fmt(deductionsTotal)}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {reportRows.map((row, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="text-sm">{row.period}</TableCell>
+                    <TableCell className="text-sm">
+                      {row.groupedUnits && row.groupedUnits.length > 0 ? (
+                        <Tooltip>
+                          <TooltipTrigger className="underline decoration-dotted cursor-help">
+                            {row.nickname}
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="text-xs">Units: {row.groupedUnits.join(", ")}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        row.nickname
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm">{row.permitNumber}</TableCell>
+                    <TableCell className="text-sm">{row.propertyAddress}</TableCell>
+                    <TableCell className="text-sm">{row.provider}</TableCell>
+                    <TableCell className="text-right text-sm">{fmt(row.totalPayout)}</TableCell>
+                    <TableCell className="text-right text-sm">{fmt(row.taxAmount)}</TableCell>
+                    <TableCell className="text-right text-sm">{fmt(row.allowableDeductions)}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="font-bold bg-muted/50">
+                  <TableCell colSpan={5}>Totals</TableCell>
+                  <TableCell className="text-right">{fmt(payoutTotal)}</TableCell>
+                  <TableCell className="text-right">{fmt(taxTotal)}</TableCell>
+                  <TableCell className="text-right">{fmt(deductionsTotal)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </TooltipProvider>
       )}
     </div>
   );

@@ -7,9 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Save, Loader2, RefreshCw } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Save, Loader2, RefreshCw, Plus, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 interface TaxSetting {
   id?: string;
@@ -18,6 +21,15 @@ interface TaxSetting {
   property_address: string;
   organization_id: string;
   nickname: string;
+  tax_group_id?: string | null;
+}
+
+interface TaxGroup {
+  id: string;
+  name: string;
+  permit_number: string | null;
+  property_address: string | null;
+  organization_id: string;
 }
 
 export function TaxSettingsTable() {
@@ -25,6 +37,9 @@ export function TaxSettingsTable() {
   const queryClient = useQueryClient();
   const [edits, setEdits] = useState<Record<string, Partial<TaxSetting>>>({});
   const [backfilling, setBackfilling] = useState(false);
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<TaxGroup | null>(null);
+  const [groupForm, setGroupForm] = useState({ name: "", permit_number: "", property_address: "" });
 
   // Fetch guesty account for backfill
   const { data: guestyAccount } = useQuery({
@@ -40,6 +55,7 @@ export function TaxSettingsTable() {
     },
     enabled: !!organizationId,
   });
+
   // Fetch listings
   const { data: listings, isLoading: listingsLoading } = useQuery({
     queryKey: ["tax-settings-listings", organizationId],
@@ -64,6 +80,21 @@ export function TaxSettingsTable() {
         .select("*");
       if (error) throw error;
       return data;
+    },
+    enabled: !!organizationId,
+  });
+
+  // Fetch tax groups
+  const { data: taxGroups } = useQuery({
+    queryKey: ["tax-groups", organizationId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("tax_groups")
+        .select("*")
+        .eq("organization_id", organizationId!)
+        .order("name");
+      if (error) throw error;
+      return data as TaxGroup[];
     },
     enabled: !!organizationId,
   });
@@ -99,7 +130,6 @@ export function TaxSettingsTable() {
   });
 
   const [behalfPlatforms, setBehalfPlatforms] = useState<string[] | null>(null);
-
   const currentBehalfPlatforms = behalfPlatforms ?? orgTaxSettings?.behalf_platforms ?? [];
 
   const saveBehalfMutation = useMutation({
@@ -137,6 +167,74 @@ export function TaxSettingsTable() {
       : [...current, platform];
     setBehalfPlatforms(updated);
   };
+
+  // Tax group mutations
+  const saveGroupMutation = useMutation({
+    mutationFn: async (group: { id?: string; name: string; permit_number: string; property_address: string }) => {
+      if (group.id) {
+        const { error } = await supabase
+          .from("tax_groups")
+          .update({ name: group.name, permit_number: group.permit_number, property_address: group.property_address })
+          .eq("id", group.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("tax_groups")
+          .insert({ name: group.name, permit_number: group.permit_number, property_address: group.property_address, organization_id: organizationId! });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tax-groups"] });
+      setGroupDialogOpen(false);
+      setEditingGroup(null);
+      setGroupForm({ name: "", permit_number: "", property_address: "" });
+      toast.success("Tax group saved");
+    },
+    onError: (err: Error) => toast.error("Failed to save group: " + err.message),
+  });
+
+  const deleteGroupMutation = useMutation({
+    mutationFn: async (groupId: string) => {
+      // Clear tax_group_id from any listings assigned to this group
+      const { error: clearError } = await supabase
+        .from("listing_tax_settings")
+        .update({ tax_group_id: null })
+        .eq("tax_group_id", groupId);
+      if (clearError) throw clearError;
+      const { error } = await supabase.from("tax_groups").delete().eq("id", groupId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tax-groups"] });
+      queryClient.invalidateQueries({ queryKey: ["listing-tax-settings"] });
+      toast.success("Tax group deleted");
+    },
+    onError: (err: Error) => toast.error("Failed to delete group: " + err.message),
+  });
+
+  const assignGroupMutation = useMutation({
+    mutationFn: async ({ listingId, taxGroupId }: { listingId: string; taxGroupId: string | null }) => {
+      const existing = taxSettings?.find((s) => s.listing_id === listingId);
+      if (existing) {
+        const { error } = await supabase
+          .from("listing_tax_settings")
+          .update({ tax_group_id: taxGroupId })
+          .eq("id", existing.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("listing_tax_settings")
+          .insert({ listing_id: listingId, organization_id: organizationId!, tax_group_id: taxGroupId });
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["listing-tax-settings"] });
+      toast.success("Group assignment updated");
+    },
+    onError: (err: Error) => toast.error("Failed to assign group: " + err.message),
+  });
 
   const saveMutation = useMutation({
     mutationFn: async (settings: { listing_id: string; permit_number: string; property_address: string }) => {
@@ -219,6 +317,18 @@ export function TaxSettingsTable() {
 
   const hasBehalfEdits = behalfPlatforms !== null;
 
+  const openCreateGroup = () => {
+    setEditingGroup(null);
+    setGroupForm({ name: "", permit_number: "", property_address: "" });
+    setGroupDialogOpen(true);
+  };
+
+  const openEditGroup = (group: TaxGroup) => {
+    setEditingGroup(group);
+    setGroupForm({ name: group.name, permit_number: group.permit_number || "", property_address: group.property_address || "" });
+    setGroupDialogOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       {/* Global behalf platforms setting */}
@@ -248,6 +358,116 @@ export function TaxSettingsTable() {
               </Button>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Tax Groups */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Tax Groups</CardTitle>
+            <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline" onClick={openCreateGroup}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  New Group
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{editingGroup ? "Edit Tax Group" : "Create Tax Group"}</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 pt-2">
+                  <div className="space-y-2">
+                    <Label>Group Name</Label>
+                    <Input
+                      value={groupForm.name}
+                      onChange={(e) => setGroupForm((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. 400 S Atlantic"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Permit Number</Label>
+                    <Input
+                      value={groupForm.permit_number}
+                      onChange={(e) => setGroupForm((f) => ({ ...f, permit_number: e.target.value }))}
+                      placeholder="e.g. 25-001797"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Property Address</Label>
+                    <Input
+                      value={groupForm.property_address}
+                      onChange={(e) => setGroupForm((f) => ({ ...f, property_address: e.target.value }))}
+                      placeholder="Full tax filing address"
+                    />
+                  </div>
+                  <Button
+                    className="w-full"
+                    disabled={!groupForm.name || saveGroupMutation.isPending}
+                    onClick={() =>
+                      saveGroupMutation.mutate({
+                        id: editingGroup?.id,
+                        name: groupForm.name,
+                        permit_number: groupForm.permit_number,
+                        property_address: groupForm.property_address,
+                      })
+                    }
+                  >
+                    {saveGroupMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Save className="h-4 w-4 mr-1" />}
+                    {editingGroup ? "Update Group" : "Create Group"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!taxGroups?.length ? (
+            <p className="text-sm text-muted-foreground">
+              No tax groups yet. Create a group to roll up multiple units under one permit number on tax reports.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {taxGroups.map((group) => {
+                const assignedListings = listings?.filter((l) => {
+                  const s = taxSettings?.find((ts) => ts.listing_id === l.id);
+                  return s?.tax_group_id === group.id;
+                });
+                return (
+                  <div key={group.id} className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <p className="font-medium text-sm">{group.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {group.permit_number || "No permit"} · {group.property_address || "No address"}
+                      </p>
+                      {assignedListings && assignedListings.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Units: {assignedListings.map((l) => l.nickname || l.id).join(", ")}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => openEditGroup(group)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          if (confirm("Delete this tax group? Listings will be ungrouped.")) {
+                            deleteGroupMutation.mutate(group.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -296,26 +516,28 @@ export function TaxSettingsTable() {
       {/* Per-property settings */}
       <div>
         <p className="text-sm text-muted-foreground mb-4">
-          Configure tax permit numbers and addresses for each property.
+          Configure tax permit numbers and addresses for each property. Assign a Tax Group to roll up multiple units into one line on reports.
         </p>
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[60px]">Include</TableHead>
-                <TableHead className="w-[200px]">Property</TableHead>
+                <TableHead className="w-[180px]">Property</TableHead>
+                <TableHead className="w-[160px]">Tax Group</TableHead>
                 <TableHead className="w-[140px]">Permit Number</TableHead>
-                <TableHead className="w-[300px]">Tax Address</TableHead>
+                <TableHead className="w-[280px]">Tax Address</TableHead>
                 <TableHead className="w-[80px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {listings?.map((listing) => {
                 const setting = getSettingForListing(listing.id);
+                const assignedGroup = taxGroups?.find((g) => g.id === setting?.tax_group_id);
+                const isGrouped = !!assignedGroup;
                 const currentPermit = getEditValue(listing.id, "permit_number", setting?.permit_number ?? "") as string;
                 const currentAddress = getEditValue(listing.id, "property_address", setting?.property_address ?? getDefaultAddress(listing)) as string;
                 const hasEdits = !!edits[listing.id];
-
                 const isIncluded = !setting?.excluded_from_tax;
 
                 return (
@@ -347,30 +569,63 @@ export function TaxSettingsTable() {
                       {listing.nickname || listing.id}
                     </TableCell>
                     <TableCell>
-                      <Input
-                        value={currentPermit}
-                        onChange={(e) => updateEdit(listing.id, "permit_number", e.target.value)}
-                        placeholder="e.g. 25-001764"
-                        className="h-8 text-sm"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        value={currentAddress}
-                        onChange={(e) => updateEdit(listing.id, "property_address", e.target.value)}
-                        placeholder="Property address"
-                        className="h-8 text-sm"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        variant={hasEdits ? "default" : "ghost"}
-                        onClick={() => handleSave(listing.id)}
-                        disabled={saveMutation.isPending}
+                      <Select
+                        value={setting?.tax_group_id || "none"}
+                        onValueChange={(val) =>
+                          assignGroupMutation.mutate({
+                            listingId: listing.id,
+                            taxGroupId: val === "none" ? null : val,
+                          })
+                        }
                       >
-                        <Save className="h-4 w-4" />
-                      </Button>
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="None" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None</SelectItem>
+                          {taxGroups?.map((g) => (
+                            <SelectItem key={g.id} value={g.id}>
+                              {g.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      {isGrouped ? (
+                        <span className="text-sm text-muted-foreground">{assignedGroup.permit_number || "—"}</span>
+                      ) : (
+                        <Input
+                          value={currentPermit}
+                          onChange={(e) => updateEdit(listing.id, "permit_number", e.target.value)}
+                          placeholder="e.g. 25-001764"
+                          className="h-8 text-sm"
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {isGrouped ? (
+                        <span className="text-sm text-muted-foreground">{assignedGroup.property_address || "—"}</span>
+                      ) : (
+                        <Input
+                          value={currentAddress}
+                          onChange={(e) => updateEdit(listing.id, "property_address", e.target.value)}
+                          placeholder="Property address"
+                          className="h-8 text-sm"
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {!isGrouped && (
+                        <Button
+                          size="sm"
+                          variant={hasEdits ? "default" : "ghost"}
+                          onClick={() => handleSave(listing.id)}
+                          disabled={saveMutation.isPending}
+                        >
+                          <Save className="h-4 w-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
