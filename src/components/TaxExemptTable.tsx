@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useUserRole } from "@/hooks/useUserRole";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, EyeOff, Eye } from "lucide-react";
 import { format } from "date-fns";
 
 export function TaxExemptTable() {
@@ -12,6 +13,8 @@ export function TaxExemptTable() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear().toString());
   const [month, setMonth] = useState((now.getMonth()).toString());
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [showHidden, setShowHidden] = useState(false);
 
   const selectedYear = parseInt(year);
   const selectedMonth = parseInt(month);
@@ -40,7 +43,8 @@ export function TaxExemptTable() {
         .lte("check_out", endDate + "T23:59:59")
         .in("status", ["confirmed", "checked_in", "checked_out"])
         .eq("source", "manual")
-        .or("tax_amount.is.null,tax_amount.eq.0");
+        .or("tax_amount.is.null,tax_amount.eq.0")
+        .gt("fare_accommodation_adjusted", 0);
       if (error) throw error;
       return data;
     },
@@ -56,12 +60,47 @@ export function TaxExemptTable() {
   }));
   const years = Array.from({ length: 5 }, (_, i) => (now.getFullYear() - 2 + i).toString());
 
-  const totalAccommodation = exemptReservations?.reduce((sum, r) => sum + (r.fare_accommodation_adjusted || 0), 0) || 0;
+  const visibleReservations = exemptReservations?.filter((r) => !hiddenIds.has(r.id)) || [];
+  const hiddenReservations = exemptReservations?.filter((r) => hiddenIds.has(r.id)) || [];
+  const totalAccommodation = visibleReservations.reduce((sum, r) => sum + (r.fare_accommodation_adjusted || 0), 0);
+
+  const toggleHide = (id: string) => {
+    setHiddenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const renderRow = (r: NonNullable<typeof exemptReservations>[number], isHidden: boolean) => (
+    <TableRow key={r.id} className={isHidden ? "opacity-50" : ""}>
+      <TableCell className="text-sm font-medium">
+        {listingMap.get(r.listing_id) || r.listing_id}
+      </TableCell>
+      <TableCell className="text-sm">{r.guest_name || "—"}</TableCell>
+      <TableCell className="text-sm">{r.source || "—"}</TableCell>
+      <TableCell className="text-sm">{r.check_in ? format(new Date(r.check_in), "MM/dd/yyyy") : "—"}</TableCell>
+      <TableCell className="text-sm">{r.check_out ? format(new Date(r.check_out), "MM/dd/yyyy") : "—"}</TableCell>
+      <TableCell className="text-right text-sm">{fmt(r.fare_accommodation_adjusted || 0)}</TableCell>
+      <TableCell className="text-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => toggleHide(r.id)}
+          title={isHidden ? "Show in report" : "Hide from report"}
+        >
+          {isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Reservations with $0 tax that need to be reported separately.
+        Manual reservations with $0 tax that need to be reported separately.
       </p>
       <div className="flex items-center gap-4">
         <Select value={month} onValueChange={setMonth}>
@@ -84,6 +123,15 @@ export function TaxExemptTable() {
             ))}
           </SelectContent>
         </Select>
+        {hiddenReservations.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowHidden(!showHidden)}
+          >
+            {showHidden ? "Hide" : "Show"} {hiddenReservations.length} hidden
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -105,24 +153,16 @@ export function TaxExemptTable() {
                 <TableHead>Check-in</TableHead>
                 <TableHead>Check-out</TableHead>
                 <TableHead className="text-right">Accommodation</TableHead>
+                <TableHead className="text-center w-[60px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {exemptReservations.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-sm font-medium">
-                    {listingMap.get(r.listing_id) || r.listing_id}
-                  </TableCell>
-                  <TableCell className="text-sm">{r.guest_name || "—"}</TableCell>
-                  <TableCell className="text-sm">{r.source || "—"}</TableCell>
-                  <TableCell className="text-sm">{r.check_in ? format(new Date(r.check_in), "MM/dd/yyyy") : "—"}</TableCell>
-                  <TableCell className="text-sm">{r.check_out ? format(new Date(r.check_out), "MM/dd/yyyy") : "—"}</TableCell>
-                  <TableCell className="text-right text-sm">{fmt(r.fare_accommodation_adjusted || 0)}</TableCell>
-                </TableRow>
-              ))}
+              {visibleReservations.map((r) => renderRow(r, false))}
+              {showHidden && hiddenReservations.map((r) => renderRow(r, true))}
               <TableRow className="font-bold bg-muted/50">
                 <TableCell colSpan={5}>Total</TableCell>
                 <TableCell className="text-right">{fmt(totalAccommodation)}</TableCell>
+                <TableCell />
               </TableRow>
             </TableBody>
           </Table>
