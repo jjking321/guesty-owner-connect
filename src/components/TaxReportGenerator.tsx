@@ -16,7 +16,7 @@ interface ReportRow {
   provider: string;
   totalPayout: number | null;
   taxAmount: number | null;
-  allowableDeductions: string;
+  allowableDeductions: number | null;
 }
 
 interface TaxReportGeneratorProps {
@@ -92,6 +92,32 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     enabled: !!organizationId,
   });
 
+  const { data: exemptReservations } = useQuery({
+    queryKey: ["tax-exempt-for-report", startDate, endDate],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("reservations")
+        .select("id, listing_id, fare_accommodation_adjusted")
+        .gte("check_out", startDate)
+        .lte("check_out", endDate + "T23:59:59")
+        .in("status", ["confirmed", "checked_in", "checked_out"])
+        .eq("source", "manual")
+        .or("tax_amount.is.null,tax_amount.eq.0")
+        .gt("fare_accommodation_adjusted", 0);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!organizationId,
+  });
+
+  const exemptByListing = new Map<string, number>();
+  if (exemptReservations) {
+    for (const r of exemptReservations) {
+      const prev = exemptByListing.get(r.listing_id) || 0;
+      exemptByListing.set(r.listing_id, prev + (r.fare_accommodation_adjusted || 0));
+    }
+  }
+
   const getDefaultAddress = (listing: any): string => {
     if (!listing.address) return "";
     const addr = listing.address as any;
@@ -142,6 +168,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       const otherPayout = other.length > 0 ? sumField(other, "host_payout") : null;
       const otherTax = other.length > 0 ? sumField(other, "tax_amount") * multiplier : null;
 
+      const exemptTotal = exemptByListing.get(listing.id) || null;
+
       rows.push({
         period: periodLabel,
         permitNumber,
@@ -149,7 +177,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "behalfPlatforms",
         totalPayout: behalfPayout,
         taxAmount: behalfTax,
-        allowableDeductions: "",
+        allowableDeductions: exemptTotal,
       });
 
       rows.push({
@@ -159,7 +187,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: otherPayout,
         taxAmount: otherTax,
-        allowableDeductions: "",
+        allowableDeductions: null,
       });
     }
 
@@ -170,6 +198,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
   const payoutTotal = reportRows.reduce((acc, r) => acc + (r.totalPayout || 0), 0);
   const taxTotal = reportRows.reduce((acc, r) => acc + (r.taxAmount || 0), 0);
+  const deductionsTotal = reportRows.reduce((acc, r) => acc + (r.allowableDeductions || 0), 0);
 
   const downloadCSV = () => {
     const csvRows = reportRows.map((r) => ({
@@ -179,7 +208,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       "Provider": r.provider,
       "Total Payout": r.totalPayout !== null ? r.totalPayout.toFixed(2) : "",
       [taxColumnLabel]: r.taxAmount !== null ? r.taxAmount.toFixed(2) : "",
-      "Allowable Deductions": r.allowableDeductions,
+      "Allowable Deductions": r.allowableDeductions !== null ? r.allowableDeductions.toFixed(2) : "",
     }));
 
     const csv = Papa.unparse(csvRows);
@@ -263,14 +292,14 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                   <TableCell className="text-sm">{row.provider}</TableCell>
                   <TableCell className="text-right text-sm">{fmt(row.totalPayout)}</TableCell>
                   <TableCell className="text-right text-sm">{fmt(row.taxAmount)}</TableCell>
-                  <TableCell className="text-right text-sm">{row.allowableDeductions}</TableCell>
+                  <TableCell className="text-right text-sm">{fmt(row.allowableDeductions)}</TableCell>
                 </TableRow>
               ))}
               <TableRow className="font-bold bg-muted/50">
                 <TableCell colSpan={4}>Totals</TableCell>
                 <TableCell className="text-right">{fmt(payoutTotal)}</TableCell>
                 <TableCell className="text-right">{fmt(taxTotal)}</TableCell>
-                <TableCell />
+                <TableCell className="text-right">{fmt(deductionsTotal)}</TableCell>
               </TableRow>
             </TableBody>
           </Table>
