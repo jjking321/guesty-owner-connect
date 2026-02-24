@@ -46,8 +46,9 @@ export function TaxSettingsTable() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("listings")
-        .select("id, nickname, address, guesty_account_id")
+        .select("id, nickname, address, guesty_account_id, active")
         .eq("archived", false)
+        .eq("active", true)
         .order("nickname");
       if (error) throw error;
       return data;
