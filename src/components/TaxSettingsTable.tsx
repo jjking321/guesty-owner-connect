@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Save, Loader2 } from "lucide-react";
+import { Save, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 
 interface TaxSetting {
   id?: string;
@@ -23,7 +24,22 @@ export function TaxSettingsTable() {
   const { organizationId } = useUserRole();
   const queryClient = useQueryClient();
   const [edits, setEdits] = useState<Record<string, Partial<TaxSetting>>>({});
+  const [backfilling, setBackfilling] = useState(false);
 
+  // Fetch guesty account for backfill
+  const { data: guestyAccount } = useQuery({
+    queryKey: ["guesty-account-for-tax", organizationId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("guesty_accounts")
+        .select("id")
+        .limit(1)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!organizationId,
+  });
   // Fetch listings
   const { data: listings, isLoading: listingsLoading } = useQuery({
     queryKey: ["tax-settings-listings", organizationId],
@@ -233,6 +249,48 @@ export function TaxSettingsTable() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Backfill missing taxes */}
+      {guestyAccount && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Backfill Missing Tax Data</CardTitle>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  try {
+                    setBackfilling(true);
+                    const { error } = await supabase.functions.invoke('backfill-reservation-taxes', {
+                      body: { guestyAccountId: guestyAccount.id },
+                    });
+                    if (error) throw error;
+                    toast.success("Tax backfill started");
+                  } catch (err: any) {
+                    toast.error("Failed to start backfill: " + err.message);
+                  } finally {
+                    setBackfilling(false);
+                  }
+                }}
+                disabled={backfilling}
+              >
+                {backfilling ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                Backfill Missing Taxes
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-3">
+              Fetches tax amounts from Guesty for reservations that are missing tax data. This runs in the background.
+            </p>
+            <SyncProgressCard
+              accountId={guestyAccount.id}
+              syncType="backfill_taxes"
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Per-property settings */}
       <div>

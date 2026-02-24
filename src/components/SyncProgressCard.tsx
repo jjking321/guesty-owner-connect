@@ -20,7 +20,7 @@ interface SyncJob {
 
 interface SyncProgressCardProps {
   accountId: string;
-  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'capacity_calendar' | 'comparable_historical' | 'comparable_future_rates' | 'airbnb_ratings' | 'new_reviews';
+  syncType: 'listings' | 'reservations' | 'reviews' | 'new_reservations' | 'capacity_calendar' | 'comparable_historical' | 'comparable_future_rates' | 'airbnb_ratings' | 'new_reviews' | 'backfill_taxes';
   onComplete?: () => void;
 }
 
@@ -32,6 +32,7 @@ const getSyncTypeName = (type: string): string => {
     case 'new_reservations': return 'New Reservations Sync';
     case 'airbnb_ratings': return 'Airbnb Ratings Scrape';
     case 'new_reviews': return 'New Reviews Sync';
+    case 'backfill_taxes': return 'Tax Backfill';
     default: return `${type.charAt(0).toUpperCase() + type.slice(1)} Sync`;
   }
 };
