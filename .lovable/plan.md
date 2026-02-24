@@ -1,39 +1,35 @@
 
 
-# Tax Report: Change "Total Revenue" to Host Payout + Add Tax Column
+# Populate Allowable Deductions with Tax-Exempt Revenue
 
-## What Changes
+## Problem
+The "Allowable Deductions" column in the tax report is always empty. It should show the revenue (accommodation amount) from tax-exempt bookings -- the same manual reservations with $0 tax that appear in the Tax Exempt tab.
 
-The tax report currently shows the proportional tax amount (5/12 or 7/12 of `tax_amount`) as "Total Revenue." This is incorrect -- "Total Revenue" should be the actual host payout, and the calculated tax amounts should be in a separate column.
+## Solution
+Query the tax-exempt reservations (manual source, tax_amount is null or 0, fare_accommodation_adjusted > 0) alongside the regular reservations, group them by listing, and sum `fare_accommodation_adjusted` per listing to populate the Allowable Deductions column.
 
-## Changes to `src/components/TaxReportGenerator.tsx`
+## Technical Details
 
-### 1. Update the reservation query
-Add `host_payout` to the select fields (currently only fetches `tax_amount`).
+### File: `src/components/TaxReportGenerator.tsx`
 
-### 2. Update the ReportRow interface
-- Rename `totalRevenue` to `totalPayout` (holds sum of `host_payout`)
-- Add `taxAmount` field (holds the calculated 5/12 or 7/12 of `tax_amount`)
+1. **Add a new query** for tax-exempt reservations in the same date range, matching the TaxExemptTable logic:
+   - `source = 'manual'`
+   - `tax_amount IS NULL OR tax_amount = 0`
+   - `fare_accommodation_adjusted > 0`
+   - Same status filter: `confirmed`, `checked_in`, `checked_out`
+   - Same date range (check_out between start and end)
 
-### 3. Update the report generation logic
-- Sum `host_payout` per provider group for the "Total Payout" column
-- Sum `tax_amount * multiplier` per provider group for the tax column (same logic as current "Total Revenue")
+2. **Group exempt totals by listing_id** and sum `fare_accommodation_adjusted`
 
-### 4. Update the table display
-- "Total Revenue" column header becomes "Total Payout"
-- Add a new column: "County Tax" on the county tab, "State Tax" on the state tab
-- Both columns show in the totals row
-- "Allowable Deductions" column stays as-is
+3. **Populate `allowableDeductions`** in each report row with the exempt total for that listing (formatted as currency), or leave empty if none
 
-### 5. Update the CSV export
-- Add "Total Payout" column with `host_payout` sums
-- Add the relevant tax column ("County Tax" or "State Tax")
-- Keep existing columns (Period, Permit Number, Property Address, Provider, Allowable Deductions)
+4. **Update the ReportRow interface** to make `allowableDeductions` a `number | null` instead of `string` so it works with the currency formatter
 
-## Column Order (final)
+5. **Update totals row** to include a sum of allowable deductions
 
-| Period | Permit # | Property Address | Provider | Total Payout | County/State Tax | Allowable Deductions |
+6. **Update CSV export** to output the numeric deduction value
 
-## Files Modified
-- `src/components/TaxReportGenerator.tsx` -- single file change
+### Behavior
+- The deduction amount is per-listing (not split by provider group), so it will appear on the first row for each listing (the "behalfPlatforms" row) and be empty on the "other" row to avoid double-counting
+- Or alternatively, show the same value on both rows if that's preferred for the CSV format -- this is a minor detail we can adjust
 
