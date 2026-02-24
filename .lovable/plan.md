@@ -1,73 +1,71 @@
 
 
-# Roll Up Multi-Unit Properties by Tax Permit Number
+# Tax Template Fill Wizard
 
-## Problem
-Some properties share a single tax permit number (e.g., "400 S Atlantic Full" and "400 S Atlantic #G" both use permit 25-001797). The tax report currently shows each unit as a separate line, but for filing purposes they need to be consolidated into a single line per permit number.
+## Overview
+Add a new "Template Fill" tab to the Tax Report page. The user uploads a blank XLSX template (like the Brevard Tourism Tax form), the system matches each row by permit number, fills in Total Revenue and Allowable Deductions from reservation data, previews the result, and lets the user download the completed XLSX.
 
-## Current Duplicates
-- **25-001797** (400 S ATLANTIC AVE): "400 S Atlantic Full" + "400 S Atlantic #G"
-- **25-001839** (637 S ORLANDO AVE): "637 S Orlando Full" + "637 S Orlando #1"
-- Plus any future groupings (like 141 California units)
+## Template Format (from uploaded file)
+Columns: **Period | Permit Number | Property Address | Provider | Total Revenue | Allowable Deductions**
 
-## Recommended Approach
+- Each permit has two rows: one for `behalfPlatforms`, one for `other`
+- The Period column (e.g. "January 2026") determines which month's data to pull
+- Total Revenue and Allowable Deductions are left blank -- the system fills these in
 
-### Add a "Tax Group" concept to the settings
-Rather than just having permit number per listing, add an optional **tax_group_id** field to `listing_tax_settings`. Listings that share the same tax group will be rolled up into a single row on the report.
-
-### How it works:
-
-1. **New database table: `tax_groups`** -- stores permit number, address, and a display name (e.g., "400 S Atlantic") for each shared permit
-2. **New column on `listing_tax_settings`**: `tax_group_id` (nullable) -- when set, this listing's revenue rolls up into that group on the report
-3. **Tax Report Generator change**: Before rendering rows, group all listings that share a `tax_group_id`. Sum their payouts, taxes, and deductions into one line. Show individual unit names in a tooltip or sub-text for reference.
-4. **Tax Settings UI**: Add a section to create/manage tax groups and assign listings to them
-
-### Report output for grouped properties
+## User Workflow
 
 ```text
-Period          | Permit #   | Property Address                        | Provider        | Total Payout | Tax
-February 2026   | 25-001797  | 400 S ATLANTIC AVE COCOA BEACH FL 32931 | behalfPlatforms | $X,XXX.XX    | $XXX.XX
-February 2026   | 25-001797  | 400 S ATLANTIC AVE COCOA BEACH FL 32931 | other           | $X,XXX.XX    | $XXX.XX
+1. Upload XLSX template
+        |
+2. System parses rows, extracts period & permit numbers
+        |
+3. System matches permits to listings via listing_tax_settings
+        |
+4. System calculates revenue & deductions from reservations
+        |
+5. Preview filled table (with match status indicators)
+        |
+6. Download completed XLSX
 ```
 
-Instead of 4 separate rows (2 per unit), you get 2 rows with summed totals.
+## How Matching Works
+
+1. Parse each row's Permit Number from the template
+2. Look up `listing_tax_settings` rows where `permit_number` matches
+3. For tax groups: if multiple listings share the same permit (via `tax_group_id`), aggregate their revenue
+4. For ungrouped listings: direct 1:1 match
+5. Pull reservations for the period indicated in the template, split by behalfPlatforms vs other
+6. Fill `Total Revenue` = sum of `host_payout` for matching provider type
+7. Fill `Allowable Deductions` = tax-exempt revenue (manual bookings with no tax) on the "other" row only
+
+## Unmatched Permits
+- Rows where the permit number doesn't match any listing will be highlighted in yellow
+- Their revenue columns will remain empty
+- A summary badge shows "X of Y permits matched"
 
 ## Technical Details
 
-### Step 1: Create `tax_groups` table
+### New dependency
+- `xlsx` (SheetJS) -- for reading and writing XLSX files client-side
 
-```text
-tax_groups
-  - id (uuid, PK)
-  - organization_id (uuid, NOT NULL)
-  - name (text) -- display name like "400 S Atlantic"
-  - permit_number (text)
-  - property_address (text)
-  - created_at, updated_at
-```
+### New component: `src/components/TaxTemplateFill.tsx`
+- File upload input (accepts `.xlsx`, `.xls`)
+- On upload: parse with SheetJS, extract rows
+- Detect period from the first row's Period column (parse month/year)
+- Fetch reservation data for that period (reuses the same query logic as `TaxReportGenerator`)
+- Build a lookup map: permit_number -> { behalfPayout, otherPayout, exemptTotal }
+  - For grouped permits (tax groups): aggregate all child listings
+  - For ungrouped: direct lookup
+- Fill in each template row's Total Revenue and Allowable Deductions
+- Show preview table with color-coded match status
+- "Download Filled Template" button: writes back to XLSX preserving the original structure
 
-RLS: org members can view, admins can manage.
+### Changes to `src/pages/TaxReport.tsx`
+- Add a new tab: "Template Fill" after Settings
+- Render `<TaxTemplateFill />` in that tab
 
-### Step 2: Add `tax_group_id` to `listing_tax_settings`
-
-- Nullable FK to `tax_groups.id`
-- When a listing has a `tax_group_id`, the report uses the group's permit/address and rolls up revenue
-
-### Step 3: Update `TaxReportGenerator.tsx`
-
-- After building per-listing data, check for `tax_group_id`
-- Listings with the same `tax_group_id` get their payout/tax/deductions summed into one report row
-- Listings without a group continue to show individually
-- The Nickname column shows the group name (or comma-separated unit names)
-
-### Step 4: Update `TaxSettingsTable.tsx`
-
-- Add a "Tax Groups" section at the top to create/edit groups
-- Add a dropdown on each listing row to assign it to a tax group
-- When assigned to a group, the individual permit/address fields become read-only (inherited from group)
-
-### Step 5: CSV export
-
-- Grouped rows export as a single line (matching filing requirements)
-- Nickname column in CSV shows the group name
+### Data flow (all client-side, no new backend needed)
+- Queries used: `listings`, `listing_tax_settings`, `tax_groups`, `organization_tax_settings`, `reservations` (same as TaxReportGenerator)
+- Matching key: `permit_number` from template row matched against `listing_tax_settings.permit_number` and `tax_groups.permit_number`
+- Period detection: parsed from the "Period" column text (e.g. "January 2026" -> month 1, year 2026)
 
