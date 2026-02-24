@@ -49,17 +49,27 @@ export function TaxTemplateFill() {
       setOriginalWorkbook(wb);
 
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json<any>(ws, { defval: "" });
+      const json = XLSX.utils.sheet_to_json<any>(ws, { defval: "", header: 1 });
 
-      const rows: TemplateRow[] = json.map((row: any) => ({
-        period: row["Period"] || "",
-        permitNumber: row["Permit Number"] || "",
-        propertyAddress: row["Property Address"] || "",
-        provider: row["Provider"] || "",
-        totalRevenue: null,
-        allowableDeductions: null,
-        matched: false,
-      }));
+      // Find header row (first row)
+      const headers = json[0] as string[];
+      const colMap: Record<string, number> = {};
+      headers.forEach((h: string, i: number) => { colMap[String(h).trim()] = i; });
+
+      const rows: TemplateRow[] = [];
+      for (let i = 1; i < json.length; i++) {
+        const row = json[i] as any[];
+        if (!row || row.length === 0) continue;
+        rows.push({
+          period: row[colMap["Period"]] || "",
+          permitNumber: row[colMap["Permit Number"]] || "",
+          propertyAddress: row[colMap["Property Address"]] || "",
+          provider: row[colMap["Provider"]] || "",
+          totalRevenue: null,
+          allowableDeductions: null,
+          matched: false,
+        });
+      }
 
       setTemplateRows(rows);
 
@@ -222,25 +232,44 @@ export function TaxTemplateFill() {
   const downloadFilled = () => {
     if (!originalWorkbook || !filledRows) return;
 
-    const wb = XLSX.utils.book_new();
-    const wsData = filledRows.map((r) => ({
-      "Period": r.period,
-      "Permit Number": r.permitNumber,
-      "Property Address": r.propertyAddress,
-      "Provider": r.provider,
-      "Total Revenue": r.totalRevenue !== null ? Math.round(r.totalRevenue * 100) / 100 : 0,
-      "Allowable Deductions": r.allowableDeductions !== null ? Math.round(r.allowableDeductions * 100) / 100 : 0,
-    }));
-    const ws = XLSX.utils.json_to_sheet(wsData);
+    // Clone the original workbook to preserve hidden columns
+    const wbData = XLSX.write(originalWorkbook, { type: "array", bookType: "xlsx" });
+    const wb = XLSX.read(wbData, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
 
-    // Set column widths
-    ws["!cols"] = [
-      { wch: 16 }, { wch: 16 }, { wch: 50 }, { wch: 18 }, { wch: 16 }, { wch: 22 },
-    ];
+    // Find "Total Revenue" and "Allowable Deductions" column indices
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+    let revCol = -1;
+    let dedCol = -1;
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
+      if (cell && String(cell.v).trim() === "Total Revenue") revCol = c;
+      if (cell && String(cell.v).trim() === "Allowable Deductions") dedCol = c;
+    }
 
-    XLSX.utils.book_append_sheet(wb, ws, "TaxableReceipts");
-    const outName = fileName.replace(/\.xlsx?$/i, "_filled.xlsx");
-    XLSX.writeFile(wb, outName);
+    // Write filled values into the cloned sheet
+    for (let i = 0; i < filledRows.length; i++) {
+      const row = filledRows[i];
+      const r = i + 1; // skip header
+      if (revCol >= 0) {
+        const addr = XLSX.utils.encode_cell({ r, c: revCol });
+        ws[addr] = { t: "n", v: row.totalRevenue !== null ? Math.round(row.totalRevenue * 100) / 100 : 0 };
+      }
+      if (dedCol >= 0) {
+        const addr = XLSX.utils.encode_cell({ r, c: dedCol });
+        ws[addr] = { t: "n", v: row.allowableDeductions !== null ? Math.round(row.allowableDeductions * 100) / 100 : 0 };
+      }
+    }
+
+    // Export as CSV
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName.replace(/\.xlsx?$/i, "_filled.csv");
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const fmt = (n: number | null) =>
