@@ -120,5 +120,8 @@ verify_jwt = true
 [functions.analyze-conversation-redflags]
 verify_jwt = true
 
+[functions.backfill-reservation-taxes]
+verify_jwt = false
+
 [functions.batch-analyze-disputes]
 verify_jwt = false
