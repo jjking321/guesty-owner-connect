@@ -139,7 +139,13 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
     const settingsMap = new Map(taxSettings?.map((s) => [s.listing_id, s]) || []);
 
-    const sortedListings = [...listings].sort((a, b) => {
+    // Filter out excluded listings
+    const includedListings = listings.filter((l) => {
+      const s = settingsMap.get(l.id);
+      return !s?.excluded_from_tax;
+    });
+
+    const sortedListings = [...includedListings].sort((a, b) => {
       const permitA = settingsMap.get(a.id)?.permit_number || "";
       const permitB = settingsMap.get(b.id)?.permit_number || "";
       if (permitA !== permitB) return permitA.localeCompare(permitB);

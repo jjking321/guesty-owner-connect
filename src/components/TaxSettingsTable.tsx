@@ -301,6 +301,7 @@ export function TaxSettingsTable() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-[60px]">Include</TableHead>
                 <TableHead className="w-[200px]">Property</TableHead>
                 <TableHead className="w-[140px]">Permit Number</TableHead>
                 <TableHead className="w-[300px]">Tax Address</TableHead>
@@ -314,8 +315,33 @@ export function TaxSettingsTable() {
                 const currentAddress = getEditValue(listing.id, "property_address", setting?.property_address ?? getDefaultAddress(listing)) as string;
                 const hasEdits = !!edits[listing.id];
 
+                const isIncluded = !setting?.excluded_from_tax;
+
                 return (
                   <TableRow key={listing.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={isIncluded}
+                        onCheckedChange={async (checked) => {
+                          const excluded = !checked;
+                          if (setting) {
+                            await supabase
+                              .from("listing_tax_settings")
+                              .update({ excluded_from_tax: excluded })
+                              .eq("id", setting.id);
+                          } else {
+                            await supabase
+                              .from("listing_tax_settings")
+                              .insert({
+                                listing_id: listing.id,
+                                organization_id: organizationId!,
+                                excluded_from_tax: excluded,
+                              });
+                          }
+                          queryClient.invalidateQueries({ queryKey: ["listing-tax-settings"] });
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium text-sm">
                       {listing.nickname || listing.id}
                     </TableCell>
