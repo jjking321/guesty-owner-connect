@@ -1,21 +1,22 @@
 
 
-# One-Time Import: Permit Numbers and Addresses from CSV
+# Re-import Updated Tax Permit Numbers from CSV
 
-## What This Does
-Imports the permit numbers and property addresses from the Brevard Tourism Tax CSV into the `listing_tax_settings` table, matching each CSV row to a listing by nickname.
+## What Changed
+You updated the CSV so that nicknames now match your listings (1:1 where possible). This updated file has 237 rows with data (2 have empty nicknames and will be skipped).
 
-## Matching Results
-- **~180+ listings matched** by exact nickname
-- Nicknames with multiple CSV rows (e.g. "400 S Atlantic Full" has 8 permits, "505 Fillmore #15" has 15) will use the **first** permit number from the CSV
-- 2 CSV rows with empty nicknames will be skipped
-- A few CSV nicknames (like "214 Lucerne") that don't match any listing will be skipped
+## What Needs to Happen
+Run the same upsert operation as before, but with the updated CSV data. This will:
+- Update permit numbers and property addresses for all matched listings
+- Overwrite any previously imported values with the corrected ones
+- Skip the 2 rows with empty nicknames (lines 23 and 48)
+- For duplicate nicknames (e.g. "1145 S Atlantic #B", "CC-507", "214 Lucerne", "RFI-709"), use the first occurrence
 
-## Technical Steps
-1. Run a series of SQL `INSERT ... ON CONFLICT` statements against `listing_tax_settings`
-2. Each statement maps a listing_id (looked up by nickname) to the CSV's permit_number and property_address
-3. Existing rows will be updated; new rows will be created
-4. Done in ~8 batches of ~25 rows each
+## Technical Details
+- Execute 5 batches of `INSERT ... ON CONFLICT` SQL against `listing_tax_settings`
+- Match on `listings.nickname` (exact match) joined to active listings
+- Upsert `permit_number` and `property_address` for each match
+- Organization ID: `3bd3e141-5af9-4377-a060-f4786c1a742b`
 
-No code changes needed -- this is purely a one-time database operation.
+No code changes needed -- this is a one-time database write operation using the migration tool.
 
