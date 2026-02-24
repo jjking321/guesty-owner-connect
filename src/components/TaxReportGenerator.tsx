@@ -11,6 +11,7 @@ import Papa from "papaparse";
 
 interface ReportRow {
   period: string;
+  nickname: string;
   permitNumber: string;
   propertyAddress: string;
   provider: string;
@@ -178,6 +179,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
       rows.push({
         period: periodLabel,
+        nickname: listing.nickname || "",
         permitNumber,
         propertyAddress,
         provider: "behalfPlatforms",
@@ -188,6 +190,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
       rows.push({
         period: periodLabel,
+        nickname: listing.nickname || "",
         permitNumber,
         propertyAddress,
         provider: "other",
@@ -209,6 +212,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   const downloadCSV = () => {
     const csvRows = reportRows.map((r) => ({
       "Period": r.period,
+      "Nickname": r.nickname,
       "Permit Number": r.permitNumber,
       "Property Address": r.propertyAddress,
       "Provider": r.provider,
@@ -299,8 +303,9 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
             <TableHeader>
               <TableRow>
                 <TableHead>Period</TableHead>
-                <TableHead>Permit #</TableHead>
-                <TableHead>Property Address</TableHead>
+                 <TableHead>Nickname</TableHead>
+                 <TableHead>Permit #</TableHead>
+                 <TableHead>Property Address</TableHead>
                 <TableHead>Provider</TableHead>
                 <TableHead className="text-right">Total Payout</TableHead>
                 <TableHead className="text-right">{taxColumnLabel}</TableHead>
@@ -311,7 +316,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
               {reportRows.map((row, i) => (
                 <TableRow key={i}>
                   <TableCell className="text-sm">{row.period}</TableCell>
-                  <TableCell className="text-sm">{row.permitNumber}</TableCell>
+                   <TableCell className="text-sm">{row.nickname}</TableCell>
+                   <TableCell className="text-sm">{row.permitNumber}</TableCell>
                   <TableCell className="text-sm">{row.propertyAddress}</TableCell>
                   <TableCell className="text-sm">{row.provider}</TableCell>
                   <TableCell className="text-right text-sm">{fmt(row.totalPayout)}</TableCell>
@@ -320,7 +326,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                 </TableRow>
               ))}
               <TableRow className="font-bold bg-muted/50">
-                <TableCell colSpan={4}>Totals</TableCell>
+                <TableCell colSpan={5}>Totals</TableCell>
                 <TableCell className="text-right">{fmt(payoutTotal)}</TableCell>
                 <TableCell className="text-right">{fmt(taxTotal)}</TableCell>
                 <TableCell className="text-right">{fmt(deductionsTotal)}</TableCell>
