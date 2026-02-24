@@ -683,6 +683,7 @@ export type Database = {
           organization_id: string
           permit_number: string | null
           property_address: string | null
+          tax_group_id: string | null
           updated_at: string | null
         }
         Insert: {
@@ -694,6 +695,7 @@ export type Database = {
           organization_id: string
           permit_number?: string | null
           property_address?: string | null
+          tax_group_id?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -705,9 +707,18 @@ export type Database = {
           organization_id?: string
           permit_number?: string | null
           property_address?: string | null
+          tax_group_id?: string | null
           updated_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "listing_tax_settings_tax_group_id_fkey"
+            columns: ["tax_group_id"]
+            isOneToOne: false
+            referencedRelation: "tax_groups"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       listings: {
         Row: {
@@ -1916,6 +1927,44 @@ export type Database = {
             columns: ["guesty_account_id"]
             isOneToOne: false
             referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tax_groups: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          organization_id: string
+          permit_number: string | null
+          property_address: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          organization_id: string
+          permit_number?: string | null
+          property_address?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          permit_number?: string | null
+          property_address?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tax_groups_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
