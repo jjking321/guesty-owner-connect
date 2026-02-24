@@ -1,0 +1,1 @@
+ALTER TABLE public.listing_tax_settings ADD COLUMN excluded_from_tax boolean NOT NULL DEFAULT false;

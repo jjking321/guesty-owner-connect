@@ -677,6 +677,7 @@ export type Database = {
         Row: {
           behalf_platforms: string[] | null
           created_at: string | null
+          excluded_from_tax: boolean
           id: string
           listing_id: string
           organization_id: string
@@ -687,6 +688,7 @@ export type Database = {
         Insert: {
           behalf_platforms?: string[] | null
           created_at?: string | null
+          excluded_from_tax?: boolean
           id?: string
           listing_id: string
           organization_id: string
@@ -697,6 +699,7 @@ export type Database = {
         Update: {
           behalf_platforms?: string[] | null
           created_at?: string | null
+          excluded_from_tax?: boolean
           id?: string
           listing_id?: string
           organization_id?: string
