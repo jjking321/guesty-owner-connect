@@ -231,6 +231,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   const fmt = (n: number | null) =>
     n !== null ? n.toLocaleString("en-US", { style: "currency", currency: "USD" }) : "";
 
+  const fmtNum = (n: number) =>
+    n.toLocaleString("en-US", { style: "currency", currency: "USD" });
   const months = Array.from({ length: 12 }, (_, i) => ({
     value: (i + 1).toString(),
     label: format(new Date(2000, i, 1), "MMMM"),
@@ -240,6 +242,22 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
   return (
     <div className="space-y-4">
+      {reportRows.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-lg border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Total Revenue</p>
+            <p className="text-2xl font-bold">{fmtNum(payoutTotal)}</p>
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <p className="text-sm text-muted-foreground">{taxColumnLabel}</p>
+            <p className="text-2xl font-bold">{fmtNum(taxTotal)}</p>
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Allowable Deductions</p>
+            <p className="text-2xl font-bold">{fmtNum(deductionsTotal)}</p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-4">
         <Select value={month} onValueChange={setMonth}>
           <SelectTrigger className="w-[160px]">
