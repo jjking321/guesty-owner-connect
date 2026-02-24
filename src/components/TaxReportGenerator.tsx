@@ -43,8 +43,9 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("listings")
-        .select("id, nickname, address")
+        .select("id, nickname, address, active")
         .eq("archived", false)
+        .eq("active", true)
         .order("nickname");
       if (error) throw error;
       return data;
