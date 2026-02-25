@@ -18,8 +18,9 @@ interface ReportRow {
   provider: string;
   totalPayout: number | null;
   taxAmount: number | null;
+  taxAmountCalc: number | null;
   allowableDeductions: number | null;
-  groupedUnits?: string[]; // for tooltip on grouped rows
+  groupedUnits?: string[];
 }
 
 interface TaxReportGeneratorProps {
@@ -35,7 +36,9 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   const selectedYear = parseInt(year);
   const selectedMonth = parseInt(month);
   const multiplier = taxType === "county" ? 5 / 12 : 7 / 12;
-  const taxColumnLabel = taxType === "county" ? "County Tax" : "State Tax";
+  const flatRate = taxType === "county" ? 0.05 : 0.07;
+  const taxCollectedLabel = taxType === "county" ? "County Tax (Collected)" : "State Tax (Collected)";
+  const taxCalcLabel = taxType === "county" ? "County Tax (Calculated)" : "State Tax (Calculated)";
 
   const periodLabel = format(new Date(selectedYear, selectedMonth - 1, 1), "MMMM yyyy");
   const startDate = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-01`;
@@ -174,11 +177,19 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         return total;
       };
 
+      const sumCalcTax = (group: typeof listingReservations) => {
+        let total = 0;
+        for (const r of group) total += ((r.sub_total as number) || 0) * flatRate;
+        return total;
+      };
+
       return {
         behalfPayout: behalf.length > 0 ? sumField(behalf, "sub_total") : 0,
         behalfTax: behalf.length > 0 ? sumField(behalf, "tax_amount") * multiplier : 0,
+        behalfTaxCalc: behalf.length > 0 ? sumCalcTax(behalf) : 0,
         otherPayout: other.length > 0 ? sumField(other, "sub_total") : 0,
         otherTax: other.length > 0 ? sumField(other, "tax_amount") * multiplier : 0,
+        otherTaxCalc: other.length > 0 ? sumCalcTax(other) : 0,
         exemptTotal: exemptByListing.get(listing.id) || 0,
         hasBehalf: behalf.length > 0,
         hasOther: other.length > 0,
@@ -205,15 +216,18 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     // Process grouped listings
     for (const [groupId, groupListings] of groupedByGroupId) {
       const group = groupsMap.get(groupId)!;
-      let totalBehalfPayout = 0, totalBehalfTax = 0, totalOtherPayout = 0, totalOtherTax = 0, totalExempt = 0;
+      let totalBehalfPayout = 0, totalBehalfTax = 0, totalBehalfTaxCalc = 0;
+      let totalOtherPayout = 0, totalOtherTax = 0, totalOtherTaxCalc = 0, totalExempt = 0;
       let anyBehalf = false, anyOther = false;
 
       for (const listing of groupListings) {
         const data = computeListingData(listing);
         totalBehalfPayout += data.behalfPayout;
         totalBehalfTax += data.behalfTax;
+        totalBehalfTaxCalc += data.behalfTaxCalc;
         totalOtherPayout += data.otherPayout;
         totalOtherTax += data.otherTax;
+        totalOtherTaxCalc += data.otherTaxCalc;
         totalExempt += data.exemptTotal;
         if (data.hasBehalf) anyBehalf = true;
         if (data.hasOther) anyOther = true;
@@ -229,6 +243,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "behalfPlatforms",
         totalPayout: anyBehalf ? totalBehalfPayout : null,
         taxAmount: anyBehalf ? totalBehalfTax : null,
+        taxAmountCalc: anyBehalf ? totalBehalfTaxCalc : null,
         allowableDeductions: null,
         groupedUnits: unitNames,
       });
@@ -241,6 +256,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: anyOther ? totalOtherPayout : null,
         taxAmount: anyOther ? totalOtherTax : null,
+        taxAmountCalc: anyOther ? totalOtherTaxCalc : null,
         allowableDeductions: totalExempt || null,
         groupedUnits: unitNames,
       });
@@ -268,6 +284,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "behalfPlatforms",
         totalPayout: data.hasBehalf ? data.behalfPayout : null,
         taxAmount: data.hasBehalf ? data.behalfTax : null,
+        taxAmountCalc: data.hasBehalf ? data.behalfTaxCalc : null,
         allowableDeductions: null,
       });
 
@@ -279,6 +296,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: data.hasOther ? data.otherPayout : null,
         taxAmount: data.hasOther ? data.otherTax : null,
+        taxAmountCalc: data.hasOther ? data.otherTaxCalc : null,
         allowableDeductions: data.exemptTotal || null,
       });
     }
@@ -290,6 +308,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
 
   const payoutTotal = reportRows.reduce((acc, r) => acc + (r.totalPayout || 0), 0);
   const taxTotal = reportRows.reduce((acc, r) => acc + (r.taxAmount || 0), 0);
+  const taxCalcTotal = reportRows.reduce((acc, r) => acc + (r.taxAmountCalc || 0), 0);
   const deductionsTotal = reportRows.reduce((acc, r) => acc + (r.allowableDeductions || 0), 0);
   const otherSubtotal = reportRows.filter((r) => r.provider === "other").reduce((acc, r) => acc + (r.totalPayout || 0), 0);
 
@@ -301,7 +320,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       "Property Address": r.propertyAddress,
       "Provider": r.provider,
       "Subtotal": r.totalPayout !== null ? r.totalPayout.toFixed(2) : "",
-      [taxColumnLabel]: r.taxAmount !== null ? r.taxAmount.toFixed(2) : "",
+      [taxCollectedLabel]: r.taxAmount !== null ? r.taxAmount.toFixed(2) : "",
+      [taxCalcLabel]: r.taxAmountCalc !== null ? r.taxAmountCalc.toFixed(2) : "",
       "Allowable Deductions": r.allowableDeductions !== null ? r.allowableDeductions.toFixed(2) : "",
     }));
 
@@ -332,14 +352,18 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   return (
     <div className="space-y-4">
       {reportRows.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm text-muted-foreground">Total Subtotal</p>
             <p className="text-2xl font-bold">{fmtNum(payoutTotal)}</p>
           </div>
           <div className="rounded-lg border bg-card p-4">
-            <p className="text-sm text-muted-foreground">{taxColumnLabel}</p>
+            <p className="text-sm text-muted-foreground">{taxCollectedLabel}</p>
             <p className="text-2xl font-bold">{fmtNum(taxTotal)}</p>
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <p className="text-sm text-muted-foreground">{taxCalcLabel}</p>
+            <p className="text-2xl font-bold">{fmtNum(taxCalcTotal)}</p>
           </div>
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm text-muted-foreground">Other Subtotal</p>
@@ -398,7 +422,8 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                   <TableHead>Property Address</TableHead>
                   <TableHead>Provider</TableHead>
                   <TableHead className="text-right">Subtotal</TableHead>
-                  <TableHead className="text-right">{taxColumnLabel}</TableHead>
+                  <TableHead className="text-right">{taxCollectedLabel}</TableHead>
+                  <TableHead className="text-right">{taxCalcLabel}</TableHead>
                   <TableHead className="text-right">Allowable Deductions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -425,6 +450,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                     <TableCell className="text-sm">{row.provider}</TableCell>
                     <TableCell className="text-right text-sm">{fmt(row.totalPayout)}</TableCell>
                     <TableCell className="text-right text-sm">{fmt(row.taxAmount)}</TableCell>
+                    <TableCell className="text-right text-sm">{fmt(row.taxAmountCalc)}</TableCell>
                     <TableCell className="text-right text-sm">{fmt(row.allowableDeductions)}</TableCell>
                   </TableRow>
                 ))}
@@ -432,6 +458,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                   <TableCell colSpan={5}>Totals</TableCell>
                   <TableCell className="text-right">{fmt(payoutTotal)}</TableCell>
                   <TableCell className="text-right">{fmt(taxTotal)}</TableCell>
+                  <TableCell className="text-right">{fmt(taxCalcTotal)}</TableCell>
                   <TableCell className="text-right">{fmt(deductionsTotal)}</TableCell>
                 </TableRow>
               </TableBody>
