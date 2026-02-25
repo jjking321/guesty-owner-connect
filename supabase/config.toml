@@ -125,3 +125,6 @@ verify_jwt = false
 
 [functions.batch-analyze-disputes]
 verify_jwt = false
+
+[functions.backfill-reservation-subtotals]
+verify_jwt = false
