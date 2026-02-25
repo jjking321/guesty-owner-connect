@@ -22,8 +22,8 @@ export function TaxExemptTable() {
 
   const refreshReservation = async (reservationId: string, listingId: string) => {
     const now = Date.now();
-    if (now - lastRefreshAt < 10000) {
-      toast.error("Please wait at least 10 seconds between refreshes");
+    if (now - lastRefreshAt < 2000) {
+      toast.error("Please wait a couple seconds between refreshes");
       return;
     }
     setRefreshingId(reservationId);
