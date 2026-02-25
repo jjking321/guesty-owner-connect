@@ -1,44 +1,25 @@
 
 
-# Add Calculated Tax Column Alongside Actual Collected
+# Remove Calculated Tax from Behalf Rows and Deduction Rows
 
-## Overview
-Add a new "Calculated" tax column next to the existing "Actual Collected" tax column. The existing column shows the proportional split (5/12 or 7/12 of `tax_amount`). The new column shows a flat percentage of `sub_total` (5% for county, 7% for state).
+## Problem
+The "Calculated" tax column currently shows values for behalf-platform rows and for rows with allowable deductions. This is incorrect because:
+1. Behalf platforms (e.g., Airbnb) already collect and remit tax -- there is nothing to calculate separately.
+2. Allowable deductions represent tax-exempt reservations -- calculating tax on them defeats the purpose.
 
 ## File: `src/components/TaxReportGenerator.tsx`
 
-### 1. Update `ReportRow` interface (line 13-23)
-Add `taxAmountCalc: number | null` field for the calculated (flat %) value.
+### Changes
 
-### 2. Update `computeListingData` (lines 166-186)
-Add per-reservation accumulation for calculated tax:
-- County: sum of `sub_total * 0.05` per reservation
-- State: sum of `sub_total * 0.07` per reservation
+**Grouped rows (lines 238-262):** Set `taxAmountCalc: null` on the behalfPlatforms row. On the "other" row, set `taxAmountCalc: null` when there are allowable deductions (`totalExempt > 0`).
 
-Return new fields: `behalfTaxCalc`, `otherTaxCalc`.
+**Ungrouped rows (lines 279-301):** Same logic -- `taxAmountCalc: null` for behalfPlatforms rows, and `taxAmountCalc: null` on "other" rows when `data.exemptTotal > 0`.
 
-### 3. Update grouped row building (lines 206-246)
-- Track `totalBehalfTaxCalc` and `totalOtherTaxCalc` accumulators
-- Populate `taxAmountCalc` on each row
+Specifically, 4 lines change from populated values to `null`:
+- Line 246: `taxAmountCalc: null` (grouped behalf)
+- Line 259: `taxAmountCalc: (anyOther && !totalExempt) ? totalOtherTaxCalc : null` (grouped other)
+- Line 287: `taxAmountCalc: null` (ungrouped behalf)
+- Line 299: `taxAmountCalc: (data.hasOther && !data.exemptTotal) ? data.otherTaxCalc : null` (ungrouped other)
 
-### 4. Update ungrouped row building (lines 257-283)
-- Populate `taxAmountCalc` from `computeListingData` results
-
-### 5. Rename existing tax column header (line 38 + table header)
-- Rename from "County Tax" / "State Tax" to "County Tax (Collected)" / "State Tax (Collected)"
-- New column header: "County Tax (Calculated)" / "State Tax (Calculated)"
-
-### 6. Add summary totals (lines 291-294)
-- Add `taxCalcTotal` for the new calculated column
-
-### 7. Update summary cards
-- Add a card showing the calculated total alongside the collected total
-
-### 8. Update table columns
-- Add new `<TableHead>` and `<TableCell>` for the calculated amount
-
-### 9. Update CSV export (lines 296-306)
-- Add the calculated column to the CSV output
-
-### No database changes needed.
+No database changes needed.
 
