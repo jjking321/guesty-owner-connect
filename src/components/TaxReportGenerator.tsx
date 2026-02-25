@@ -243,7 +243,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "behalfPlatforms",
         totalPayout: anyBehalf ? totalBehalfPayout : null,
         taxAmount: anyBehalf ? totalBehalfTax : null,
-        taxAmountCalc: anyBehalf ? totalBehalfTaxCalc : null,
+        taxAmountCalc: null,
         allowableDeductions: null,
         groupedUnits: unitNames,
       });
@@ -256,7 +256,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: anyOther ? totalOtherPayout : null,
         taxAmount: anyOther ? totalOtherTax : null,
-        taxAmountCalc: anyOther ? totalOtherTaxCalc : null,
+        taxAmountCalc: (anyOther && !totalExempt) ? totalOtherTaxCalc : null,
         allowableDeductions: totalExempt || null,
         groupedUnits: unitNames,
       });
@@ -284,7 +284,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "behalfPlatforms",
         totalPayout: data.hasBehalf ? data.behalfPayout : null,
         taxAmount: data.hasBehalf ? data.behalfTax : null,
-        taxAmountCalc: data.hasBehalf ? data.behalfTaxCalc : null,
+        taxAmountCalc: null,
         allowableDeductions: null,
       });
 
@@ -296,7 +296,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: data.hasOther ? data.otherPayout : null,
         taxAmount: data.hasOther ? data.otherTax : null,
-        taxAmountCalc: data.hasOther ? data.otherTaxCalc : null,
+        taxAmountCalc: (data.hasOther && !data.exemptTotal) ? data.otherTaxCalc : null,
         allowableDeductions: data.exemptTotal || null,
       });
     }
