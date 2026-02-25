@@ -4,6 +4,7 @@ import { TaxSettingsTable } from "@/components/TaxSettingsTable";
 import { TaxReportGenerator } from "@/components/TaxReportGenerator";
 import { TaxExemptTable } from "@/components/TaxExemptTable";
 import { TaxTemplateFill } from "@/components/TaxTemplateFill";
+import { BackfillSubtotals } from "@/components/BackfillSubtotals";
 
 export default function TaxReport() {
   return (
@@ -38,7 +39,10 @@ export default function TaxReport() {
           </TabsContent>
 
           <TabsContent value="settings">
-            <TaxSettingsTable />
+            <div className="space-y-6">
+              <TaxSettingsTable />
+              <BackfillSubtotals />
+            </div>
           </TabsContent>
 
           <TabsContent value="template">
