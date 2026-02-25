@@ -1,48 +1,43 @@
 
 
-# Why the Backfill Skipped All 1,021 Reservations
+# Fix: Use Correct Guesty Field Name `subTotalPrice` Instead of `subTotal`
 
 ## Root Cause
 
-The Guesty API is not returning `money.subTotal` when only `_id money.subTotal` is requested in the `fields` parameter. The working sync functions (e.g., `sync-new-reservations`) request **all** money sub-fields together:
+Every Guesty sync function in the project requests `money.subTotal`, but the actual field name in the Guesty API response is `money.subTotalPrice`. This is why the database has zero positive `sub_total` values across all 61,965 reservations -- the field has never been correctly mapped.
 
-```
-fields: '_id status checkIn checkOut ... money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue money.totalTaxes money.subTotal'
-```
+## Changes Required
 
-The backfill function requests only:
+All four edge functions that reference `money.subTotal` need to be updated to `money.subTotalPrice`:
 
-```
-fields: '_id money.subTotal'
-```
+### 1. `supabase/functions/backfill-reservation-subtotals/index.ts`
+- Line 135: Type definition `subTotal` → `subTotalPrice`
+- Line 143: Fields param `money.subTotal` → `money.subTotalPrice`
+- Line 304: Type in processPage `subTotal` → `subTotalPrice`
+- Line 307: Access `res.money?.subTotal` → `res.money?.subTotalPrice`
+- Line 410: Progress message text (cosmetic)
 
-Guesty's API appears to not populate the `money` object at all when only a single nested sub-field is requested in isolation. Every reservation came back with `money` as `undefined` or `null`, so the function correctly skipped all 1,021 records (the "skip if null" logic working as designed).
+### 2. `supabase/functions/sync-guesty-data/index.ts`
+- Line 26: Type definition `subTotal` → `subTotalPrice`
+- Line 380: Fields param `money.subTotal` → `money.subTotalPrice`
+- Line 409: Mapping `reservation.money?.subTotal` → `reservation.money?.subTotalPrice`
+- Line 532: Same mapping (second upsert block)
 
-## Fix
+### 3. `supabase/functions/sync-new-reservations/index.ts`
+- Line 33: Type definition `subTotal` → `subTotalPrice`
+- Line 462: Fields param `money.subTotal` → `money.subTotalPrice`
+- Line 531: Mapping `reservation.money?.subTotal` → `reservation.money?.subTotalPrice`
 
-In `supabase/functions/backfill-reservation-subtotals/index.ts`, change the `fields` parameter in `fetchReservationPage` (line 143) to request the full set of money fields, matching the working sync pattern. Also add a diagnostic log on the first page to confirm data is coming through.
+### 4. `supabase/functions/sync-listing-reservations/index.ts`
+- Line 33: Type definition `subTotal` → `subTotalPrice`
+- Line 401: Fields param `money.subTotal` → `money.subTotalPrice`
+- Line 438: Mapping `reservation.money?.subTotal` → `reservation.money?.subTotalPrice`
 
-### Changes
+## No Database or Frontend Changes
 
-**File: `supabase/functions/backfill-reservation-subtotals/index.ts`**
+The database column stays `sub_total`. The frontend components (`TaxReportGenerator.tsx`, `TaxTemplateFill.tsx`) already reference `sub_total` correctly. Only the API field name in the edge functions is wrong.
 
-1. **Line 143** — Expand the `fields` parameter:
-   ```
-   // From:
-   fields: '_id money.subTotal',
-   // To:
-   fields: '_id money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue money.totalTaxes money.subTotal',
-   ```
+## After Deployment
 
-2. **After line 330** (after processing the first page) — Add a diagnostic log to confirm data shape:
-   ```typescript
-   if (firstPage.results.length > 0) {
-     const sample = firstPage.results[0];
-     console.log(`Sample reservation: _id=${sample._id}, money=${JSON.stringify(sample.money)}`);
-   }
-   ```
-
-3. **Update the return type** on `fetchReservationPage` (line 135) to include the broader money fields so TypeScript doesn't complain, though only `subTotal` is used.
-
-This is a one-line fix (the `fields` string) plus a diagnostic log. No other logic changes needed — the processing and skip logic are correct.
+Re-run the backfill for a test month (e.g., January 2026) to verify `subTotalPrice` values are now being captured and written to `sub_total`.
 
