@@ -1,20 +1,39 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUserRole } from "@/hooks/useUserRole";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Loader2, EyeOff, Eye } from "lucide-react";
+import { Loader2, EyeOff, Eye, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 export function TaxExemptTable() {
   const { organizationId } = useUserRole();
+  const queryClient = useQueryClient();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear().toString());
   const [month, setMonth] = useState((now.getMonth()).toString());
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
+
+  const refreshReservation = async (reservationId: string, listingId: string) => {
+    setRefreshingId(reservationId);
+    try {
+      const { error } = await supabase.functions.invoke('sync-listing-reservations', {
+        body: { listingId },
+      });
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ["tax-exempt-reservations"] });
+      toast.success("Reservation refreshed from Guesty");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to refresh reservation");
+    } finally {
+      setRefreshingId(null);
+    }
+  };
 
   const selectedYear = parseInt(year);
   const selectedMonth = parseInt(month);
@@ -78,21 +97,46 @@ export function TaxExemptTable() {
       <TableCell className="text-sm font-medium">
         {listingMap.get(r.listing_id) || r.listing_id}
       </TableCell>
-      <TableCell className="text-sm">{r.guest_name || "—"}</TableCell>
+      <TableCell className="text-sm">
+        <a
+          href={`https://app.guesty.com/reservations/${r.id}/summary`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 hover:underline"
+        >
+          {r.guest_name || "—"}
+        </a>
+      </TableCell>
       <TableCell className="text-sm">{r.source || "—"}</TableCell>
       <TableCell className="text-sm">{r.check_in ? format(new Date(r.check_in), "MM/dd/yyyy") : "—"}</TableCell>
       <TableCell className="text-sm">{r.check_out ? format(new Date(r.check_out), "MM/dd/yyyy") : "—"}</TableCell>
       <TableCell className="text-right text-sm">{fmt(r.fare_accommodation_adjusted || 0)}</TableCell>
       <TableCell className="text-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => toggleHide(r.id)}
-          title={isHidden ? "Show in report" : "Hide from report"}
-        >
-          {isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-        </Button>
+        <div className="flex items-center justify-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            disabled={refreshingId === r.id}
+            onClick={() => refreshReservation(r.id, r.listing_id)}
+            title="Refresh from Guesty"
+          >
+            {refreshingId === r.id ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => toggleHide(r.id)}
+            title={isHidden ? "Show in report" : "Hide from report"}
+          >
+            {isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -153,7 +197,7 @@ export function TaxExemptTable() {
                 <TableHead>Check-in</TableHead>
                 <TableHead>Check-out</TableHead>
                 <TableHead className="text-right">Accommodation</TableHead>
-                <TableHead className="text-center w-[60px]"></TableHead>
+                <TableHead className="text-center w-[90px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
