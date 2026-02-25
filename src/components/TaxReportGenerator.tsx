@@ -189,7 +189,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         behalfTaxCalc: behalf.length > 0 ? sumCalcTax(behalf) : 0,
         otherPayout: other.length > 0 ? sumField(other, "sub_total") : 0,
         otherTax: other.length > 0 ? sumField(other, "tax_amount") * multiplier : 0,
-        otherTaxCalc: other.length > 0 ? sumCalcTax(other) : 0,
+        otherTaxCalc: ((other.length > 0 ? sumField(other, "sub_total") : 0) - (exemptByListing.get(listing.id) || 0)) * flatRate,
         exemptTotal: exemptByListing.get(listing.id) || 0,
         hasBehalf: behalf.length > 0,
         hasOther: other.length > 0,
@@ -256,7 +256,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: anyOther ? totalOtherPayout : null,
         taxAmount: anyOther ? totalOtherTax : null,
-        taxAmountCalc: (anyOther && !totalExempt) ? totalOtherTaxCalc : null,
+        taxAmountCalc: anyOther ? (totalOtherPayout - totalExempt) * flatRate : null,
         allowableDeductions: totalExempt || null,
         groupedUnits: unitNames,
       });
@@ -296,7 +296,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
         provider: "other",
         totalPayout: data.hasOther ? data.otherPayout : null,
         taxAmount: data.hasOther ? data.otherTax : null,
-        taxAmountCalc: (data.hasOther && !data.exemptTotal) ? data.otherTaxCalc : null,
+        taxAmountCalc: data.hasOther ? (data.otherPayout - data.exemptTotal) * flatRate : null,
         allowableDeductions: data.exemptTotal || null,
       });
     }
