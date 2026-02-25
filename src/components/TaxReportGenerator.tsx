@@ -98,7 +98,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reservations")
-        .select("id, listing_id, source, tax_amount, host_payout, status, check_out")
+        .select("id, listing_id, source, tax_amount, sub_total, status, check_out")
         .gte("check_out", startDate)
         .lte("check_out", endDate + "T23:59:59")
         .in("status", ["confirmed", "checked_in", "checked_out"]);
@@ -168,16 +168,16 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       const behalf = listingReservations.filter((r) => globalBehalfPlatforms.includes(r.source || ""));
       const other = listingReservations.filter((r) => !globalBehalfPlatforms.includes(r.source || ""));
 
-      const sumField = (group: typeof listingReservations, field: "host_payout" | "tax_amount") => {
+      const sumField = (group: typeof listingReservations, field: "sub_total" | "tax_amount") => {
         let total = 0;
         for (const r of group) total += (r[field] as number) || 0;
         return total;
       };
 
       return {
-        behalfPayout: behalf.length > 0 ? sumField(behalf, "host_payout") : 0,
+        behalfPayout: behalf.length > 0 ? sumField(behalf, "sub_total") : 0,
         behalfTax: behalf.length > 0 ? sumField(behalf, "tax_amount") * multiplier : 0,
-        otherPayout: other.length > 0 ? sumField(other, "host_payout") : 0,
+        otherPayout: other.length > 0 ? sumField(other, "sub_total") : 0,
         otherTax: other.length > 0 ? sumField(other, "tax_amount") * multiplier : 0,
         exemptTotal: exemptByListing.get(listing.id) || 0,
         hasBehalf: behalf.length > 0,

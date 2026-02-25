@@ -30,6 +30,7 @@ interface GuestyReservation {
     totalPaid?: number;
     ownerRevenue?: number;
     totalTaxes?: number;
+    subTotal?: number;
   };
   guest?: {
     fullName?: string;
@@ -397,7 +398,7 @@ Deno.serve(async (req) => {
         limit,
         skip,
         filters,
-        fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue money.totalTaxes guest.fullName',
+        fields: '_id status checkIn checkOut nightsCount guestsCount listingId source confirmationCode createdAt lastUpdatedAt money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue money.totalTaxes money.subTotal guest.fullName',
       });
 
       const reservations = result.data.results || [];
@@ -434,6 +435,7 @@ Deno.serve(async (req) => {
         total_paid: reservation.money?.totalPaid,
         owner_revenue: reservation.money?.ownerRevenue,
         tax_amount: reservation.money?.totalTaxes,
+        sub_total: reservation.money?.subTotal,
         source: reservation.source,
         confirmation_code: reservation.confirmationCode,
         created_at_guesty: reservation.createdAt,

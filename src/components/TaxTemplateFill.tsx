@@ -131,7 +131,7 @@ export function TaxTemplateFill() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("reservations")
-        .select("id, listing_id, source, tax_amount, host_payout, status, check_out, fare_accommodation_adjusted")
+        .select("id, listing_id, source, tax_amount, sub_total, status, check_out, fare_accommodation_adjusted")
         .gte("check_out", startDate!)
         .lte("check_out", endDate + "T23:59:59")
         .in("status", ["confirmed", "checked_in", "checked_out"]);
@@ -191,9 +191,9 @@ export function TaxTemplateFill() {
         for (const r of listingRes) {
           const isBehalf = globalBehalfPlatforms.includes(r.source || "");
           if (isBehalf) {
-            behalfPayout += (r.host_payout as number) || 0;
+            behalfPayout += (r.sub_total as number) || 0;
           } else {
-            otherPayout += (r.host_payout as number) || 0;
+            otherPayout += (r.sub_total as number) || 0;
             // Tax exempt: manual source, no tax, has accommodation fare
             if (
               r.source === "manual" &&
