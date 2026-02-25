@@ -299,7 +299,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       "Permit Number": r.permitNumber,
       "Property Address": r.propertyAddress,
       "Provider": r.provider,
-      "Total Payout": r.totalPayout !== null ? r.totalPayout.toFixed(2) : "",
+      "Subtotal": r.totalPayout !== null ? r.totalPayout.toFixed(2) : "",
       [taxColumnLabel]: r.taxAmount !== null ? r.taxAmount.toFixed(2) : "",
       "Allowable Deductions": r.allowableDeductions !== null ? r.allowableDeductions.toFixed(2) : "",
     }));
@@ -333,7 +333,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
       {reportRows.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="rounded-lg border bg-card p-4">
-            <p className="text-sm text-muted-foreground">Total Revenue</p>
+            <p className="text-sm text-muted-foreground">Total Subtotal</p>
             <p className="text-2xl font-bold">{fmtNum(payoutTotal)}</p>
           </div>
           <div className="rounded-lg border bg-card p-4">
@@ -392,7 +392,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
                   <TableHead>Permit #</TableHead>
                   <TableHead>Property Address</TableHead>
                   <TableHead>Provider</TableHead>
-                  <TableHead className="text-right">Total Payout</TableHead>
+                  <TableHead className="text-right">Subtotal</TableHead>
                   <TableHead className="text-right">{taxColumnLabel}</TableHead>
                   <TableHead className="text-right">Allowable Deductions</TableHead>
                 </TableRow>
