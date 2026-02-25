@@ -1,21 +1,28 @@
 
 
-# Replace "Total Payout" with Guesty `money.subTotal` — COMPLETED
+# Add Real-Time Progress to Backfill Subtotals
 
 ## Summary
-Swapped the revenue display column from `host_payout` to a new `sub_total` field (sourced from Guesty's `money.subTotal`). Tax calculations remain unchanged (still using `tax_amount * 5/12` for county and `tax_amount * 7/12` for state).
+Add a live progress bar to the BackfillSubtotals component using the existing `SyncProgressCard` pattern, and ensure OAuth token sharing is properly handled.
 
-## Changes Made
+## OAuth Status
+The `backfill-reservation-subtotals` edge function already uses `getGuestyAccessTokenCached()` with the shared `guesty_oauth_tokens` table. This means it shares cached tokens with all other Guesty sync functions and respects cooldown periods. No changes needed here.
 
-### 1. Database: Added `sub_total` column to `reservations` ✅
-### 2. Edge Functions: Syncing `money.subTotal` from Guesty ✅
-- `supabase/functions/sync-guesty-data/index.ts` (both upsert locations)
-- `supabase/functions/sync-new-reservations/index.ts`
-- `supabase/functions/sync-listing-reservations/index.ts`
-### 3. Frontend: Using `sub_total` instead of `host_payout` for display ✅
-- `src/components/TaxReportGenerator.tsx`
-- `src/components/TaxTemplateFill.tsx`
+## Changes
 
-### 4. Backfill (follow-up)
-Existing reservations won't have `sub_total` populated until re-synced. A backfill function can be created to fetch `money.subTotal` for historical records.
+### 1. Update `SyncProgressCard` to support `backfill_subtotals` sync type
+- Add `'backfill_subtotals'` to the `syncType` union in `SyncProgressCardProps`
+- Add a display name mapping: `'backfill_subtotals'` → `'Subtotal Backfill'`
+
+### 2. Update `BackfillSubtotals` component to show `SyncProgressCard`
+- Import and render `SyncProgressCard` below the backfill button
+- Pass the first account's ID and `syncType="backfill_subtotals"`
+- The `SyncProgressCard` handles all realtime subscription logic (polling for running jobs, subscribing to `postgres_changes` on `sync_jobs`)
+
+### 3. Enable realtime on `sync_jobs` table (if not already)
+- Verify `sync_jobs` is in the `supabase_realtime` publication. If not, add a migration.
+
+### Files to edit
+- `src/components/SyncProgressCard.tsx` (add `backfill_subtotals` to type union and display name)
+- `src/components/BackfillSubtotals.tsx` (add `SyncProgressCard` with realtime progress)
 
