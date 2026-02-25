@@ -291,6 +291,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   const payoutTotal = reportRows.reduce((acc, r) => acc + (r.totalPayout || 0), 0);
   const taxTotal = reportRows.reduce((acc, r) => acc + (r.taxAmount || 0), 0);
   const deductionsTotal = reportRows.reduce((acc, r) => acc + (r.allowableDeductions || 0), 0);
+  const otherSubtotal = reportRows.filter((r) => r.provider === "other").reduce((acc, r) => acc + (r.totalPayout || 0), 0);
 
   const downloadCSV = () => {
     const csvRows = reportRows.map((r) => ({
@@ -331,7 +332,7 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
   return (
     <div className="space-y-4">
       {reportRows.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm text-muted-foreground">Total Subtotal</p>
             <p className="text-2xl font-bold">{fmtNum(payoutTotal)}</p>
@@ -339,6 +340,10 @@ export function TaxReportGenerator({ taxType }: TaxReportGeneratorProps) {
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm text-muted-foreground">{taxColumnLabel}</p>
             <p className="text-2xl font-bold">{fmtNum(taxTotal)}</p>
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Other Subtotal</p>
+            <p className="text-2xl font-bold">{fmtNum(otherSubtotal)}</p>
           </div>
           <div className="rounded-lg border bg-card p-4">
             <p className="text-sm text-muted-foreground">Allowable Deductions</p>
