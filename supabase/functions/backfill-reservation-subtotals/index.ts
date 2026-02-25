@@ -132,7 +132,7 @@ async function fetchReservationPage(
   checkOutStart: string,
   checkOutEnd: string,
   skip: number
-): Promise<{ results: Array<{ _id: string; money?: { fareAccommodationAdjusted?: number; hostPayout?: number; totalPaid?: number; ownerRevenue?: number; totalTaxes?: number; subTotal?: number } }>; count: number }> {
+): Promise<{ results: Array<{ _id: string; money?: { fareAccommodationAdjusted?: number; hostPayout?: number; totalPaid?: number; ownerRevenue?: number; totalTaxes?: number; subTotalPrice?: number } }>; count: number }> {
   const filters = JSON.stringify([
     { field: 'checkOut', operator: '$gte', value: checkOutStart },
     { field: 'checkOut', operator: '$lte', value: checkOutEnd },
@@ -140,7 +140,7 @@ async function fetchReservationPage(
 
   const params = new URLSearchParams({
     filters,
-    fields: '_id money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue money.totalTaxes money.subTotal',
+    fields: '_id money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue money.totalTaxes money.subTotalPrice',
     limit: String(PAGE_SIZE),
     skip: String(skip),
     sort: 'checkOut',
@@ -301,10 +301,10 @@ Deno.serve(async (req) => {
     let pagesProcessed = 0;
 
     // Process first page
-    const processPage = async (results: Array<{ _id: string; money?: { subTotal?: number } }>) => {
+    const processPage = async (results: Array<{ _id: string; money?: { subTotalPrice?: number } }>) => {
       const updates: { id: string; sub_total: number }[] = [];
       for (const res of results) {
-        const subTotal = res.money?.subTotal;
+        const subTotal = res.money?.subTotalPrice;
         if (subTotal != null && subTotal !== undefined) {
           updates.push({ id: res._id, sub_total: subTotal });
         } else {
@@ -407,7 +407,7 @@ Deno.serve(async (req) => {
     // All done
     await supabaseAdmin.from('sync_jobs').update({
       status: 'completed',
-      progress_message: `Completed. Updated ${updated} reservations (${skipped} had no subTotal data).`,
+      progress_message: `Completed. Updated ${updated} reservations (${skipped} had no subTotalPrice data).`,
       completed_at: new Date().toISOString(),
     }).eq('id', jobId);
 
