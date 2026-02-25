@@ -12,9 +12,8 @@ const LOCK_STALE_MS = 90000;
 const LOCK_POLL_INTERVAL_MS = 1000;
 const LOCK_MAX_POLLS = 6;
 
-const BATCH_SIZE = 5;
-const BATCH_DELAY_MS = 1000;
-const RECORDS_PER_INVOCATION = 500;
+const PAGE_SIZE = 100;
+const PAGE_DELAY_MS = 500;
 const FUNCTION_TIMEOUT_BUFFER = 40000;
 
 function parseRetryAfter(header: string | null): number {
@@ -128,14 +127,32 @@ async function fetchGuestyOAuthToken(clientId: string, clientSecret: string): Pr
   throw new Error('OAUTH_RATE_LIMIT:Unable to authenticate after multiple attempts. Please wait 3 minutes.');
 }
 
-async function fetchReservationSubTotal(apiToken: string, reservationId: string): Promise<number | null> {
+async function fetchReservationPage(
+  apiToken: string,
+  checkOutStart: string,
+  checkOutEnd: string,
+  skip: number
+): Promise<{ results: Array<{ _id: string; money?: { subTotal?: number } }>; count: number }> {
+  const filters = JSON.stringify([
+    { field: 'checkOut', operator: '$gte', value: checkOutStart },
+    { field: 'checkOut', operator: '$lte', value: checkOutEnd },
+  ]);
+
+  const params = new URLSearchParams({
+    filters,
+    fields: '_id money.subTotal',
+    limit: String(PAGE_SIZE),
+    skip: String(skip),
+    sort: 'checkOut',
+  });
+
   for (let attempt = 0; attempt <= 3; attempt++) {
     if (attempt > 0) {
-      await sleep(Math.min(1000 * Math.pow(2, attempt - 1), 10000));
+      await sleep(Math.min(2000 * Math.pow(2, attempt - 1), 15000));
     }
 
     const response = await fetch(
-      `https://open-api.guesty.com/v1/reservations/${reservationId}?fields=money.subTotal`,
+      `https://open-api.guesty.com/v1/reservations?${params.toString()}`,
       {
         headers: {
           'Authorization': `Bearer ${apiToken}`,
@@ -152,36 +169,29 @@ async function fetchReservationSubTotal(apiToken: string, reservationId: string)
 
     if (response.status === 429) {
       if (attempt < 3) {
-        const retryAfter = response.headers.get('Retry-After');
-        const retryAfterMs = retryAfter ? parseInt(retryAfter) * 1000 : 0;
+        const retryAfterMs = parseRetryAfter(response.headers.get('Retry-After'));
         const backoffMs = Math.min(2000 * Math.pow(2, attempt), 30000);
         const waitTime = Math.max(backoffMs, retryAfterMs);
         if (waitTime > MAX_WAIT_TIME) {
-          console.log(`Rate limit wait ${waitTime}ms exceeds max, skipping reservation`);
-          return null;
+          throw new Error('Rate limit wait too long, aborting page fetch');
         }
-        console.log(`Rate limited, waiting ${waitTime}ms (attempt ${attempt + 1}/4)...`);
+        console.log(`Rate limited on list endpoint, waiting ${waitTime}ms (attempt ${attempt + 1}/4)...`);
         await sleep(waitTime);
         continue;
       }
-      console.log('Rate limit exceeded after retries, skipping reservation');
-      return null;
-    }
-
-    if (response.status === 404 || response.status === 410) {
-      await response.text();
-      return null;
+      throw new Error('Rate limit exceeded after retries on list endpoint');
     }
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Guesty API error ${response.status}: ${errorText}`);
+      throw new Error(`Guesty list API error ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
-    return data?.money?.subTotal ?? null;
+    return { results: data.results || [], count: data.count || 0 };
   }
-  return null;
+
+  throw new Error('Failed to fetch reservation page after retries');
 }
 
 Deno.serve(async (req) => {
@@ -213,7 +223,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { guestyAccountId, jobId: existingJobId } = body;
+    const { guestyAccountId, jobId: existingJobId, skipOffset } = body;
     const checkOutMonths = body.checkOutMonths || body.checkInMonths;
 
     if (!guestyAccountId) {
@@ -243,8 +253,7 @@ Deno.serve(async (req) => {
       supabaseAdmin, account.id, account.client_id, account.client_secret
     );
 
-    // Build date ranges from checkInMonths
-    // Each month string "YYYY-MM" becomes a range: first day to last day
+    // Build date range from checkOutMonths
     const dateFilters: { start: string; end: string }[] = checkOutMonths.map((m: string) => {
       const [year, month] = m.split('-').map(Number);
       const start = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -253,72 +262,31 @@ Deno.serve(async (req) => {
       return { start, end };
     });
 
-    // Find the overall min start and max end for a single query
     const overallStart = dateFilters.reduce((min, d) => d.start < min ? d.start : min, dateFilters[0].start);
     const overallEnd = dateFilters.reduce((max, d) => d.end > max ? d.end : max, dateFilters[0].end);
 
     console.log(`Backfilling sub_total for check-out months: ${checkOutMonths.join(', ')}`);
     console.log(`Date range: ${overallStart} to ${overallEnd}`);
 
-    // Fetch reservations missing sub_total within the date range
-    const { data: missingReservations, error: queryError } = await supabaseAdmin
-      .from('reservations')
-      .select('id, check_out')
-      .eq('guesty_account_id', guestyAccountId)
-      .is('sub_total', null)
-      .gte('check_out', overallStart)
-      .lte('check_out', overallEnd)
-      .in('status', ['confirmed', 'checked_in', 'checked_out'])
-      .limit(RECORDS_PER_INVOCATION);
+    // First page fetch to get total count from Guesty
+    let currentSkip = skipOffset || 0;
+    const firstPage = await fetchReservationPage(apiToken, overallStart, overallEnd, currentSkip);
+    const totalFromGuesty = firstPage.count;
 
-    if (queryError) throw queryError;
-
-    // Further filter to only include reservations whose check_in falls in the requested months
-    const requestedMonths = new Set(checkOutMonths);
-    const filteredReservations = missingReservations?.filter(r => {
-      if (!r.check_out) return false;
-      const checkOutMonth = r.check_out.substring(0, 7); // "YYYY-MM"
-      return requestedMonths.has(checkOutMonth);
-    }) || [];
-
-    const totalMissing = filteredReservations.length;
-    console.log(`Found ${totalMissing} reservations missing sub_total in requested months`);
-
-    if (totalMissing === 0) {
-      if (existingJobId) {
-        await supabaseAdmin.from('sync_jobs').update({
-          status: 'completed',
-          progress_message: 'All reservations in selected months have sub_total data',
-          completed_at: new Date().toISOString(),
-        }).eq('id', existingJobId);
-      }
-      return new Response(JSON.stringify({ message: 'No reservations missing sub_total', count: 0 }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    console.log(`Guesty reports ${totalFromGuesty} total reservations in date range, starting at skip=${currentSkip}`);
 
     // Create or reuse sync job
     let jobId = existingJobId;
     if (!jobId) {
-      // Get total count for progress
-      const { count: totalCount } = await supabaseAdmin
-        .from('reservations')
-        .select('id', { count: 'exact', head: true })
-        .eq('guesty_account_id', guestyAccountId)
-        .is('sub_total', null)
-        .gte('check_out', overallStart)
-        .lte('check_out', overallEnd)
-        .in('status', ['confirmed', 'checked_in', 'checked_out']);
-
       const { data: newJob, error: jobError } = await supabaseAdmin
         .from('sync_jobs')
         .insert({
           guesty_account_id: guestyAccountId,
           sync_type: 'backfill_subtotals',
           status: 'running',
-          progress_message: `Starting sub_total backfill for ${totalCount} reservations...`,
-          total_items: totalCount,
-          items_synced: 0,
+          progress_message: `Starting sub_total backfill (${totalFromGuesty} reservations from Guesty)...`,
+          total_items: totalFromGuesty,
+          items_synced: currentSkip,
         })
         .select('id')
         .single();
@@ -328,13 +296,51 @@ Deno.serve(async (req) => {
     }
 
     const startTime = Date.now();
-    let processed = 0;
     let updated = 0;
-    let errors = 0;
+    let skipped = 0;
+    let pagesProcessed = 0;
 
-    for (let i = 0; i < filteredReservations.length; i += BATCH_SIZE) {
+    // Process first page
+    const processPage = async (results: Array<{ _id: string; money?: { subTotal?: number } }>) => {
+      const updates: { id: string; sub_total: number }[] = [];
+      for (const res of results) {
+        const subTotal = res.money?.subTotal;
+        if (subTotal != null && subTotal !== undefined) {
+          updates.push({ id: res._id, sub_total: subTotal });
+        } else {
+          skipped++;
+        }
+      }
+
+      // Batch update DB
+      for (const upd of updates) {
+        const { error: updateError } = await supabaseAdmin
+          .from('reservations')
+          .update({ sub_total: upd.sub_total })
+          .eq('id', upd.id);
+
+        if (updateError) {
+          console.error(`Failed to update ${upd.id}:`, updateError);
+        } else {
+          updated++;
+        }
+      }
+    };
+
+    await processPage(firstPage.results);
+    currentSkip += firstPage.results.length;
+    pagesProcessed++;
+
+    // Update progress
+    await supabaseAdmin.from('sync_jobs').update({
+      items_synced: currentSkip,
+      progress_message: `Updated ${updated} reservations (page ${pagesProcessed}, ${skipped} skipped)...`,
+    }).eq('id', jobId);
+
+    // Continue fetching pages until done or timeout approaching
+    while (currentSkip < totalFromGuesty) {
       if (Date.now() - startTime > FUNCTION_TIMEOUT_BUFFER) {
-        console.log(`Approaching timeout after processing ${processed} records, will self-invoke`);
+        console.log(`Approaching timeout after ${pagesProcessed} pages (${currentSkip}/${totalFromGuesty}), will self-invoke`);
         break;
       }
 
@@ -347,75 +353,30 @@ Deno.serve(async (req) => {
 
       if (jobCheck?.status === 'failed') {
         console.log('Job was cancelled');
-        return new Response(JSON.stringify({ message: 'Job cancelled', processed, updated }), {
+        return new Response(JSON.stringify({ message: 'Job cancelled', updated, skipped }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const batch = filteredReservations.slice(i, i + BATCH_SIZE);
+      await sleep(PAGE_DELAY_MS);
 
-      for (let j = 0; j < batch.length; j++) {
-        const reservation = batch[j];
-        if (j > 0) await sleep(200);
-        try {
-          const subTotal = await fetchReservationSubTotal(apiToken, reservation.id);
+      const page = await fetchReservationPage(apiToken, overallStart, overallEnd, currentSkip);
+      if (page.results.length === 0) break;
 
-          if (subTotal !== null) {
-            const { error: updateError } = await supabaseAdmin
-              .from('reservations')
-              .update({ sub_total: subTotal })
-              .eq('id', reservation.id);
-
-            if (updateError) {
-              console.error(`Failed to update ${reservation.id}:`, updateError);
-              errors++;
-            } else {
-              updated++;
-            }
-          } else {
-            // Set to 0 if not found
-            await supabaseAdmin
-              .from('reservations')
-              .update({ sub_total: 0 })
-              .eq('id', reservation.id);
-            updated++;
-          }
-        } catch (err: any) {
-          console.error(`Error fetching sub_total for ${reservation.id}:`, err.message);
-          errors++;
-        }
-        processed++;
-      }
+      await processPage(page.results);
+      currentSkip += page.results.length;
+      pagesProcessed++;
 
       // Update progress
-      const { data: currentProgress } = await supabaseAdmin
-        .from('sync_jobs')
-        .select('items_synced')
-        .eq('id', jobId)
-        .single();
-      const newItemsSynced = (currentProgress?.items_synced || 0) + batch.length;
       await supabaseAdmin.from('sync_jobs').update({
-        items_synced: newItemsSynced,
-        progress_message: `Updated ${newItemsSynced} reservations (${errors} errors)...`,
+        items_synced: currentSkip,
+        progress_message: `Updated ${updated} reservations (page ${pagesProcessed}, ${skipped} skipped)...`,
       }).eq('id', jobId);
-
-      if (i + BATCH_SIZE < filteredReservations.length) {
-        await sleep(BATCH_DELAY_MS);
-      }
     }
 
-    // Check if there are more to process
-    const { count: remainingCount } = await supabaseAdmin
-      .from('reservations')
-      .select('id', { count: 'exact', head: true })
-      .eq('guesty_account_id', guestyAccountId)
-      .is('sub_total', null)
-      .gte('check_out', overallStart)
-      .lte('check_out', overallEnd)
-      .in('status', ['confirmed', 'checked_in', 'checked_out']);
-
-    if (remainingCount && remainingCount > 0) {
-      console.log(`${remainingCount} reservations remaining, self-invoking...`);
+    // If there are more pages, self-invoke
+    if (currentSkip < totalFromGuesty) {
+      console.log(`${totalFromGuesty - currentSkip} reservations remaining, self-invoking at skip=${currentSkip}...`);
 
       const functionUrl = `${supabaseUrl}/functions/v1/backfill-reservation-subtotals`;
       fetch(functionUrl, {
@@ -425,30 +386,32 @@ Deno.serve(async (req) => {
           'Authorization': `Bearer ${serviceRoleKey}`,
           'x-service-role': 'true',
         },
-        body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId }),
+        body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId, skipOffset: currentSkip }),
       }).catch(err => console.error('Self-invoke error:', err));
 
       return new Response(JSON.stringify({
         message: 'Batch complete, continuing...',
-        processed,
         updated,
-        errors,
-        remaining: remainingCount,
+        skipped,
+        pagesProcessed,
+        currentSkip,
+        totalFromGuesty,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // All done
     await supabaseAdmin.from('sync_jobs').update({
-      status: errors > 0 ? 'completed_with_errors' : 'completed',
-      progress_message: `Completed. Updated ${updated} reservations${errors > 0 ? ` (${errors} errors)` : ''}`,
+      status: 'completed',
+      progress_message: `Completed. Updated ${updated} reservations (${skipped} had no subTotal data).`,
       completed_at: new Date().toISOString(),
     }).eq('id', jobId);
 
     return new Response(JSON.stringify({
       message: 'Sub_total backfill complete',
-      processed,
       updated,
-      errors,
+      skipped,
+      pagesProcessed,
+      totalFromGuesty,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (error: any) {
