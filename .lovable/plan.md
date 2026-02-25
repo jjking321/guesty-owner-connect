@@ -1,25 +1,41 @@
 
 
-# Remove Calculated Tax from Behalf Rows and Deduction Rows
+# Fix Calculated Tax to Exclude Exempt Reservations
 
 ## Problem
-The "Calculated" tax column currently shows values for behalf-platform rows and for rows with allowable deductions. This is incorrect because:
-1. Behalf platforms (e.g., Airbnb) already collect and remit tax -- there is nothing to calculate separately.
-2. Allowable deductions represent tax-exempt reservations -- calculating tax on them defeats the purpose.
+The "Calculated" tax column computes `sub_total * 5%` (or 7%) across **all** "other" reservations, including tax-exempt ones. The correct formula is:
+
+```text
+Calculated Tax = (Other Subtotal − Allowable Deductions) × flat rate
+```
+
+Currently the code sums `sub_total * flatRate` per reservation in `sumCalcTax`, which includes exempt reservations in the total. And when deductions exist, it nullifies the value entirely instead of subtracting.
 
 ## File: `src/components/TaxReportGenerator.tsx`
 
-### Changes
+### Change 1: Compute calculated tax as `(otherPayout - exemptTotal) * flatRate`
 
-**Grouped rows (lines 238-262):** Set `taxAmountCalc: null` on the behalfPlatforms row. On the "other" row, set `taxAmountCalc: null` when there are allowable deductions (`totalExempt > 0`).
+Instead of accumulating `sub_total * flatRate` per reservation via `sumCalcTax`, the calculated tax should simply be:
 
-**Ungrouped rows (lines 279-301):** Same logic -- `taxAmountCalc: null` for behalfPlatforms rows, and `taxAmountCalc: null` on "other" rows when `data.exemptTotal > 0`.
+```typescript
+otherTaxCalc: (otherPayout - exemptTotal) * flatRate
+```
 
-Specifically, 4 lines change from populated values to `null`:
-- Line 246: `taxAmountCalc: null` (grouped behalf)
-- Line 259: `taxAmountCalc: (anyOther && !totalExempt) ? totalOtherTaxCalc : null` (grouped other)
-- Line 287: `taxAmountCalc: null` (ungrouped behalf)
-- Line 299: `taxAmountCalc: (data.hasOther && !data.exemptTotal) ? data.otherTaxCalc : null` (ungrouped other)
+This is cleaner and matches the expected formula. The `sumCalcTax` helper can be removed or kept for behalf rows only.
+
+### Change 2: Always show calculated tax on "other" rows (remove the null-when-deductions logic)
+
+Since the calculation now properly subtracts deductions, there is no reason to hide the value when deductions exist. The four locations that build rows will set:
+
+- **Behalf rows**: `taxAmountCalc: null` (unchanged -- platforms handle tax)
+- **Other rows (grouped)**: `taxAmountCalc: anyOther ? (totalOtherPayout - totalExempt) * flatRate : null`
+- **Other rows (ungrouped)**: `taxAmountCalc: data.hasOther ? (data.otherPayout - data.exemptTotal) * flatRate : null`
+
+### Summary of line changes
+
+- Lines ~186-192: Update `otherTaxCalc` computation in `computeListingData` return
+- Lines ~256: Update grouped "other" row `taxAmountCalc`
+- Lines ~296: Update ungrouped "other" row `taxAmountCalc`
 
 No database changes needed.
 
