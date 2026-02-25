@@ -18,9 +18,16 @@ export function TaxExemptTable() {
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [lastRefreshAt, setLastRefreshAt] = useState<number>(0);
 
   const refreshReservation = async (reservationId: string, listingId: string) => {
+    const now = Date.now();
+    if (now - lastRefreshAt < 10000) {
+      toast.error("Please wait at least 10 seconds between refreshes");
+      return;
+    }
     setRefreshingId(reservationId);
+    setLastRefreshAt(Date.now());
     try {
       const { error } = await supabase.functions.invoke('sync-listing-reservations', {
         body: { listingId },
