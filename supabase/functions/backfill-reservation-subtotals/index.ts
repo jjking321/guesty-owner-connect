@@ -212,7 +212,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { guestyAccountId, checkInMonths, jobId: existingJobId } = await req.json();
+    const body = await req.json();
+    const { guestyAccountId, jobId: existingJobId } = body;
+    const checkOutMonths = body.checkOutMonths || body.checkInMonths;
 
     if (!guestyAccountId) {
       return new Response(JSON.stringify({ error: 'guestyAccountId is required' }), {
@@ -220,8 +222,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (!checkInMonths || !Array.isArray(checkInMonths) || checkInMonths.length === 0) {
-      return new Response(JSON.stringify({ error: 'checkInMonths is required (array of "YYYY-MM" strings)' }), {
+    if (!checkOutMonths || !Array.isArray(checkOutMonths) || checkOutMonths.length === 0) {
+      return new Response(JSON.stringify({ error: 'checkOutMonths is required (array of "YYYY-MM" strings)' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -243,7 +245,7 @@ Deno.serve(async (req) => {
 
     // Build date ranges from checkInMonths
     // Each month string "YYYY-MM" becomes a range: first day to last day
-    const dateFilters: { start: string; end: string }[] = checkInMonths.map((m: string) => {
+    const dateFilters: { start: string; end: string }[] = checkOutMonths.map((m: string) => {
       const [year, month] = m.split('-').map(Number);
       const start = `${year}-${String(month).padStart(2, '0')}-01`;
       const lastDay = new Date(year, month, 0).getDate();
@@ -255,28 +257,28 @@ Deno.serve(async (req) => {
     const overallStart = dateFilters.reduce((min, d) => d.start < min ? d.start : min, dateFilters[0].start);
     const overallEnd = dateFilters.reduce((max, d) => d.end > max ? d.end : max, dateFilters[0].end);
 
-    console.log(`Backfilling sub_total for check-in months: ${checkInMonths.join(', ')}`);
+    console.log(`Backfilling sub_total for check-out months: ${checkOutMonths.join(', ')}`);
     console.log(`Date range: ${overallStart} to ${overallEnd}`);
 
     // Fetch reservations missing sub_total within the date range
     const { data: missingReservations, error: queryError } = await supabaseAdmin
       .from('reservations')
-      .select('id, check_in')
+      .select('id, check_out')
       .eq('guesty_account_id', guestyAccountId)
       .is('sub_total', null)
-      .gte('check_in', overallStart)
-      .lte('check_in', overallEnd)
+      .gte('check_out', overallStart)
+      .lte('check_out', overallEnd)
       .in('status', ['confirmed', 'checked_in', 'checked_out'])
       .limit(RECORDS_PER_INVOCATION);
 
     if (queryError) throw queryError;
 
     // Further filter to only include reservations whose check_in falls in the requested months
-    const requestedMonths = new Set(checkInMonths);
+    const requestedMonths = new Set(checkOutMonths);
     const filteredReservations = missingReservations?.filter(r => {
-      if (!r.check_in) return false;
-      const checkInMonth = r.check_in.substring(0, 7); // "YYYY-MM"
-      return requestedMonths.has(checkInMonth);
+      if (!r.check_out) return false;
+      const checkOutMonth = r.check_out.substring(0, 7); // "YYYY-MM"
+      return requestedMonths.has(checkOutMonth);
     }) || [];
 
     const totalMissing = filteredReservations.length;
@@ -304,8 +306,8 @@ Deno.serve(async (req) => {
         .select('id', { count: 'exact', head: true })
         .eq('guesty_account_id', guestyAccountId)
         .is('sub_total', null)
-        .gte('check_in', overallStart)
-        .lte('check_in', overallEnd)
+        .gte('check_out', overallStart)
+        .lte('check_out', overallEnd)
         .in('status', ['confirmed', 'checked_in', 'checked_out']);
 
       const { data: newJob, error: jobError } = await supabaseAdmin
@@ -408,8 +410,8 @@ Deno.serve(async (req) => {
       .select('id', { count: 'exact', head: true })
       .eq('guesty_account_id', guestyAccountId)
       .is('sub_total', null)
-      .gte('check_in', overallStart)
-      .lte('check_in', overallEnd)
+      .gte('check_out', overallStart)
+      .lte('check_out', overallEnd)
       .in('status', ['confirmed', 'checked_in', 'checked_out']);
 
     if (remainingCount && remainingCount > 0) {
@@ -423,7 +425,7 @@ Deno.serve(async (req) => {
           'Authorization': `Bearer ${serviceRoleKey}`,
           'x-service-role': 'true',
         },
-        body: JSON.stringify({ guestyAccountId, checkInMonths, jobId }),
+        body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId }),
       }).catch(err => console.error('Self-invoke error:', err));
 
       return new Response(JSON.stringify({

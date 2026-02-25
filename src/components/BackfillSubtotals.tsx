@@ -62,7 +62,7 @@ export function BackfillSubtotals() {
           {
             body: {
               guestyAccountId: account.id,
-              checkInMonths: selectedMonths.sort(),
+              checkOutMonths: selectedMonths.sort(),
             },
           }
         );
@@ -85,7 +85,7 @@ export function BackfillSubtotals() {
         <h3 className="text-lg font-semibold">Backfill Subtotals</h3>
         <p className="text-sm text-muted-foreground">
           Fetch <code className="text-xs bg-muted px-1 py-0.5 rounded">money.subTotal</code> from
-          Guesty for reservations that are missing it. Select the check-in months to backfill.
+          Guesty for reservations that are missing it. Select the check-out months to backfill.
         </p>
       </div>
 
