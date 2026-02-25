@@ -5,9 +5,10 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { SyncProgressCard } from "@/components/SyncProgressCard";
 
 export function BackfillSubtotals() {
   const { organizationId } = useUserRole();
@@ -119,6 +120,13 @@ export function BackfillSubtotals() {
           </Badge>
         )}
       </div>
+
+      {accounts && accounts.length > 0 && (
+        <SyncProgressCard
+          accountId={accounts[0].id}
+          syncType="backfill_subtotals"
+        />
+      )}
     </div>
   );
 }
