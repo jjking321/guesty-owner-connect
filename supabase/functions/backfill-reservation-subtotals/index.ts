@@ -132,7 +132,7 @@ async function fetchReservationPage(
   checkOutStart: string,
   checkOutEnd: string,
   skip: number
-): Promise<{ results: Array<{ _id: string; money?: { subTotal?: number } }>; count: number }> {
+): Promise<{ results: Array<{ _id: string; money?: { fareAccommodationAdjusted?: number; hostPayout?: number; totalPaid?: number; ownerRevenue?: number; totalTaxes?: number; subTotal?: number } }>; count: number }> {
   const filters = JSON.stringify([
     { field: 'checkOut', operator: '$gte', value: checkOutStart },
     { field: 'checkOut', operator: '$lte', value: checkOutEnd },
@@ -140,7 +140,7 @@ async function fetchReservationPage(
 
   const params = new URLSearchParams({
     filters,
-    fields: '_id money.subTotal',
+    fields: '_id money.fareAccommodationAdjusted money.hostPayout money.totalPaid money.ownerRevenue money.totalTaxes money.subTotal',
     limit: String(PAGE_SIZE),
     skip: String(skip),
     sort: 'checkOut',
@@ -326,6 +326,11 @@ Deno.serve(async (req) => {
         }
       }
     };
+
+    if (firstPage.results.length > 0) {
+      const sample = firstPage.results[0];
+      console.log(`Sample reservation: _id=${sample._id}, money=${JSON.stringify(sample.money)}`);
+    }
 
     await processPage(firstPage.results);
     currentSkip += firstPage.results.length;
