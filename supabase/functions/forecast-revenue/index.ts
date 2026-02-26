@@ -1257,6 +1257,7 @@ serve(async (req) => {
         forecast.total_forecast_p50 = simResults.p50 * share;
         forecast.total_forecast_p25 = simResults.p25 * share;
         forecast.total_forecast_p75 = simResults.p75 * share;
+        forecast.blended_forecast = simResults.p50 * share;
       }
       console.log(`Redistributed simulation percentiles to ${monthlyForecasts.length} months (sum of monthly P50 = $${simResults.p50.toFixed(0)})`);
     }
