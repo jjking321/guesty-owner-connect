@@ -1,41 +1,62 @@
 
 
-# Fix Calculated Tax to Exclude Exempt Reservations
+# Make Monthly Forecasts Sum to Year-End P50
 
 ## Problem
-The "Calculated" tax column computes `sub_total * 5%` (or 7%) across **all** "other" reservations, including tax-exempt ones. The correct formula is:
 
-```text
-Calculated Tax = (Other Subtotal − Allowable Deductions) × flat rate
+The monthly `total_forecast_p50` values (line 1100) are simply the `blended_forecast` point estimates. The year-end P50 (line 1148) comes from a Monte Carlo simulation that:
+1. Applies random noise (±10-30%) to each month's `blended_forecast`
+2. Takes `max(on_books, simulated)` per month per iteration -- this inflates the total
+3. Applies a `forecastFloor` to the result
+4. Takes the median of 1000 simulated annual totals
+
+These two approaches produce different numbers by design. The sum of monthly point estimates will almost always be lower than the simulation P50 because the `max(on_books, ...)` floor and the forecast floor both push the simulation upward.
+
+## Solution: Distribute Simulation Results Back to Months
+
+After running the Monte Carlo simulation, scale each month's P50/P25/P75 proportionally so they sum exactly to the year-end simulation percentiles.
+
+## File: `supabase/functions/forecast-revenue/index.ts`
+
+### Change: After simulation results (after line 1248), redistribute to monthly forecasts
+
+After `simResults` is computed, calculate a scaling factor:
+
+```
+scalingFactor = simResults.p50 / sum(monthly blended_forecasts)
 ```
 
-Currently the code sums `sub_total * flatRate` per reservation in `sumCalcTax`, which includes exempt reservations in the total. And when deductions exist, it nullifies the value entirely instead of subtracting.
-
-## File: `src/components/TaxReportGenerator.tsx`
-
-### Change 1: Compute calculated tax as `(otherPayout - exemptTotal) * flatRate`
-
-Instead of accumulating `sub_total * flatRate` per reservation via `sumCalcTax`, the calculated tax should simply be:
+Then update each month's `total_forecast_p50`, `total_forecast_p25`, and `total_forecast_p75` using that ratio:
 
 ```typescript
-otherTaxCalc: (otherPayout - exemptTotal) * flatRate
+// After line 1248 (simulation results logged)
+
+// Redistribute simulation percentiles to monthly forecasts proportionally
+const monthlyBlendedSum = monthlyForecasts.reduce((s, f) => s + f.blended_forecast, 0);
+
+if (monthlyBlendedSum > 0) {
+  const p50Scale = simResults.p50 / monthlyBlendedSum;
+  const p25Scale = simResults.p25 / monthlyBlendedSum;
+  const p75Scale = simResults.p75 / monthlyBlendedSum;
+
+  for (const forecast of monthlyForecasts) {
+    const share = forecast.blended_forecast / monthlyBlendedSum;
+    forecast.total_forecast_p50 = simResults.p50 * share;
+    forecast.total_forecast_p25 = simResults.p25 * share;
+    forecast.total_forecast_p75 = simResults.p75 * share;
+  }
+}
 ```
 
-This is cleaner and matches the expected formula. The `sumCalcTax` helper can be removed or kept for behalf rows only.
+This ensures:
+- `sum(monthly P50) === year-end P50` exactly
+- Each month's relative weight is preserved (a month that was 15% of the blended total stays 15% of the P50)
+- The monthly P50 still respects the Monte Carlo simulation's floor logic and variance
+- No changes to the simulation itself or the blended forecast logic
 
-### Change 2: Always show calculated tax on "other" rows (remove the null-when-deductions logic)
-
-Since the calculation now properly subtracts deductions, there is no reason to hide the value when deductions exist. The four locations that build rows will set:
-
-- **Behalf rows**: `taxAmountCalc: null` (unchanged -- platforms handle tax)
-- **Other rows (grouped)**: `taxAmountCalc: anyOther ? (totalOtherPayout - totalExempt) * flatRate : null`
-- **Other rows (ungrouped)**: `taxAmountCalc: data.hasOther ? (data.otherPayout - data.exemptTotal) * flatRate : null`
-
-### Summary of line changes
-
-- Lines ~186-192: Update `otherTaxCalc` computation in `computeListingData` return
-- Lines ~256: Update grouped "other" row `taxAmountCalc`
-- Lines ~296: Update ungrouped "other" row `taxAmountCalc`
+### Lines affected
+- Remove the naive ±15% bands from `forecastEnhanced` return (lines 1100-1102): the P25/P75 values will now come from the redistribution
+- Add redistribution block after line 1248
 
 No database changes needed.
 
