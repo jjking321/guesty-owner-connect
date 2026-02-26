@@ -479,9 +479,7 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                           <td className="py-2 text-right font-semibold">
                             {isPastMonth && actualForMonth > 0 
                               ? `$${Math.round(actualForMonth).toLocaleString()}`
-                              : isCurrentMonth
-                                ? `$${Math.round(actualForMonth + (Number(m.total_forecast_p50 || m.blended_forecast || 0))).toLocaleString()}`
-                                : `$${Math.round(Number(m.total_forecast_p50 || m.blended_forecast || 0)).toLocaleString()}`}
+                              : `$${Math.round(Number(m.total_forecast_p50 || m.blended_forecast || 0)).toLocaleString()}`}
                           </td>
                           <td className="py-2 text-center">
                             {(isCurrentMonth || isFutureMonth) && pace !== undefined ? (
