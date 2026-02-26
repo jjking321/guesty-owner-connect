@@ -1098,8 +1098,8 @@ serve(async (req) => {
         // Backwards compatible fields
         additional_forecast: additionalNeeded,
         total_forecast_p50: blendedForecast,
-        total_forecast_p25: blendedForecast * 0.85,
-        total_forecast_p75: blendedForecast * 1.15
+        total_forecast_p25: blendedForecast,
+        total_forecast_p75: blendedForecast
       };
     }
 
@@ -1247,6 +1247,19 @@ serve(async (req) => {
       `\nP75: $${simResults.p75.toFixed(0)}` +
       `\nP90: $${simResults.p90.toFixed(0)}\n`
     );
+
+    // Redistribute simulation percentiles to monthly forecasts proportionally
+    const monthlyBlendedSum = monthlyForecasts.reduce((s: number, f: any) => s + f.blended_forecast, 0);
+
+    if (monthlyBlendedSum > 0) {
+      for (const forecast of monthlyForecasts) {
+        const share = forecast.blended_forecast / monthlyBlendedSum;
+        forecast.total_forecast_p50 = simResults.p50 * share;
+        forecast.total_forecast_p25 = simResults.p25 * share;
+        forecast.total_forecast_p75 = simResults.p75 * share;
+      }
+      console.log(`Redistributed simulation percentiles to ${monthlyForecasts.length} months (sum of monthly P50 = $${simResults.p50.toFixed(0)})`);
+    }
 
     // Calculate goal probabilities (projection only)
     const totalProjection = goals?.reduce((sum, g) => sum + (Number(g.projection_revenue) || 0), 0) || 0;
