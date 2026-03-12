@@ -140,7 +140,7 @@ export function CopyGoalsDialog({
   }, [listingsWithGoals, sourceListingId]);
 
   const handleSelectAll = () => {
-    setTargetListingIds(targetOptions.map((l) => l.id));
+    setTargetListingIds(allTargetOptions.map((l) => l.id));
   };
 
   const handleDeselectAll = () => {
