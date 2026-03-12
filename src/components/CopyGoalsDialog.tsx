@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Copy, CheckCircle2, AlertCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Loader2, Copy, CheckCircle2, AlertCircle, Search } from "lucide-react";
 
 interface CopyGoalsDialogProps {
   open: boolean;
