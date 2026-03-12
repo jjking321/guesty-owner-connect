@@ -7,8 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Download, Lock, Unlock, Search } from "lucide-react";
+import { Download, Lock, Unlock, Search, Copy } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { CopyGoalsDialog } from "@/components/CopyGoalsDialog";
 
 interface MonthlyAverage {
   month: string;
