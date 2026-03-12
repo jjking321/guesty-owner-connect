@@ -23,6 +23,7 @@ export default function GoalsReview() {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedListings, setSelectedListings] = useState<Set<string>>(new Set());
+  const [copyGoalsOpen, setCopyGoalsOpen] = useState(false);
 
   // Fetch listings
   const { data: listings = [] } = useQuery({
