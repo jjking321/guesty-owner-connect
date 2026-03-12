@@ -119,12 +119,25 @@ export function CopyGoalsDialog({
   }, [listings, goalsData]);
 
   // Filter listings with goals for source selection
-  const sourceOptions = listingsWithGoals.filter((l) => l.hasGoals);
+  const sourceOptions = useMemo(() => {
+    const opts = listingsWithGoals.filter((l) => l.hasGoals);
+    if (!sourceSearch) return opts;
+    const q = sourceSearch.toLowerCase();
+    return opts.filter((l) => l.nickname?.toLowerCase().includes(q));
+  }, [listingsWithGoals, sourceSearch]);
 
   // Filter target options (exclude source)
-  const targetOptions = listingsWithGoals.filter(
-    (l) => l.id !== sourceListingId
-  );
+  const targetOptions = useMemo(() => {
+    const opts = listingsWithGoals.filter((l) => l.id !== sourceListingId);
+    if (!targetSearch) return opts;
+    const q = targetSearch.toLowerCase();
+    return opts.filter((l) => l.nickname?.toLowerCase().includes(q));
+  }, [listingsWithGoals, sourceListingId, targetSearch]);
+
+  // All target options (unfiltered, for Select All)
+  const allTargetOptions = useMemo(() => {
+    return listingsWithGoals.filter((l) => l.id !== sourceListingId);
+  }, [listingsWithGoals, sourceListingId]);
 
   const handleSelectAll = () => {
     setTargetListingIds(targetOptions.map((l) => l.id));
