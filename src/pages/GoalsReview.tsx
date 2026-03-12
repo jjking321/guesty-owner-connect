@@ -332,6 +332,14 @@ export default function GoalsReview() {
           onSelectionChange={setSelectedListings}
           onGoalsSaved={refetchGoals}
         />
+
+        <CopyGoalsDialog
+          open={copyGoalsOpen}
+          onOpenChange={setCopyGoalsOpen}
+          listingIds={listingIds}
+          groupName="All Properties"
+          onSuccess={refetchGoals}
+        />
       </div>
     </DashboardLayout>
   );
