@@ -225,6 +225,7 @@ export function CopyGoalsDialog({
 
       // Invalidate queries and close
       queryClient.invalidateQueries({ queryKey: ["group-goals"] });
+      queryClient.invalidateQueries({ queryKey: ["property-goals"] });
       queryClient.invalidateQueries({ queryKey: ["copy-goals-data"] });
       onSuccess?.();
       onOpenChange(false);
@@ -232,6 +233,8 @@ export function CopyGoalsDialog({
       // Reset state
       setSourceListingId(null);
       setTargetListingIds([]);
+      setSourceSearch("");
+      setTargetSearch("");
     } catch (error: any) {
       toast({
         title: "Failed to copy goals",
