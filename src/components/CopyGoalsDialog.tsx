@@ -67,18 +67,30 @@ export function CopyGoalsDialog({
     enabled: open && listingIds.length > 0,
   });
 
-  // Fetch all goals for the year
+  // Fetch all goals for the year (batched for large portfolios)
   const { data: goalsData } = useQuery({
     queryKey: ["copy-goals-data", listingIds, year],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
-      const { data, error } = await supabase
-        .from("property_goals")
-        .select("listing_id, month, projection_revenue, locked")
-        .in("listing_id", listingIds)
-        .eq("year", year);
-      if (error) throw error;
-      return data || [];
+      const BATCH_SIZE = 60;
+      const chunks: string[][] = [];
+      for (let i = 0; i < listingIds.length; i += BATCH_SIZE) {
+        chunks.push(listingIds.slice(i, i + BATCH_SIZE));
+      }
+      const promises = chunks.map((batch) =>
+        supabase
+          .from("property_goals")
+          .select("listing_id, month, projection_revenue, locked")
+          .in("listing_id", batch)
+          .eq("year", year)
+      );
+      const results = await Promise.all(promises);
+      const all: any[] = [];
+      for (const res of results) {
+        if (res.error) throw res.error;
+        if (res.data) all.push(...res.data);
+      }
+      return all;
     },
     enabled: open && listingIds.length > 0,
   });
