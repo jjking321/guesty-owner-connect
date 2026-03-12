@@ -7,8 +7,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Download, Lock, Unlock, Search } from "lucide-react";
+import { Download, Lock, Unlock, Search, Copy } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { CopyGoalsDialog } from "@/components/CopyGoalsDialog";
 
 interface MonthlyAverage {
   month: string;
@@ -22,6 +23,7 @@ export default function GoalsReview() {
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedListings, setSelectedListings] = useState<Set<string>>(new Set());
+  const [copyGoalsOpen, setCopyGoalsOpen] = useState(false);
 
   // Fetch listings
   const { data: listings = [] } = useQuery({
@@ -305,6 +307,10 @@ export default function GoalsReview() {
             <Download className="h-4 w-4 mr-2" />
             Export CSV
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setCopyGoalsOpen(true)}>
+            <Copy className="h-4 w-4 mr-2" />
+            Copy Goals
+          </Button>
           <Button variant="outline" size="sm" onClick={() => handleBulkLock(true)} disabled={selectedListings.size === 0}>
             <Lock className="h-4 w-4 mr-2" />
             Lock Selected
@@ -325,6 +331,14 @@ export default function GoalsReview() {
           selectedListings={selectedListings}
           onSelectionChange={setSelectedListings}
           onGoalsSaved={refetchGoals}
+        />
+
+        <CopyGoalsDialog
+          open={copyGoalsOpen}
+          onOpenChange={setCopyGoalsOpen}
+          listingIds={listingIds}
+          groupName="All Properties"
+          onSuccess={refetchGoals}
         />
       </div>
     </DashboardLayout>

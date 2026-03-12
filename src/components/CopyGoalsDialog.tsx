@@ -20,7 +20,8 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Copy, CheckCircle2, AlertCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Loader2, Copy, CheckCircle2, AlertCircle, Search } from "lucide-react";
 
 interface CopyGoalsDialogProps {
   open: boolean;
@@ -46,6 +47,8 @@ export function CopyGoalsDialog({
   const [targetListingIds, setTargetListingIds] = useState<string[]>([]);
   const [skipLocked, setSkipLocked] = useState(true);
   const [isCopying, setIsCopying] = useState(false);
+  const [sourceSearch, setSourceSearch] = useState("");
+  const [targetSearch, setTargetSearch] = useState("");
 
   // Fetch listing details
   const { data: listings } = useQuery({
@@ -64,18 +67,30 @@ export function CopyGoalsDialog({
     enabled: open && listingIds.length > 0,
   });
 
-  // Fetch all goals for the year
+  // Fetch all goals for the year (batched for large portfolios)
   const { data: goalsData } = useQuery({
     queryKey: ["copy-goals-data", listingIds, year],
     queryFn: async () => {
       if (listingIds.length === 0) return [];
-      const { data, error } = await supabase
-        .from("property_goals")
-        .select("listing_id, month, projection_revenue, locked")
-        .in("listing_id", listingIds)
-        .eq("year", year);
-      if (error) throw error;
-      return data || [];
+      const BATCH_SIZE = 60;
+      const chunks: string[][] = [];
+      for (let i = 0; i < listingIds.length; i += BATCH_SIZE) {
+        chunks.push(listingIds.slice(i, i + BATCH_SIZE));
+      }
+      const promises = chunks.map((batch) =>
+        supabase
+          .from("property_goals")
+          .select("listing_id, month, projection_revenue, locked")
+          .in("listing_id", batch)
+          .eq("year", year)
+      );
+      const results = await Promise.all(promises);
+      const all: any[] = [];
+      for (const res of results) {
+        if (res.error) throw res.error;
+        if (res.data) all.push(...res.data);
+      }
+      return all;
     },
     enabled: open && listingIds.length > 0,
   });
@@ -104,15 +119,28 @@ export function CopyGoalsDialog({
   }, [listings, goalsData]);
 
   // Filter listings with goals for source selection
-  const sourceOptions = listingsWithGoals.filter((l) => l.hasGoals);
+  const sourceOptions = useMemo(() => {
+    const opts = listingsWithGoals.filter((l) => l.hasGoals);
+    if (!sourceSearch) return opts;
+    const q = sourceSearch.toLowerCase();
+    return opts.filter((l) => l.nickname?.toLowerCase().includes(q));
+  }, [listingsWithGoals, sourceSearch]);
 
   // Filter target options (exclude source)
-  const targetOptions = listingsWithGoals.filter(
-    (l) => l.id !== sourceListingId
-  );
+  const targetOptions = useMemo(() => {
+    const opts = listingsWithGoals.filter((l) => l.id !== sourceListingId);
+    if (!targetSearch) return opts;
+    const q = targetSearch.toLowerCase();
+    return opts.filter((l) => l.nickname?.toLowerCase().includes(q));
+  }, [listingsWithGoals, sourceListingId, targetSearch]);
+
+  // All target options (unfiltered, for Select All)
+  const allTargetOptions = useMemo(() => {
+    return listingsWithGoals.filter((l) => l.id !== sourceListingId);
+  }, [listingsWithGoals, sourceListingId]);
 
   const handleSelectAll = () => {
-    setTargetListingIds(targetOptions.map((l) => l.id));
+    setTargetListingIds(allTargetOptions.map((l) => l.id));
   };
 
   const handleDeselectAll = () => {
@@ -197,6 +225,7 @@ export function CopyGoalsDialog({
 
       // Invalidate queries and close
       queryClient.invalidateQueries({ queryKey: ["group-goals"] });
+      queryClient.invalidateQueries({ queryKey: ["property-goals"] });
       queryClient.invalidateQueries({ queryKey: ["copy-goals-data"] });
       onSuccess?.();
       onOpenChange(false);
@@ -204,6 +233,8 @@ export function CopyGoalsDialog({
       // Reset state
       setSourceListingId(null);
       setTargetListingIds([]);
+      setSourceSearch("");
+      setTargetSearch("");
     } catch (error: any) {
       toast({
         title: "Failed to copy goals",
@@ -266,6 +297,15 @@ export function CopyGoalsDialog({
             <Label className="text-base font-medium">
               Step 1: Select Source Property
             </Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search source properties..."
+                value={sourceSearch}
+                onChange={(e) => setSourceSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
             {sourceOptions.length === 0 ? (
               <div className="flex items-center gap-2 text-muted-foreground p-4 border rounded-lg">
                 <AlertCircle className="h-4 w-4" />
@@ -321,7 +361,7 @@ export function CopyGoalsDialog({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label className="text-base font-medium">
-                  Step 2: Select Target Properties ({targetOptions.length} available)
+                  Step 2: Select Target Properties ({allTargetOptions.length} available, {targetListingIds.length} selected)
                 </Label>
                 <div className="flex gap-2">
                   <Button
@@ -339,6 +379,16 @@ export function CopyGoalsDialog({
                     Deselect All
                   </Button>
                 </div>
+              </div>
+
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search target properties..."
+                  value={targetSearch}
+                  onChange={(e) => setTargetSearch(e.target.value)}
+                  className="pl-9"
+                />
               </div>
 
               <ScrollArea className="h-48 border rounded-lg">

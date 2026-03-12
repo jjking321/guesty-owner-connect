@@ -1,20 +1,55 @@
 
 
-# Bulk Copy Goals on Goals Review Page
+# Fix Monthly Forecast Display to Use Redistributed P50 Values
 
-## What exists
-There's already a `CopyGoalsDialog` component that supports selecting a source property and multiple target properties. It's currently only used in the Group Detail page. We just need to wire it into the Goals Review page.
+## Problem
 
-## Plan
+The redistribution logic in the edge function correctly updates `total_forecast_p50` on each monthly forecast object. However, the frontend (`src/components/RevenueForecast.tsx`, line 483-484) displays:
 
-1. **Add a "Copy Goals" button** to the Goals Review page action bar (next to Export CSV, Lock/Unlock buttons)
-2. **Import and render `CopyGoalsDialog`** passing all filtered listing IDs and hooking `onSuccess` to `refetchGoals`
-3. **Add search filtering** to the existing `CopyGoalsDialog` source list (it already has search in the `CopyGoalsFromPropertyDialog` but `CopyGoalsDialog` lacks it — will add for consistency since the portfolio has 272 properties)
+```typescript
+m.blended_forecast || m.total_forecast_p50
+```
 
-### Files to modify
-- `src/pages/GoalsReview.tsx` — add Copy Goals button + dialog state + render `CopyGoalsDialog`
-- `src/components/CopyGoalsDialog.tsx` — add search input for source and target lists, use batched fetching for goals (currently no batching), fetch all listings instead of only those passed via `listingIds` prop (or accept all listing IDs from GoalsReview)
+Since `blended_forecast` is always a non-zero number (the raw point estimate before redistribution), it always takes precedence. The redistributed `total_forecast_p50` is never shown.
 
-### Key detail
-The `CopyGoalsDialog` currently takes a `listingIds` prop scoped to a group. For the Goals Review page, we'll pass all active listing IDs. The dialog's existing two-step flow (pick source, then pick targets with Select All/Deselect All) already handles the bulk use case well.
+The same issue exists in `GroupDetail.tsx` (line 482) and `OwnerDetail.tsx` (line 539) which read `total_forecast_p50`, but those should be fine since they use `total_forecast_p50` directly.
+
+## Solution
+
+Two changes needed:
+
+### Change 1: Frontend — Use `total_forecast_p50` instead of `blended_forecast` for display
+
+**File: `src/components/RevenueForecast.tsx`** (lines 483-484)
+
+Change the forecast column to prefer `total_forecast_p50` over `blended_forecast`:
+
+```typescript
+// Before
+actualForMonth + (Number(m.blended_forecast || m.total_forecast_p50 || 0))
+// After
+actualForMonth + (Number(m.total_forecast_p50 || m.blended_forecast || 0))
+```
+
+Same swap on line 484 for future months.
+
+### Change 2: Edge function — Also update `blended_forecast` during redistribution (belt and suspenders)
+
+**File: `supabase/functions/forecast-revenue/index.ts`** (lines 1255-1259)
+
+In the redistribution loop, also update `blended_forecast` so any other consumer that reads it gets the correct value:
+
+```typescript
+for (const forecast of monthlyForecasts) {
+  const share = forecast.blended_forecast / monthlyBlendedSum;
+  forecast.total_forecast_p50 = simResults.p50 * share;
+  forecast.total_forecast_p25 = simResults.p25 * share;
+  forecast.total_forecast_p75 = simResults.p75 * share;
+  forecast.blended_forecast = simResults.p50 * share; // Keep in sync
+}
+```
+
+This ensures both fields agree, so regardless of which one any component reads, the values will sum to the year-end P50.
+
+No database changes needed. After deploying, re-run forecasts from the Forecast Admin page.
 
