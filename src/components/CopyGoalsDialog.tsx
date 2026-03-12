@@ -358,7 +358,7 @@ export function CopyGoalsDialog({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label className="text-base font-medium">
-                  Step 2: Select Target Properties ({targetOptions.length} available)
+                  Step 2: Select Target Properties ({allTargetOptions.length} available, {targetListingIds.length} selected)
                 </Label>
                 <div className="flex gap-2">
                   <Button
