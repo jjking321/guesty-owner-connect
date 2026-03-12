@@ -47,6 +47,8 @@ export function CopyGoalsDialog({
   const [targetListingIds, setTargetListingIds] = useState<string[]>([]);
   const [skipLocked, setSkipLocked] = useState(true);
   const [isCopying, setIsCopying] = useState(false);
+  const [sourceSearch, setSourceSearch] = useState("");
+  const [targetSearch, setTargetSearch] = useState("");
 
   // Fetch listing details
   const { data: listings } = useQuery({
