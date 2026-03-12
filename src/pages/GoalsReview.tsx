@@ -307,6 +307,10 @@ export default function GoalsReview() {
             <Download className="h-4 w-4 mr-2" />
             Export CSV
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setCopyGoalsOpen(true)}>
+            <Copy className="h-4 w-4 mr-2" />
+            Copy Goals
+          </Button>
           <Button variant="outline" size="sm" onClick={() => handleBulkLock(true)} disabled={selectedListings.size === 0}>
             <Lock className="h-4 w-4 mr-2" />
             Lock Selected
