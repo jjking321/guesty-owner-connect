@@ -1024,6 +1024,8 @@ export default function PropertyDetail() {
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead>Guest</TableHead>
+                          <TableHead>Confirmation</TableHead>
                           <TableHead 
                             className="cursor-pointer hover:bg-muted/50 select-none"
                             onClick={() => handleReservationSort('check_in')}
