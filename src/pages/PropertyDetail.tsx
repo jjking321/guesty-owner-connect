@@ -1091,6 +1091,12 @@ export default function PropertyDetail() {
                           
                           return (
                             <TableRow key={reservation.id}>
+                              <TableCell className="whitespace-nowrap text-sm">
+                                {reservation.guest_name || "—"}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                                {reservation.confirmation_code || "—"}
+                              </TableCell>
                               <TableCell className="whitespace-nowrap">
                                 {formatDateDisplay(reservation.check_in)}
                               </TableCell>
