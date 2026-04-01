@@ -17,6 +17,8 @@ export default function TaxReport() {
           </p>
         </div>
 
+        <BackfillSubtotals />
+
         <Tabs defaultValue="county" className="space-y-4">
           <TabsList>
             <TabsTrigger value="county">County</TabsTrigger>
@@ -39,10 +41,7 @@ export default function TaxReport() {
           </TabsContent>
 
           <TabsContent value="settings">
-            <div className="space-y-6">
-              <TaxSettingsTable />
-              <BackfillSubtotals />
-            </div>
+            <TaxSettingsTable />
           </TabsContent>
 
           <TabsContent value="template">
