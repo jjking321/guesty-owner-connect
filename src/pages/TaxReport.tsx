@@ -41,10 +41,7 @@ export default function TaxReport() {
           </TabsContent>
 
           <TabsContent value="settings">
-            <div className="space-y-6">
-              <TaxSettingsTable />
-              <BackfillSubtotals />
-            </div>
+            <TaxSettingsTable />
           </TabsContent>
 
           <TabsContent value="template">
