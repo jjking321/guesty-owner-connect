@@ -503,6 +503,58 @@ export default function Settings() {
     }
   };
 
+  const handleToggleActionables = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ actionables_generation_enabled: enabled })
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Actionables enabled" : "Actionables disabled",
+        description: enabled 
+          ? "AI actionables will be generated during nightly sync."
+          : "AI actionables generation will be skipped during nightly sync.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleDisputeAnalysis = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ dispute_analysis_enabled: enabled } as any)
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Dispute analysis enabled" : "Dispute analysis disabled",
+        description: enabled 
+          ? "Review disputes will be analyzed automatically overnight."
+          : "Automated dispute analysis will be skipped.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleToggleForecastGeneration = async (accountId: string, enabled: boolean) => {
     try {
       const { error } = await supabase
