@@ -1155,6 +1155,76 @@ export default function Settings() {
           </Card>
         )}
 
+        {/* AI Actionables */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-primary" />
+                    AI Actionables
+                  </CardTitle>
+                  <CardDescription>
+                    AI-generated prioritized action items for each property based on pricing, gaps, ratings, and pacing
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="actionables-auto-sync"
+                    checked={guestyAccounts[0]?.actionables_generation_enabled === true}
+                    onCheckedChange={(checked) => handleToggleActionables(guestyAccounts[0].id, checked)}
+                  />
+                  <Label htmlFor="actionables-auto-sync" className="text-sm cursor-pointer">
+                    Include in nightly sync
+                  </Label>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                When enabled, actionables are regenerated each night after all data syncs complete. 
+                Issues are scored and prioritized so you can focus on the highest-impact items first.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Dispute Analysis */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-primary" />
+                    Automated Dispute Analysis
+                  </CardTitle>
+                  <CardDescription>
+                    AI analyzes guest conversations and reviews to score dispute potential overnight
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="dispute-auto-sync"
+                    checked={(guestyAccounts[0] as any)?.dispute_analysis_enabled === true}
+                    onCheckedChange={(checked) => handleToggleDisputeAnalysis(guestyAccounts[0].id, checked)}
+                  />
+                  <Label htmlFor="dispute-auto-sync" className="text-sm cursor-pointer">
+                    Run overnight
+                  </Label>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                When enabled, reviews in "triage" status are automatically analyzed at 2 AM UTC. 
+                The AI fetches guest conversations, identifies red flags, and scores each review's dispute likelihood.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         <TeamManagement />
 
         <AIPromptsSettings />
