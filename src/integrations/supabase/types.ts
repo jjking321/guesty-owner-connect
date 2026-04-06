@@ -516,6 +516,7 @@ export type Database = {
           client_id: string
           client_secret: string
           created_at: string
+          dispute_analysis_enabled: boolean | null
           forecast_generation_enabled: boolean | null
           id: string
           last_automated_sync: string | null
@@ -537,6 +538,7 @@ export type Database = {
           client_id: string
           client_secret: string
           created_at?: string
+          dispute_analysis_enabled?: boolean | null
           forecast_generation_enabled?: boolean | null
           id?: string
           last_automated_sync?: string | null
@@ -558,6 +560,7 @@ export type Database = {
           client_id?: string
           client_secret?: string
           created_at?: string
+          dispute_analysis_enabled?: boolean | null
           forecast_generation_enabled?: boolean | null
           id?: string
           last_automated_sync?: string | null
