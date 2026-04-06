@@ -150,7 +150,7 @@ export default function Settings() {
       // Only select safe fields - exclude client_id and client_secret for security
       const { data, error } = await supabase
         .from("guesty_accounts")
-        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled")
+        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled, actionables_generation_enabled, dispute_analysis_enabled")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
