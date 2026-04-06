@@ -150,7 +150,7 @@ export default function Settings() {
       // Only select safe fields - exclude client_id and client_secret for security
       const { data, error } = await supabase
         .from("guesty_accounts")
-        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled")
+        .select("id, account_name, organization_id, created_at, updated_at, last_listings_sync, last_reservations_sync, last_owners_sync, last_reviews_sync, last_calendar_sync, last_automated_sync, automated_sync_enabled, airbnb_scrape_enabled, forecast_generation_enabled, probability_calculation_enabled, actionables_generation_enabled, dispute_analysis_enabled")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -491,6 +491,58 @@ export default function Settings() {
         description: enabled 
           ? "Airbnb ratings will be scraped during nightly sync."
           : "Airbnb ratings scraping will be skipped during nightly sync.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleActionables = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ actionables_generation_enabled: enabled })
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Actionables enabled" : "Actionables disabled",
+        description: enabled 
+          ? "AI actionables will be generated during nightly sync."
+          : "AI actionables generation will be skipped during nightly sync.",
+      });
+
+      loadAccounts();
+    } catch (error: any) {
+      toast({
+        title: "Failed to update setting",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleToggleDisputeAnalysis = async (accountId: string, enabled: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("guesty_accounts")
+        .update({ dispute_analysis_enabled: enabled } as any)
+        .eq("id", accountId);
+
+      if (error) throw error;
+
+      toast({
+        title: enabled ? "Dispute analysis enabled" : "Dispute analysis disabled",
+        description: enabled 
+          ? "Review disputes will be analyzed automatically overnight."
+          : "Automated dispute analysis will be skipped.",
       });
 
       loadAccounts();
@@ -1099,6 +1151,76 @@ export default function Settings() {
                   Run manual forecasts or first-time data preparation
                 </p>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* AI Actionables */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5 text-primary" />
+                    AI Actionables
+                  </CardTitle>
+                  <CardDescription>
+                    AI-generated prioritized action items for each property based on pricing, gaps, ratings, and pacing
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="actionables-auto-sync"
+                    checked={guestyAccounts[0]?.actionables_generation_enabled === true}
+                    onCheckedChange={(checked) => handleToggleActionables(guestyAccounts[0].id, checked)}
+                  />
+                  <Label htmlFor="actionables-auto-sync" className="text-sm cursor-pointer">
+                    Include in nightly sync
+                  </Label>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                When enabled, actionables are regenerated each night after all data syncs complete. 
+                Issues are scored and prioritized so you can focus on the highest-impact items first.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Dispute Analysis */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-primary" />
+                    Automated Dispute Analysis
+                  </CardTitle>
+                  <CardDescription>
+                    AI analyzes guest conversations and reviews to score dispute potential overnight
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="dispute-auto-sync"
+                    checked={(guestyAccounts[0] as any)?.dispute_analysis_enabled === true}
+                    onCheckedChange={(checked) => handleToggleDisputeAnalysis(guestyAccounts[0].id, checked)}
+                  />
+                  <Label htmlFor="dispute-auto-sync" className="text-sm cursor-pointer">
+                    Run overnight
+                  </Label>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                When enabled, reviews in "triage" status are automatically analyzed at 2 AM UTC. 
+                The AI fetches guest conversations, identifies red flags, and scores each review's dispute likelihood.
+              </p>
             </CardContent>
           </Card>
         )}

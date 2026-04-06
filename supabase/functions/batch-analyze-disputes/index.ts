@@ -27,6 +27,28 @@ Deno.serve(async (req) => {
 
     console.log(`Starting batch dispute analysis. Limit: ${limit}, skipWithoutReservation: ${skipWithoutReservation}`);
 
+    // Check if any account has dispute analysis enabled
+    const { data: accounts, error: accountsError } = await supabase
+      .from('guesty_accounts')
+      .select('id, dispute_analysis_enabled')
+      .eq('automated_sync_enabled', true);
+
+    if (accountsError) {
+      throw new Error(`Failed to fetch accounts: ${accountsError.message}`);
+    }
+
+    const anyEnabled = accounts?.some(a => a.dispute_analysis_enabled === true);
+    if (!anyEnabled) {
+      console.log('Dispute analysis is disabled for all accounts. Skipping.');
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Dispute analysis is disabled. Enable it in Settings.',
+        processed: 0,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Fetch reviews in triage status - no date filter, process any visible triage review
     let query = supabase
       .from('reviews')
