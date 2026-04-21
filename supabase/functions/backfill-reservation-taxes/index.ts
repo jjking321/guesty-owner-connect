@@ -222,10 +222,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get account credentials
+    // Get account
     const { data: account, error: accountError } = await supabaseAdmin
       .from('guesty_accounts')
-      .select('id, client_id, client_secret')
+      .select('id')
       .eq('id', guestyAccountId)
       .single();
 
@@ -233,9 +233,19 @@ Deno.serve(async (req) => {
       throw new Error('Guesty account not found');
     }
 
+    const { data: creds, error: credsError } = await supabaseAdmin
+      .from('guesty_account_credentials')
+      .select('client_id, client_secret')
+      .eq('guesty_account_id', guestyAccountId)
+      .single();
+
+    if (credsError || !creds) {
+      throw new Error('Guesty account credentials not found');
+    }
+
     // Get access token
     const apiToken = await getGuestyAccessTokenCached(
-      supabaseAdmin, account.id, account.client_id, account.client_secret
+      supabaseAdmin, account.id, creds.client_id, creds.client_secret
     );
 
     // Fetch reservation IDs missing tax_amount (exclude manual reservations)

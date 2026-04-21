@@ -623,9 +623,19 @@ Deno.serve(async (req) => {
       throw new Error('Guesty account not found');
     }
 
+    const { data: creds, error: credsError } = await supabase
+      .from('guesty_account_credentials')
+      .select('client_id, client_secret')
+      .eq('guesty_account_id', accountId)
+      .single();
+
+    if (credsError || !creds) {
+      throw new Error('Guesty account credentials not found');
+    }
+
     console.log(`Starting sync for account: ${account.account_name}, type: ${syncType}`);
 
-    const accessToken = await getGuestyAccessTokenCached(supabase, accountId, account.client_id, account.client_secret);
+    const accessToken = await getGuestyAccessTokenCached(supabase, accountId, creds.client_id, creds.client_secret);
 
     let listingsCount = 0;
     let reservationsCount = 0;

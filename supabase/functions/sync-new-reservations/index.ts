@@ -365,12 +365,22 @@ Deno.serve(async (req) => {
 
     const { data: account, error: accountError } = await supabase
       .from('guesty_accounts')
-      .select('client_id, client_secret, organization_id')
+      .select('organization_id')
       .eq('id', accountId)
       .single();
 
     if (accountError || !account) {
       throw new Error('Guesty account not found');
+    }
+
+    const { data: creds, error: credsError } = await supabase
+      .from('guesty_account_credentials')
+      .select('client_id, client_secret')
+      .eq('guesty_account_id', accountId)
+      .single();
+
+    if (credsError || !creds) {
+      throw new Error('Guesty account credentials not found');
     }
 
     const { data: mostRecentReservation, error: cutoffError } = await supabase
@@ -428,8 +438,8 @@ Deno.serve(async (req) => {
     const apiToken = await getGuestyAccessTokenCached(
       supabase,
       accountId,
-      account.client_id,
-      account.client_secret
+      creds.client_id,
+      creds.client_secret
     );
 
     const filters = JSON.stringify([

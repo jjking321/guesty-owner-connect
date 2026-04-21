@@ -319,22 +319,22 @@ Deno.serve(async (req) => {
     }
 
     // Get Guesty account credentials
-    const { data: guestyAccount, error: accountError } = await supabase
-      .from('guesty_accounts')
-      .select('id, client_id, client_secret')
-      .eq('id', review.guesty_account_id)
+    const { data: creds, error: credsError } = await supabase
+      .from('guesty_account_credentials')
+      .select('client_id, client_secret')
+      .eq('guesty_account_id', review.guesty_account_id)
       .single();
 
-    if (accountError || !guestyAccount) {
-      throw new Error(`Guesty account not found: ${accountError?.message}`);
+    if (credsError || !creds) {
+      throw new Error(`Guesty account credentials not found: ${credsError?.message}`);
     }
 
     // Get access token
     const accessToken = await getGuestyAccessTokenCached(
       supabase,
-      guestyAccount.id,
-      guestyAccount.client_id,
-      guestyAccount.client_secret
+      review.guesty_account_id,
+      creds.client_id,
+      creds.client_secret
     );
 
     // Step 1: Find conversation for this reservation

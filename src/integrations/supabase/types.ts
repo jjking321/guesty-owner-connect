@@ -507,14 +507,44 @@ export type Database = {
         }
         Relationships: []
       }
+      guesty_account_credentials: {
+        Row: {
+          client_id: string
+          client_secret: string
+          created_at: string
+          guesty_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          client_secret: string
+          created_at?: string
+          guesty_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          client_secret?: string
+          created_at?: string
+          guesty_account_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guesty_account_credentials_guesty_account_id_fkey"
+            columns: ["guesty_account_id"]
+            isOneToOne: true
+            referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guesty_accounts: {
         Row: {
           account_name: string
           actionables_generation_enabled: boolean | null
           airbnb_scrape_enabled: boolean | null
           automated_sync_enabled: boolean | null
-          client_id: string
-          client_secret: string
           created_at: string
           dispute_analysis_enabled: boolean | null
           forecast_generation_enabled: boolean | null
@@ -535,8 +565,6 @@ export type Database = {
           actionables_generation_enabled?: boolean | null
           airbnb_scrape_enabled?: boolean | null
           automated_sync_enabled?: boolean | null
-          client_id: string
-          client_secret: string
           created_at?: string
           dispute_analysis_enabled?: boolean | null
           forecast_generation_enabled?: boolean | null
@@ -557,8 +585,6 @@ export type Database = {
           actionables_generation_enabled?: boolean | null
           airbnb_scrape_enabled?: boolean | null
           automated_sync_enabled?: boolean | null
-          client_id?: string
-          client_secret?: string
           created_at?: string
           dispute_analysis_enabled?: boolean | null
           forecast_generation_enabled?: boolean | null
