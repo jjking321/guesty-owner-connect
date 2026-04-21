@@ -325,14 +325,14 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { data: account, error: accountError } = await supabase
-      .from('guesty_accounts')
+    const { data: creds, error: credsError } = await supabase
+      .from('guesty_account_credentials')
       .select('client_id, client_secret')
-      .eq('id', listing.guesty_account_id)
+      .eq('guesty_account_id', listing.guesty_account_id)
       .single();
 
-    if (accountError || !account) {
-      console.error('Guesty account not found:', accountError);
+    if (credsError || !creds) {
+      console.error('Guesty account credentials not found:', credsError);
       return new Response(
         JSON.stringify({ error: 'Guesty account not configured' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -343,8 +343,8 @@ Deno.serve(async (req) => {
     const accessToken = await getGuestyAccessTokenCached(
       supabase,
       listing.guesty_account_id,
-      account.client_id,
-      account.client_secret
+      creds.client_id,
+      creds.client_secret
     );
 
     const today = new Date();

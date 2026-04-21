@@ -357,22 +357,22 @@ Deno.serve(async (req) => {
 
     const accountId = listing.guesty_account_id;
 
-    const { data: account, error: accountError } = await supabase
-      .from('guesty_accounts')
+    const { data: creds, error: credsError } = await supabase
+      .from('guesty_account_credentials')
       .select('client_id, client_secret')
-      .eq('id', accountId)
+      .eq('guesty_account_id', accountId)
       .single();
 
-    if (accountError || !account) {
-      throw new Error('Guesty account not found');
+    if (credsError || !creds) {
+      throw new Error('Guesty account credentials not found');
     }
 
     // Use cached token manager
     const apiToken = await getGuestyAccessTokenCached(
       supabase,
       accountId,
-      account.client_id,
-      account.client_secret
+      creds.client_id,
+      creds.client_secret
     );
 
     let allReservations: GuestyReservation[] = [];

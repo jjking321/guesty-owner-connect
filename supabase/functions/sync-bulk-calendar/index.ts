@@ -337,14 +337,14 @@ async function performSync(
   console.log(`Starting bulk calendar sync for account ${guestyAccountId}, resuming from offset ${resumeFromOffset}`);
 
   try {
-    const { data: account, error: accountError } = await supabase
-      .from('guesty_accounts')
+    const { data: creds, error: credsError } = await supabase
+      .from('guesty_account_credentials')
       .select('client_id, client_secret')
-      .eq('id', guestyAccountId)
+      .eq('guesty_account_id', guestyAccountId)
       .single();
 
-    if (accountError || !account) {
-      throw new Error('Guesty account not found');
+    if (credsError || !creds) {
+      throw new Error('Guesty account credentials not found');
     }
 
     const { data: listings, error: listingsError } = await supabase
@@ -380,8 +380,8 @@ async function performSync(
       accessToken = await getGuestyAccessTokenCached(
         supabase,
         guestyAccountId,
-        account.client_id,
-        account.client_secret
+        creds.client_id,
+        creds.client_secret
       );
     }
 

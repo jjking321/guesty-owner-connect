@@ -395,7 +395,7 @@ async function performSync(
 
     const { data: guestyAccount, error: accountError } = await supabaseClient
       .from('guesty_accounts')
-      .select('client_id, client_secret')
+      .select('id')
       .eq('id', guestyAccountId)
       .single();
 
@@ -403,12 +403,22 @@ async function performSync(
       throw new Error('Guesty account not found');
     }
 
+    const { data: creds, error: credsError } = await supabaseClient
+      .from('guesty_account_credentials')
+      .select('client_id, client_secret')
+      .eq('guesty_account_id', guestyAccountId)
+      .single();
+
+    if (credsError || !creds) {
+      throw new Error('Guesty account credentials not found');
+    }
+
     // Get access token using cached token manager
     const accessToken = await getGuestyAccessTokenCached(
       supabaseClient,
       guestyAccountId,
-      guestyAccount.client_id,
-      guestyAccount.client_secret
+      creds.client_id,
+      creds.client_secret
     );
 
     // Get list of this account's listing IDs for filtering
