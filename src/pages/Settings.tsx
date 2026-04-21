@@ -241,29 +241,16 @@ export default function Settings() {
     const clientSecret = formData.get("client_secret") as string;
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-
-      // Get user's organization
-      const { data: membership } = await supabase
-        .from("organization_members")
-        .select("organization_id")
-        .eq("user_id", user.id)
-        .single();
-
-      if (!membership) {
-        throw new Error("No organization found. Please contact support.");
-      }
-
-      const { error } = await supabase.from("guesty_accounts").insert({
-        user_id: user.id,
-        organization_id: membership.organization_id,
-        account_name: accountName,
-        client_id: clientId,
-        client_secret: clientSecret,
-      } as any);
+      const { data, error } = await supabase.functions.invoke("save-guesty-credentials", {
+        body: {
+          account_name: accountName,
+          client_id: clientId,
+          client_secret: clientSecret,
+        },
+      });
 
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
       toast({
         title: "Account added",
