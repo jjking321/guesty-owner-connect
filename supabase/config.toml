@@ -128,3 +128,7 @@ verify_jwt = false
 
 [functions.backfill-reservation-subtotals]
 verify_jwt = false
+
+[functions.save-guesty-credentials]
+verify_jwt = true
+
