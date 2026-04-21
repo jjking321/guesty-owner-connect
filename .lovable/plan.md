@@ -1,55 +1,52 @@
 
 
-# Fix Monthly Forecast Display to Use Redistributed P50 Values
+# Lock down Guesty OAuth credentials
 
 ## Problem
-
-The redistribution logic in the edge function correctly updates `total_forecast_p50` on each monthly forecast object. However, the frontend (`src/components/RevenueForecast.tsx`, line 483-484) displays:
-
-```typescript
-m.blended_forecast || m.total_forecast_p50
-```
-
-Since `blended_forecast` is always a non-zero number (the raw point estimate before redistribution), it always takes precedence. The redistributed `total_forecast_p50` is never shown.
-
-The same issue exists in `GroupDetail.tsx` (line 482) and `OwnerDetail.tsx` (line 539) which read `total_forecast_p50`, but those should be fine since they use `total_forecast_p50` directly.
+The `guesty_accounts` table holds `client_id` and `client_secret` in plaintext columns, and its RLS `SELECT` policy grants read access to every organization member. Any logged-in member can read another tenant admin's secret. The frontend already avoids selecting these columns, but RLS still allows it.
 
 ## Solution
+Move credentials into a separate `guesty_account_credentials` table that only the service role can read. Strip the columns from `guesty_accounts` so they can never be exposed via the user-facing API. Edge functions continue to work because they already use the service role key.
 
-Two changes needed:
+## Plan
 
-### Change 1: Frontend — Use `total_forecast_p50` instead of `blended_forecast` for display
+### 1. Database migration
+Create `public.guesty_account_credentials`:
+- `guesty_account_id uuid PRIMARY KEY REFERENCES guesty_accounts(id) ON DELETE CASCADE`
+- `client_id text NOT NULL`
+- `client_secret text NOT NULL`
+- `created_at`, `updated_at` timestamps
 
-**File: `src/components/RevenueForecast.tsx`** (lines 483-484)
+Then:
+- Enable RLS, add **no** policies for `authenticated`/`anon` (service role bypasses RLS). Add an explicit `REVOKE ALL ... FROM anon, authenticated` for defense in depth.
+- Backfill: `INSERT INTO guesty_account_credentials SELECT id, client_id, client_secret, now(), now() FROM guesty_accounts`.
+- Drop `client_id` and `client_secret` columns from `guesty_accounts`.
 
-Change the forecast column to prefer `total_forecast_p50` over `blended_forecast`:
+### 2. New edge function: `save-guesty-credentials`
+A small authenticated function that the Settings page calls when adding/editing a Guesty account. It:
+- Validates the caller's JWT and confirms they are an `admin` or `super_admin` of the target organization.
+- Inserts the row into `guesty_accounts` (without secrets) and upserts the credentials row into `guesty_account_credentials` using the service role client.
 
-```typescript
-// Before
-actualForMonth + (Number(m.blended_forecast || m.total_forecast_p50 || 0))
-// After
-actualForMonth + (Number(m.total_forecast_p50 || m.blended_forecast || 0))
-```
+This avoids exposing the credentials table to the client SDK at all.
 
-Same swap on line 484 for future months.
+### 3. Update existing edge functions (10 files)
+In each function below, replace the current `.from('guesty_accounts').select('client_id, client_secret, ...')` call with two calls: one to `guesty_accounts` for the non-secret fields it needs, and one to `guesty_account_credentials` for the secrets.
+- `sync-reviews`, `sync-new-reviews`, `sync-owners`, `sync-listing-calendar`, `sync-bulk-calendar`, `sync-listing-reservations`, `sync-new-reservations`, `fetch-dispute-conversation`, `backfill-reservation-subtotals`, `backfill-reservation-taxes`
 
-### Change 2: Edge function — Also update `blended_forecast` during redistribution (belt and suspenders)
+### 4. Update `src/pages/Settings.tsx`
+- `handleAddAccount`: call `supabase.functions.invoke('save-guesty-credentials', { body: { account_name, client_id, client_secret } })` instead of inserting directly into `guesty_accounts`.
+- `loadAccounts`: already safe — no change needed (it never selected secrets).
+- If there's an "edit credentials" flow, route it through the same edge function.
 
-**File: `supabase/functions/forecast-revenue/index.ts`** (lines 1255-1259)
+### 5. Mark security finding fixed
+After deploying, mark `guesty_accounts_client_secret_exposure` as fixed with an explanation of the new architecture.
 
-In the redistribution loop, also update `blended_forecast` so any other consumer that reads it gets the correct value:
+## Out of scope (separate findings)
+The security panel also flagged: `forecast_settings` open RLS, `dispute_analysis_progress` cross-tenant leak, unauthenticated edge functions, the `x-service-role` header bypass, leaked password protection, and the `xlsx` vulnerability. These are tracked separately — this plan only addresses the Guesty credential exposure. Let me know if you'd like a follow-up plan covering the rest.
 
-```typescript
-for (const forecast of monthlyForecasts) {
-  const share = forecast.blended_forecast / monthlyBlendedSum;
-  forecast.total_forecast_p50 = simResults.p50 * share;
-  forecast.total_forecast_p25 = simResults.p25 * share;
-  forecast.total_forecast_p75 = simResults.p75 * share;
-  forecast.blended_forecast = simResults.p50 * share; // Keep in sync
-}
-```
-
-This ensures both fields agree, so regardless of which one any component reads, the values will sum to the year-end P50.
-
-No database changes needed. After deploying, re-run forecasts from the Forecast Admin page.
+## Technical details
+- The credentials table is keyed by `guesty_account_id` (PK + FK with cascade delete) so deleting an account auto-cleans its secrets.
+- No client-side `supabase.from('guesty_account_credentials')` calls will exist anywhere — all access is through edge functions using `SUPABASE_SERVICE_ROLE_KEY`.
+- The new `save-guesty-credentials` function will validate JWT in code (per project's edge function rules) and check `has_organization_role(organization_id, user_id, 'admin')` or `super_admin` before writing.
+- Migration order matters: create + backfill the new table **before** dropping the columns, all in one transactional migration file.
 
