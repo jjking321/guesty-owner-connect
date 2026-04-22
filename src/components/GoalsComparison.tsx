@@ -1063,6 +1063,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
               </div>
 
               <TabsContent value="monthly">
+                {viewMode === 'table' ? renderMetricTable() : (
                 <ResponsiveContainer width="100%" height={400}>
                   <LineChart data={monthlyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -1135,9 +1136,11 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     )}
                   </LineChart>
                 </ResponsiveContainer>
+                )}
               </TabsContent>
 
               <TabsContent value="cumulative">
+                {viewMode === 'table' ? renderMetricTable() : (
                 <ResponsiveContainer width="100%" height={400}>
                   <LineChart data={cumulativeData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -1210,6 +1213,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     )}
                   </LineChart>
                 </ResponsiveContainer>
+                )}
               </TabsContent>
             </Tabs>
           ) : (
@@ -1244,6 +1248,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   </Label>
                 </div>
               </div>
+              {viewMode === 'table' ? renderMetricTable() : (
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart 
                   data={activeMetric === 'occupancy' ? occupancyData : activeMetric === 'revpar' ? revparData : adrData} 
@@ -1304,6 +1309,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   )}
                 </LineChart>
               </ResponsiveContainer>
+              )}
             </div>
           )}
         </CardContent>
