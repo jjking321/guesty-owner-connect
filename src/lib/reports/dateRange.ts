@@ -2,10 +2,15 @@ import {
   startOfMonth,
   endOfMonth,
   startOfYear,
+  endOfYear,
   subYears,
+  addYears,
   endOfDay,
+  startOfDay,
   subDays,
+  addDays,
   subMonths,
+  addMonths,
   differenceInCalendarDays,
   format,
 } from 'date-fns';
@@ -42,6 +47,45 @@ export function resolveDateRange(cfg: DateRangeConfig, now: Date = new Date()): 
       const start = startOfYear(lastYear);
       const end = new Date(lastYear.getFullYear(), 11, 31, 23, 59, 59);
       return { start, end, label: `Last year (${lastYear.getFullYear()})` };
+    }
+    case 'next_month': {
+      const nextMonth = addMonths(now, 1);
+      return {
+        start: startOfMonth(nextMonth),
+        end: endOfMonth(nextMonth),
+        label: format(nextMonth, 'MMMM yyyy'),
+      };
+    }
+    case 'next_30_days': {
+      const start = startOfDay(addDays(now, 1));
+      const end = endOfDay(addDays(now, 30));
+      return { start, end, label: 'Next 30 days' };
+    }
+    case 'next_90_days': {
+      const start = startOfDay(addDays(now, 1));
+      const end = endOfDay(addDays(now, 90));
+      return { start, end, label: 'Next 90 days' };
+    }
+    case 'next_6_months': {
+      const start = startOfMonth(addMonths(now, 1));
+      const end = endOfMonth(addMonths(now, 6));
+      return { start, end, label: 'Next 6 months' };
+    }
+    case 'next_12_months': {
+      const start = startOfMonth(addMonths(now, 1));
+      const end = endOfMonth(addMonths(now, 12));
+      return { start, end, label: 'Next 12 months' };
+    }
+    case 'rest_of_year': {
+      const start = startOfDay(now);
+      const end = endOfYear(now);
+      return { start, end, label: `Rest of ${format(now, 'yyyy')}` };
+    }
+    case 'next_year': {
+      const nextYear = addYears(now, 1);
+      const start = startOfYear(nextYear);
+      const end = endOfYear(nextYear);
+      return { start, end, label: `Next year (${nextYear.getFullYear()})` };
     }
     default: {
       const start = startOfMonth(now);
