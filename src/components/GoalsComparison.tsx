@@ -57,6 +57,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const [showGoals, setShowGoals] = useState(true);
   const [showCompset, setShowCompset] = useState(false);
   const [showComparison, setShowComparison] = useState(true);
+  const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
   const [compsetMonthlyAverages, setCompsetMonthlyAverages] = useState<CompsetMonthlyAverage[]>([]);
   const [calendarRates, setCalendarRates] = useState<Map<string, { avgRate: number; totalDays: number; availableDays: number }>>(new Map());
   const { toast } = useToast();
