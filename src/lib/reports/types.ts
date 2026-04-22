@@ -18,8 +18,21 @@ export interface ReportScope {
   ids?: string[]; // listing IDs (for 'listings'), or [groupId] / [ownerId]
 }
 
+export type DateRangePreset =
+  | 'this_month'
+  | 'ytd'
+  | 'ttm'
+  | 'last_year'
+  | 'next_month'
+  | 'next_30_days'
+  | 'next_90_days'
+  | 'next_6_months'
+  | 'next_12_months'
+  | 'rest_of_year'
+  | 'next_year';
+
 export type DateRangeConfig =
-  | { preset: 'this_month' | 'ytd' | 'ttm' | 'last_year' }
+  | { preset: DateRangePreset }
   | { preset: 'custom'; start: string; end: string };
 
 export type BreakdownKey = 'month' | 'listing' | 'owner' | 'group';

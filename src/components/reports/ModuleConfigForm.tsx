@@ -273,6 +273,13 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
                 <SelectItem value="ytd">Year to date</SelectItem>
                 <SelectItem value="ttm">Trailing 12 months</SelectItem>
                 <SelectItem value="last_year">Last year</SelectItem>
+                <SelectItem value="rest_of_year">Rest of this year</SelectItem>
+                <SelectItem value="next_month">Next month</SelectItem>
+                <SelectItem value="next_30_days">Next 30 days</SelectItem>
+                <SelectItem value="next_90_days">Next 90 days</SelectItem>
+                <SelectItem value="next_6_months">Next 6 months</SelectItem>
+                <SelectItem value="next_12_months">Next 12 months</SelectItem>
+                <SelectItem value="next_year">Next year</SelectItem>
                 <SelectItem value="custom">Custom</SelectItem>
               </SelectContent>
             </Select>
