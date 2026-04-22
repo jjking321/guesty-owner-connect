@@ -229,26 +229,47 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
     return aggregateGenericGoals(module, filtered, listingsById);
   }
 
-  // Forecast path — read from forecast_accuracy as rough P50 source
+  // Forecast path — read from revenue_forecasts.monthly_forecasts JSONB
   if (module.metric === 'forecast_p50') {
-    // Use forecast_accuracy.forecast_p50 grouped by target_month
     if (listingIds.length === 0) {
       return emptyData(module);
     }
+    const startYear = range.start.getFullYear();
+    const endYear = range.end.getFullYear();
     const chunkSize = 60;
-    const all: any[] = [];
+    const rows: Array<{ listing_id: string; target_month: string; forecast_p50: number }> = [];
     for (let i = 0; i < listingIds.length; i += chunkSize) {
       const chunk = listingIds.slice(i, i + chunkSize);
       const { data, error } = await supabase
-        .from('forecast_accuracy')
-        .select('listing_id, target_month, forecast_p50')
+        .from('revenue_forecasts')
+        .select('listing_id, year, monthly_forecasts, generated_at')
         .in('listing_id', chunk)
-        .gte('target_month', format(range.start, 'yyyy-MM'))
-        .lte('target_month', format(range.end, 'yyyy-MM'));
+        .gte('year', startYear)
+        .lte('year', endYear)
+        .order('generated_at', { ascending: false });
       if (error) throw error;
-      all.push(...(data ?? []));
+      // Keep only the most recent forecast per (listing_id, year)
+      const seen = new Set<string>();
+      for (const r of (data ?? []) as any[]) {
+        const key = `${r.listing_id}-${r.year}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const monthly = Array.isArray(r.monthly_forecasts) ? r.monthly_forecasts : [];
+        for (const m of monthly) {
+          const targetMonth: string | undefined = m?.month;
+          if (!targetMonth) continue;
+          const p50 = Number(
+            m?.total_forecast_p50 ?? m?.blended_forecast ?? m?.probability_forecast ?? 0,
+          );
+          // Filter to month range
+          const [y, mo] = targetMonth.split('-').map(Number);
+          const d = new Date(y, (mo || 1) - 1, 15);
+          if (d < range.start || d > range.end) continue;
+          rows.push({ listing_id: r.listing_id, target_month: targetMonth, forecast_p50: p50 });
+        }
+      }
     }
-    return aggregateGenericForecast(module, all, listingsById);
+    return aggregateGenericForecast(module, rows, listingsById);
   }
 
   // Reservation-night-derived metrics: revenue, nights, occupancy, adr, revpar
