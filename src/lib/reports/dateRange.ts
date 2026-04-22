@@ -1,5 +1,16 @@
-import { startOfMonth, endOfMonth, startOfYear, subYears, endOfDay, subDays, format } from 'date-fns';
-import type { DateRangeConfig, ResolvedDateRange } from './types';
+import {
+  startOfMonth,
+  endOfMonth,
+  startOfYear,
+  subYears,
+  endOfDay,
+  subDays,
+  subMonths,
+  differenceInCalendarDays,
+  format,
+} from 'date-fns';
+import type { DateRangeConfig, ResolvedDateRange, CompareKey } from './types';
+import { COMPARE_LABELS } from './types';
 
 export function resolveDateRange(cfg: DateRangeConfig, now: Date = new Date()): ResolvedDateRange {
   if (cfg.preset === 'custom') {
@@ -52,4 +63,49 @@ export function shiftRangeByYear(range: ResolvedDateRange, years: number): Resol
   const end = new Date(range.end);
   end.setFullYear(end.getFullYear() + years);
   return { start, end, label: `${range.label} (shifted ${years}y)` };
+}
+
+/**
+ * Resolve the comparison range for a given primary range and compare key.
+ * Returns null when the compare key has no date-range semantics (e.g. 'goal').
+ */
+export function resolveCompareRange(
+  primary: ResolvedDateRange,
+  compare: CompareKey,
+  now: Date = new Date(),
+): ResolvedDateRange | null {
+  if (!compare || compare === 'goal') return null;
+
+  switch (compare) {
+    case 'last_year':
+      return shiftRangeByYear(primary, -1);
+    case 'two_years_ago':
+      return shiftRangeByYear(primary, -2);
+    case 'previous_period': {
+      const lengthDays = differenceInCalendarDays(primary.end, primary.start) + 1;
+      const end = subDays(primary.start, 1);
+      const start = subDays(end, lengthDays - 1);
+      return { start, end: endOfDay(end), label: COMPARE_LABELS.previous_period };
+    }
+    case 'last_30_days': {
+      const end = subDays(now, 1);
+      const start = subDays(end, 29);
+      return { start, end: endOfDay(end), label: COMPARE_LABELS.last_30_days };
+    }
+    case 'last_90_days': {
+      const end = subDays(now, 1);
+      const start = subDays(end, 89);
+      return { start, end: endOfDay(end), label: COMPARE_LABELS.last_90_days };
+    }
+    case 'last_month': {
+      const lastMonth = subMonths(now, 1);
+      return {
+        start: startOfMonth(lastMonth),
+        end: endOfMonth(lastMonth),
+        label: format(lastMonth, 'MMMM yyyy'),
+      };
+    }
+    default:
+      return null;
+  }
 }

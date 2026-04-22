@@ -1,12 +1,13 @@
 import { supabase } from '@/integrations/supabase/client';
 import { format, eachMonthOfInterval, startOfMonth, endOfMonth, differenceInCalendarDays } from 'date-fns';
-import { resolveDateRange, rangeToISO, shiftRangeByYear } from './dateRange';
+import { resolveDateRange, rangeToISO, resolveCompareRange } from './dateRange';
 import {
   type ModuleData,
   type ModuleDataRow,
   type ReportModule,
   METRIC_LABELS,
   METRIC_UNITS,
+  COMPARE_LABELS,
 } from './types';
 
 const BATCH_SIZE = 1000;
@@ -368,8 +369,10 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
   // Comparison
   let compareTotal: number | undefined;
   let compareLabel: string | undefined;
-  if (module.compare === 'last_year') {
-    const prevRange = shiftRangeByYear(range, -1);
+
+  // Date-range based comparisons (last_year, previous_period, last_30_days, last_90_days, last_month, two_years_ago)
+  const prevRange = resolveCompareRange(range, module.compare ?? null);
+  if (prevRange && module.compare && module.compare !== 'goal') {
     const { start: ps, end: pe } = rangeToISO(prevRange);
     const prevNights = await fetchReservationNights(listingIds, ps, pe);
     const prevRev = prevNights.reduce((a, n) => a + Number(n.revenue_allocation || 0), 0);
@@ -392,21 +395,53 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
         compareTotal = prevAvail > 0 ? prevRev / prevAvail : 0;
         break;
     }
-    compareLabel = 'Last year';
+    compareLabel = COMPARE_LABELS[module.compare];
 
-    // Per-bucket compare for month breakdowns
+    // Per-bucket compare for month breakdowns — only meaningful when buckets align
+    // (year-shifted comparisons map cleanly; other ranges may not, so we still
+    // render per-bucket where the bucket label exists in the prev range.)
     if (!module.breakdown || module.breakdown === 'month') {
       const prevBucketRev = new Map<string, number>();
       const prevBucketNights = new Map<string, number>();
-      for (const n of prevNights) {
-        const d = new Date(n.night_date + 'T00:00:00');
-        // Shift forward 1 year to align with current bucket label
-        const shifted = new Date(d);
-        shifted.setFullYear(shifted.getFullYear() + 1);
-        const k = format(shifted, 'MMM yyyy');
-        prevBucketRev.set(k, (prevBucketRev.get(k) ?? 0) + Number(n.revenue_allocation || 0));
-        prevBucketNights.set(k, (prevBucketNights.get(k) ?? 0) + 1);
+
+      // For year shifts, align by shifting forward N years; for other compares,
+      // align by index position (oldest prev bucket → oldest current bucket).
+      const yearShift =
+        module.compare === 'last_year' ? 1 : module.compare === 'two_years_ago' ? 2 : 0;
+
+      if (yearShift > 0) {
+        for (const n of prevNights) {
+          const d = new Date(n.night_date + 'T00:00:00');
+          const shifted = new Date(d);
+          shifted.setFullYear(shifted.getFullYear() + yearShift);
+          const k = format(shifted, 'MMM yyyy');
+          prevBucketRev.set(k, (prevBucketRev.get(k) ?? 0) + Number(n.revenue_allocation || 0));
+          prevBucketNights.set(k, (prevBucketNights.get(k) ?? 0) + 1);
+        }
+      } else {
+        // Index-aligned: bucket the prev range by its own months, then map by ordinal
+        const prevMonthRev = new Map<string, number>();
+        const prevMonthNights = new Map<string, number>();
+        for (const n of prevNights) {
+          const d = new Date(n.night_date + 'T00:00:00');
+          const k = format(d, 'MMM yyyy');
+          prevMonthRev.set(k, (prevMonthRev.get(k) ?? 0) + Number(n.revenue_allocation || 0));
+          prevMonthNights.set(k, (prevMonthNights.get(k) ?? 0) + 1);
+        }
+        const prevMonths = eachMonthOfInterval({
+          start: startOfMonth(prevRange.start),
+          end: endOfMonth(prevRange.end),
+        }).map((m) => format(m, 'MMM yyyy'));
+        const currMonths = allKeys;
+        const len = Math.min(prevMonths.length, currMonths.length);
+        for (let i = 0; i < len; i++) {
+          const pk = prevMonths[i];
+          const ck = currMonths[i];
+          prevBucketRev.set(ck, prevMonthRev.get(pk) ?? 0);
+          prevBucketNights.set(ck, prevMonthNights.get(pk) ?? 0);
+        }
       }
+
       for (const row of rows) {
         const r = prevBucketRev.get(row.key) ?? 0;
         const nb = prevBucketNights.get(row.key) ?? 0;

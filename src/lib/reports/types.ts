@@ -24,7 +24,25 @@ export type DateRangeConfig =
 
 export type BreakdownKey = 'month' | 'listing' | 'owner' | 'group';
 
-export type CompareKey = 'last_year' | 'goal' | null;
+export type CompareKey =
+  | 'last_year'           // same range, shifted -1 year
+  | 'previous_period'     // immediately preceding range of equal length
+  | 'last_30_days'        // fixed: 30 days ending yesterday
+  | 'last_90_days'        // fixed: 90 days ending yesterday
+  | 'last_month'          // previous calendar month
+  | 'two_years_ago'       // same range, shifted -2 years
+  | 'goal'                // monthly revenue goals
+  | null;
+
+export const COMPARE_LABELS: Record<Exclude<CompareKey, null>, string> = {
+  last_year: 'Last year',
+  previous_period: 'Previous period',
+  last_30_days: 'Last 30 days',
+  last_90_days: 'Last 90 days',
+  last_month: 'Last month',
+  two_years_ago: '2 years ago',
+  goal: 'Goal',
+};
 
 export interface ReportModule {
   id: string;

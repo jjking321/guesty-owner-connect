@@ -17,6 +17,7 @@ import {
   type CompareKey,
   METRIC_LABELS,
   WIDGET_LABELS,
+  COMPARE_LABELS,
 } from '@/lib/reports/types';
 
 interface Props {
@@ -265,10 +266,20 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">None</SelectItem>
-              <SelectItem value="last_year">Last year</SelectItem>
-              <SelectItem value="goal">Goal</SelectItem>
+              <SelectItem value="last_year">{COMPARE_LABELS.last_year}</SelectItem>
+              <SelectItem value="two_years_ago">{COMPARE_LABELS.two_years_ago}</SelectItem>
+              <SelectItem value="previous_period">{COMPARE_LABELS.previous_period}</SelectItem>
+              <SelectItem value="last_30_days">{COMPARE_LABELS.last_30_days}</SelectItem>
+              <SelectItem value="last_90_days">{COMPARE_LABELS.last_90_days}</SelectItem>
+              <SelectItem value="last_month">{COMPARE_LABELS.last_month}</SelectItem>
+              <SelectItem value="goal">{COMPARE_LABELS.goal} (revenue only)</SelectItem>
             </SelectContent>
           </Select>
+          {module.compare === 'goal' && module.metric !== 'revenue' && (
+            <p className="text-xs text-muted-foreground">
+              Goal comparison only applies to the Revenue metric.
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
