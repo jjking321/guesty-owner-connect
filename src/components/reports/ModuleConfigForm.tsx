@@ -131,28 +131,11 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
         </div>
 
         {module.scope.kind === 'listings' && (
-          <div className="space-y-1">
-            <Label>Listings ({module.scope.ids?.length ?? 0} selected)</Label>
-            <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
-              {listings.map((l) => {
-                const checked = module.scope.ids?.includes(l.id) ?? false;
-                return (
-                  <label key={l.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(v) => {
-                        const ids = new Set(module.scope.ids ?? []);
-                        if (v) ids.add(l.id);
-                        else ids.delete(l.id);
-                        update({ scope: { kind: 'listings', ids: Array.from(ids) } });
-                      }}
-                    />
-                    <span className="truncate">{l.nickname || l.id}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+          <ListingMultiSelect
+            listings={listings}
+            selectedIds={module.scope.ids ?? []}
+            onChange={(ids) => update({ scope: { kind: 'listings', ids } })}
+          />
         )}
 
         {module.scope.kind === 'group' && (
