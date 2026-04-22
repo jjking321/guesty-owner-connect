@@ -1,12 +1,13 @@
 import { supabase } from '@/integrations/supabase/client';
 import { format, eachMonthOfInterval, startOfMonth, endOfMonth, differenceInCalendarDays } from 'date-fns';
-import { resolveDateRange, rangeToISO, shiftRangeByYear } from './dateRange';
+import { resolveDateRange, rangeToISO, resolveCompareRange } from './dateRange';
 import {
   type ModuleData,
   type ModuleDataRow,
   type ReportModule,
   METRIC_LABELS,
   METRIC_UNITS,
+  COMPARE_LABELS,
 } from './types';
 
 const BATCH_SIZE = 1000;
