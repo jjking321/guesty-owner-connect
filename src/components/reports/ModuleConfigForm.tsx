@@ -28,6 +28,89 @@ interface Props {
   onMoveDown?: () => void;
 }
 
+interface ListingMultiSelectProps {
+  listings: Array<{ id: string; nickname: string | null }>;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}
+
+function ListingMultiSelect({ listings, selectedIds, onChange }: ListingMultiSelectProps) {
+  const [search, setSearch] = useState('');
+  const selectedSet = new Set(selectedIds);
+  const filtered = listings.filter((l) =>
+    (l.nickname || l.id).toLowerCase().includes(search.toLowerCase())
+  );
+
+  const toggle = (id: string, checked: boolean) => {
+    const next = new Set(selectedIds);
+    if (checked) next.add(id);
+    else next.delete(id);
+    onChange(Array.from(next));
+  };
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((l) => selectedSet.has(l.id));
+  const toggleAllFiltered = () => {
+    const next = new Set(selectedIds);
+    if (allFilteredSelected) {
+      filtered.forEach((l) => next.delete(l.id));
+    } else {
+      filtered.forEach((l) => next.add(l.id));
+    }
+    onChange(Array.from(next));
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <Label>Listings ({selectedIds.length} selected)</Label>
+        {selectedIds.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => onChange([])}
+          >
+            Clear
+          </Button>
+        )}
+      </div>
+      <Input
+        placeholder="Search listings..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="h-8"
+      />
+      <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
+        {filtered.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-2 text-center">No listings match.</p>
+        ) : (
+          <>
+            {filtered.length > 1 && (
+              <label className="flex items-center gap-2 text-xs cursor-pointer text-muted-foreground border-b pb-1 mb-1">
+                <Checkbox
+                  checked={allFilteredSelected}
+                  onCheckedChange={() => toggleAllFiltered()}
+                />
+                <span>{allFilteredSelected ? 'Deselect' : 'Select'} all {search ? 'matching' : ''} ({filtered.length})</span>
+              </label>
+            )}
+            {filtered.map((l) => (
+              <label key={l.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={selectedSet.has(l.id)}
+                  onCheckedChange={(v) => toggle(l.id, !!v)}
+                />
+                <span className="truncate">{l.nickname || l.id}</span>
+              </label>
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveDown }: Props) {
   const update = (patch: Partial<ReportModule>) => onChange({ ...module, ...patch });
 
@@ -131,28 +214,11 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
         </div>
 
         {module.scope.kind === 'listings' && (
-          <div className="space-y-1">
-            <Label>Listings ({module.scope.ids?.length ?? 0} selected)</Label>
-            <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
-              {listings.map((l) => {
-                const checked = module.scope.ids?.includes(l.id) ?? false;
-                return (
-                  <label key={l.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={(v) => {
-                        const ids = new Set(module.scope.ids ?? []);
-                        if (v) ids.add(l.id);
-                        else ids.delete(l.id);
-                        update({ scope: { kind: 'listings', ids: Array.from(ids) } });
-                      }}
-                    />
-                    <span className="truncate">{l.nickname || l.id}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+          <ListingMultiSelect
+            listings={listings}
+            selectedIds={module.scope.ids ?? []}
+            onChange={(ids) => update({ scope: { kind: 'listings', ids } })}
+          />
         )}
 
         {module.scope.kind === 'group' && (
