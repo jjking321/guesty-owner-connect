@@ -990,14 +990,17 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         </CardHeader>
         <CardContent>
           {/* Metric selector tabs */}
-          <Tabs value={activeMetric} onValueChange={(v) => setActiveMetric(v as 'revenue' | 'occupancy' | 'revpar' | 'adr')}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="revenue">Revenue</TabsTrigger>
-              <TabsTrigger value="occupancy">Occupancy</TabsTrigger>
-              <TabsTrigger value="revpar">RevPAR</TabsTrigger>
-              <TabsTrigger value="adr">ADR</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+            <Tabs value={activeMetric} onValueChange={(v) => setActiveMetric(v as 'revenue' | 'occupancy' | 'revpar' | 'adr')}>
+              <TabsList>
+                <TabsTrigger value="revenue">Revenue</TabsTrigger>
+                <TabsTrigger value="occupancy">Occupancy</TabsTrigger>
+                <TabsTrigger value="revpar">RevPAR</TabsTrigger>
+                <TabsTrigger value="adr">ADR</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {viewControls}
+          </div>
 
           {activeMetric === 'revenue' ? (
             // Revenue chart with existing functionality
