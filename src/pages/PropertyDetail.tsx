@@ -582,6 +582,27 @@ export default function PropertyDetail() {
     return data;
   }, [reservations, metricsDateRange, capacityCalendar]);
 
+  const handleExportMonthlyCSV = () => {
+    const headers = ['Month', 'Revenue', 'Nights', 'Occupancy %', 'ADR', 'RevPAR'];
+    const rows = monthlyMetrics.map((row) => [
+      row.month,
+      row.revenue.toFixed(2),
+      row.nights,
+      row.occupancy.toFixed(1),
+      row.adr.toFixed(2),
+      row.revpar.toFixed(2),
+    ]);
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = (listing?.nickname || 'property').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    a.href = url;
+    a.download = `monthly-breakdown-${safeName}-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
