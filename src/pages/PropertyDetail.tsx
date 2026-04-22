@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info, ChevronDown, ChevronRight, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowLeft, Home, MapPin, Users, Bed, DollarSign, Calendar, TrendingUp, Percent, Info, ChevronDown, ChevronRight, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown, Download } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -582,6 +582,27 @@ export default function PropertyDetail() {
     return data;
   }, [reservations, metricsDateRange, capacityCalendar]);
 
+  const handleExportMonthlyCSV = () => {
+    const headers = ['Month', 'Revenue', 'Nights', 'Occupancy %', 'ADR', 'RevPAR'];
+    const rows = monthlyMetrics.map((row) => [
+      row.month,
+      row.revenue.toFixed(2),
+      row.nights,
+      row.occupancy.toFixed(1),
+      row.adr.toFixed(2),
+      row.revpar.toFixed(2),
+    ]);
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safeName = (listing?.nickname || 'property').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    a.href = url;
+    a.download = `monthly-breakdown-${safeName}-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -921,16 +942,29 @@ export default function PropertyDetail() {
 
               {/* Monthly Performance Table */}
               <Collapsible open={isMonthlyTableOpen} onOpenChange={setIsMonthlyTableOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button variant="ghost" className="flex items-center gap-2 w-full justify-start p-0 h-auto hover:bg-transparent">
-                    {isMonthlyTableOpen ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
-                    )}
-                    <span className="text-sm font-medium">Monthly Breakdown</span>
+                <div className="flex items-center justify-between gap-2">
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="flex items-center gap-2 justify-start p-0 h-auto hover:bg-transparent">
+                      {isMonthlyTableOpen ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                      <span className="text-sm font-medium">Monthly Breakdown</span>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleExportMonthlyCSV();
+                    }}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
                   </Button>
-                </CollapsibleTrigger>
+                </div>
                 <CollapsibleContent className="mt-4">
                   <Card>
                     <CardContent className="pt-6">
