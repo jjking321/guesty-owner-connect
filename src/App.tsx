@@ -21,6 +21,9 @@ import Comparables from "./pages/Comparables";
 import GoalsReview from "./pages/GoalsReview";
 import Actionables from "./pages/Actionables";
 import TaxReport from "./pages/TaxReport";
+import Reports from "./pages/Reports";
+import ReportBuilder from "./pages/ReportBuilder";
+import ReportViewer from "./pages/ReportViewer";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +58,10 @@ const App = () => (
           <Route path="/owners/:id" element={<OwnerDetail />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/tax-report" element={<TaxReport />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/reports/new" element={<ReportBuilder />} />
+          <Route path="/reports/:id" element={<ReportViewer />} />
+          <Route path="/reports/:id/edit" element={<ReportBuilder />} />
           <Route path="/forecast-admin" element={<ForecastAdmin />} />
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
