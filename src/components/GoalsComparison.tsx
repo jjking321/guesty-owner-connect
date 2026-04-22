@@ -4,9 +4,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { LineChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { Target, TrendingUp, TrendingDown } from "lucide-react";
+import { Target, TrendingUp, TrendingDown, Download, BarChart3, TableIcon } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format, parseISO, getDaysInMonth, addDays } from "date-fns";
 
 interface GoalsComparisonProps {
@@ -55,6 +57,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
   const [showGoals, setShowGoals] = useState(true);
   const [showCompset, setShowCompset] = useState(false);
   const [showComparison, setShowComparison] = useState(true);
+  const [viewMode, setViewMode] = useState<'chart' | 'table'>('chart');
   const [compsetMonthlyAverages, setCompsetMonthlyAverages] = useState<CompsetMonthlyAverage[]>([]);
   const [calendarRates, setCalendarRates] = useState<Map<string, { avgRate: number; totalDays: number; availableDays: number }>>(new Map());
   const { toast } = useToast();
@@ -799,6 +802,162 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
     }
   };
 
+  // ---------- Table / CSV helpers ----------
+  type TableColumn = { key: string; label: string; format: 'text' | 'currency' | 'percent' | 'integer' };
+
+  const buildTableConfig = (): { columns: TableColumn[]; rows: Record<string, any>[] } => {
+    if (activeMetric === 'revenue') {
+      const source = activeTab === 'cumulative' ? cumulativeData : monthlyData;
+      const cols: TableColumn[] = [
+        { key: 'month', label: 'Month', format: 'text' },
+        { key: 'actual', label: 'Actual', format: 'currency' },
+      ];
+      if (showGoals) cols.push({ key: 'projection', label: 'Goal', format: 'currency' });
+      if (showComparison) cols.push({ key: 'lastYearActual', label: 'Last Year', format: 'currency' });
+      if (showForecast) {
+        cols.push(
+          { key: 'forecastP25', label: 'Forecast P25', format: 'currency' },
+          { key: 'forecastP50', label: 'Forecast P50', format: 'currency' },
+          { key: 'forecastP75', label: 'Forecast P75', format: 'currency' },
+        );
+      }
+      if (showCompset) cols.push({ key: 'compsetAverage', label: 'Compset Avg', format: 'currency' });
+      return { columns: cols, rows: source };
+    }
+
+    const source =
+      activeMetric === 'occupancy' ? occupancyData :
+      activeMetric === 'revpar' ? revparData : adrData;
+    const valueFormat: TableColumn['format'] = activeMetric === 'occupancy' ? 'percent' : 'currency';
+    const cols: TableColumn[] = [
+      { key: 'month', label: 'Month', format: 'text' },
+      { key: 'currentYear', label: 'Current Year', format: valueFormat },
+    ];
+    if (showComparison) cols.push({ key: 'lastYear', label: 'Last Year', format: valueFormat });
+    if (showCompset) cols.push({ key: 'compsetAverage', label: 'Compset Avg', format: valueFormat });
+    return { columns: cols, rows: source };
+  };
+
+  const formatCellDisplay = (value: any, fmt: TableColumn['format']) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (fmt === 'text') return String(value);
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '—';
+    if (fmt === 'currency') return `$${num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    if (fmt === 'percent') return `${num.toFixed(1)}%`;
+    if (fmt === 'integer') return num.toLocaleString();
+    return String(num);
+  };
+
+  const formatCellCsv = (value: any, fmt: TableColumn['format']) => {
+    if (value === null || value === undefined || value === '') return '';
+    if (fmt === 'text') {
+      const s = String(value);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '';
+    if (fmt === 'currency') return num.toFixed(2);
+    if (fmt === 'percent') return num.toFixed(1);
+    return String(num);
+  };
+
+  const renderMetricTable = () => {
+    const { columns, rows } = buildTableConfig();
+    return (
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {columns.map((c) => (
+                <TableHead key={c.key} className={c.format === 'text' ? '' : 'text-right'}>
+                  {c.label}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="text-center text-muted-foreground py-8">
+                  No data available
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((row, i) => (
+                <TableRow key={i}>
+                  {columns.map((c) => (
+                    <TableCell key={c.key} className={c.format === 'text' ? 'font-medium' : 'text-right tabular-nums'}>
+                      {formatCellDisplay((row as any)[c.key], c.format)}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  };
+
+  const handleExportCSV = () => {
+    const { columns, rows } = buildTableConfig();
+    const headerLine = columns.map((c) => c.label).join(',');
+    const dataLines = rows.map((row) =>
+      columns.map((c) => formatCellCsv((row as any)[c.key], c.format)).join(',')
+    );
+    const csv = [headerLine, ...dataLines].join('\n');
+
+    const slugSource = listingId || 'portfolio';
+    const slug = slugSource.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'portfolio';
+    const metricSlug = activeMetric === 'revenue' ? `revenue-${activeTab}` : activeMetric;
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const filename = `performance-${metricSlug}-${year}-${slug}-${today}.csv`;
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    toast({ title: 'CSV exported', description: filename });
+  };
+
+  const viewControls = (
+    <div className="flex items-center gap-2">
+      <div className="inline-flex rounded-md border bg-background p-0.5">
+        <Button
+          type="button"
+          variant={viewMode === 'chart' ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-8 px-2"
+          onClick={() => setViewMode('chart')}
+          aria-label="Chart view"
+        >
+          <BarChart3 className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-8 px-2"
+          onClick={() => setViewMode('table')}
+          aria-label="Table view"
+        >
+          <TableIcon className="h-4 w-4" />
+        </Button>
+      </div>
+      <Button type="button" variant="outline" size="sm" onClick={handleExportCSV}>
+        <Download className="h-4 w-4" />
+        Export CSV
+      </Button>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <div>
@@ -831,14 +990,17 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
         </CardHeader>
         <CardContent>
           {/* Metric selector tabs */}
-          <Tabs value={activeMetric} onValueChange={(v) => setActiveMetric(v as 'revenue' | 'occupancy' | 'revpar' | 'adr')}>
-            <TabsList className="mb-4">
-              <TabsTrigger value="revenue">Revenue</TabsTrigger>
-              <TabsTrigger value="occupancy">Occupancy</TabsTrigger>
-              <TabsTrigger value="revpar">RevPAR</TabsTrigger>
-              <TabsTrigger value="adr">ADR</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+            <Tabs value={activeMetric} onValueChange={(v) => setActiveMetric(v as 'revenue' | 'occupancy' | 'revpar' | 'adr')}>
+              <TabsList>
+                <TabsTrigger value="revenue">Revenue</TabsTrigger>
+                <TabsTrigger value="occupancy">Occupancy</TabsTrigger>
+                <TabsTrigger value="revpar">RevPAR</TabsTrigger>
+                <TabsTrigger value="adr">ADR</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {viewControls}
+          </div>
 
           {activeMetric === 'revenue' ? (
             // Revenue chart with existing functionality
@@ -901,6 +1063,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
               </div>
 
               <TabsContent value="monthly">
+                {viewMode === 'table' ? renderMetricTable() : (
                 <ResponsiveContainer width="100%" height={400}>
                   <LineChart data={monthlyData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -973,9 +1136,11 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     )}
                   </LineChart>
                 </ResponsiveContainer>
+                )}
               </TabsContent>
 
               <TabsContent value="cumulative">
+                {viewMode === 'table' ? renderMetricTable() : (
                 <ResponsiveContainer width="100%" height={400}>
                   <LineChart data={cumulativeData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -1048,6 +1213,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                     )}
                   </LineChart>
                 </ResponsiveContainer>
+                )}
               </TabsContent>
             </Tabs>
           ) : (
@@ -1082,6 +1248,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   </Label>
                 </div>
               </div>
+              {viewMode === 'table' ? renderMetricTable() : (
               <ResponsiveContainer width="100%" height={400}>
                 <LineChart 
                   data={activeMetric === 'occupancy' ? occupancyData : activeMetric === 'revpar' ? revparData : adrData} 
@@ -1142,6 +1309,7 @@ export function GoalsComparison({ listingId, reservations, goals: externalGoals,
                   )}
                 </LineChart>
               </ResponsiveContainer>
+              )}
             </div>
           )}
         </CardContent>
