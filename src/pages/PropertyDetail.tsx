@@ -942,16 +942,29 @@ export default function PropertyDetail() {
 
               {/* Monthly Performance Table */}
               <Collapsible open={isMonthlyTableOpen} onOpenChange={setIsMonthlyTableOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button variant="ghost" className="flex items-center gap-2 w-full justify-start p-0 h-auto hover:bg-transparent">
-                    {isMonthlyTableOpen ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
-                    )}
-                    <span className="text-sm font-medium">Monthly Breakdown</span>
+                <div className="flex items-center justify-between gap-2">
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="flex items-center gap-2 justify-start p-0 h-auto hover:bg-transparent">
+                      {isMonthlyTableOpen ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                      <span className="text-sm font-medium">Monthly Breakdown</span>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleExportMonthlyCSV();
+                    }}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Export CSV
                   </Button>
-                </CollapsibleTrigger>
+                </div>
                 <CollapsibleContent className="mt-4">
                   <Card>
                     <CardContent className="pt-6">
