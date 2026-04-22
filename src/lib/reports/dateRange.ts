@@ -1,5 +1,16 @@
-import { startOfMonth, endOfMonth, startOfYear, subYears, endOfDay, subDays, format } from 'date-fns';
-import type { DateRangeConfig, ResolvedDateRange } from './types';
+import {
+  startOfMonth,
+  endOfMonth,
+  startOfYear,
+  subYears,
+  endOfDay,
+  subDays,
+  subMonths,
+  differenceInCalendarDays,
+  format,
+} from 'date-fns';
+import type { DateRangeConfig, ResolvedDateRange, CompareKey } from './types';
+import { COMPARE_LABELS } from './types';
 
 export function resolveDateRange(cfg: DateRangeConfig, now: Date = new Date()): ResolvedDateRange {
   if (cfg.preset === 'custom') {
