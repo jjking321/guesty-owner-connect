@@ -17,6 +17,7 @@ import {
   type CompareKey,
   METRIC_LABELS,
   WIDGET_LABELS,
+  COMPARE_LABELS,
 } from '@/lib/reports/types';
 
 interface Props {
