@@ -54,30 +54,47 @@ async function getToken(supabase: any, accountId: string): Promise<string | null
   return null;
 }
 
-async function fetchPropertyLog(token: string, listingId: string): Promise<any | null> {
+async function fetchPropertyLogPage(token: string, listingId: string, skip: number): Promise<any | null> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const url = new URL(`https://open-api.guesty.com/v1/property-logs/${listingId}`);
-    url.searchParams.set('limit', '100');
-    url.searchParams.set('skip', '0');
+    url.searchParams.set('limit', '20'); // Guesty caps at 20
+    url.searchParams.set('skip', String(skip));
     const r = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     });
-    if (r.status === 429 || r.status === 500) {
-      await sleep(Math.min(2000 * Math.pow(2, attempt - 1), 30000));
+    if (r.status === 429 || r.status === 500 || r.status === 502 || r.status === 503) {
+      await sleep(Math.min(1500 * Math.pow(2, attempt - 1), 20000));
       continue;
     }
     if (r.status === 404) return null;
     if (!r.ok) {
-      console.error(`property-logs ${listingId} failed: ${r.status} ${await r.text()}`);
+      console.error(`property-logs ${listingId} skip=${skip} failed: ${r.status} ${await r.text()}`);
       return null;
     }
-    const j = await r.json();
-    if (attempt === 1) {
-      console.log(`[debug ${listingId}] response keys=${Object.keys(j).join(',')} sample=${JSON.stringify(j).slice(0, 800)}`);
-    }
-    return j;
+    return await r.json();
   }
   return null;
+}
+
+async function fetchAllPropertyLogs(token: string, listingId: string, maxPages = 25): Promise<any[]> {
+  const all: any[] = [];
+  let skip = 0;
+  let firstLogged = false;
+  for (let page = 0; page < maxPages; page++) {
+    const j = await fetchPropertyLogPage(token, listingId, skip);
+    if (!j) break;
+    const entries: any[] = j.results || j.logs || j.entries || j.data || (Array.isArray(j) ? j : []);
+    if (!firstLogged) {
+      console.log(`[debug ${listingId}] keys=${Object.keys(j).join(',')} entries=${entries.length} sample=${JSON.stringify(entries[0] ?? j)?.slice(0, 600)}`);
+      firstLogged = true;
+    }
+    if (!entries.length) break;
+    all.push(...entries);
+    if (entries.length < 20) break;
+    skip += 20;
+    await sleep(120);
+  }
+  return all;
 }
 
 // Map a Guesty property-log entry to one of our event types.
@@ -160,14 +177,10 @@ Deno.serve(async (req) => {
       const orgId = orgByAccount.get(l.guesty_account_id);
       if (!token || !orgId) continue;
 
-      const log = await fetchPropertyLog(token, l.id);
+      const entries = await fetchAllPropertyLogs(token, l.id);
       processed++;
-      const entries: any[] = log?.results || log?.logs || log?.entries || log?.data || (Array.isArray(log) ? log : []);
-      if (processed <= 2) {
-        console.log(`[debug ${l.id}] keys=${log ? Object.keys(log).join(',') : 'null'} entries=${entries.length} sample=${JSON.stringify(entries[0] ?? log)?.slice(0, 500)}`);
-      }
       if (!entries.length) {
-        await sleep(150);
+        await sleep(120);
         continue;
       }
 
