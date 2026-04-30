@@ -321,7 +321,12 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
     const data = await fetchGuestyData(apiToken, 'listings', {
       limit,
       skip,
-      fields: '_id createdAt nickname status isListed active lastActivityAt activatedAt deactivatedAt listedAt propertyType accommodates bedrooms address picture pictures integrations',
+      // Note: do NOT include lastActivityAt/activatedAt/deactivatedAt/listedAt in fields whitelist —
+      // those fields get filtered out by Guesty when listed. Omit fields= for full payload, or
+      // include only confirmed-supported fields. Using full payload here to ensure lastActivityAt is returned.
+    }, 5); // 5 retries for listings
+    // (the call below intentionally omits the fields filter to receive lastActivityAt)
+    // dummy line replaced below
     }, 5); // 5 retries for listings
 
     const listings = data.results || [];
