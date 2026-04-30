@@ -280,6 +280,7 @@ async function computeReviewSeries(range: ResolvedRange, buckets: Bucket[], mode
     return buckets.map((b, i) => ({
       bucket: b.label,
       bucketStart: b.start,
+      bucketEnd: b.end,
       value: sums[i].n > 0 ? sums[i].s / sums[i].n : 0,
     }));
   }
@@ -301,7 +302,7 @@ async function computeReviewSeries(range: ResolvedRange, buckets: Bucket[], mode
       const t = new Date(r.review_date).getTime();
       if (t <= cutoff) { s += Number(r.rating || 0); n++; } else break;
     }
-    return { bucket: b.label, bucketStart: b.start, value: n > 0 ? s / n : 0 };
+    return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: n > 0 ? s / n : 0 };
   });
 }
 
