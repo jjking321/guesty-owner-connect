@@ -424,7 +424,7 @@ export async function fetchReviewDetail(window: BucketWindow): Promise<KpiDetail
   const end = format(window.end, 'yyyy-MM-dd');
   const data = await paginate(
     supabase.from('reviews')
-      .select('id, listing_id, rating, review_date, source, public_review')
+      .select('id, listing_id, rating, review_date, source, review_text')
       .eq('is_removed', false)
       .not('rating', 'is', null)
       .gte('review_date', start)
@@ -439,7 +439,7 @@ export async function fetchReviewDetail(window: BucketWindow): Promise<KpiDetail
   return data.map((r: any) => ({
     id: r.id,
     primary: nameMap.get(r.listing_id) || r.listing_id || '—',
-    secondary: `${r.source || ''} · ${typeof r.public_review === 'string' ? r.public_review.slice(0, 100) : ''}`,
+    secondary: `${r.source || ''} · ${typeof r.review_text === 'string' ? r.review_text.slice(0, 100) : ''}`,
     value: Number(r.rating),
     date: r.review_date,
   })).sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime());
