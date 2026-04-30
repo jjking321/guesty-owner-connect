@@ -1,6 +1,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { LucideIcon } from 'lucide-react';
+import { Tooltip as UiTooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Info, LucideIcon } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
   Tooltip, CartesianGrid, Legend,
@@ -17,6 +18,10 @@ interface Props {
   compareLabel?: string | null;
   chartType?: 'line' | 'bar';
   rightSlot?: React.ReactNode;
+  description?: string;
+  helpText?: string;
+  onSelectBucket?: (bucketStart: Date, bucketEnd: Date | null, bucketLabel: string) => void;
+  onClickHeadline?: () => void;
 }
 
 function formatValue(v: number, unit: KpiResult['unit']): string {
