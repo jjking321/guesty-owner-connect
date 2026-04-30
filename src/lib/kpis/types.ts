@@ -45,6 +45,18 @@ export interface KpiResult {
   compareTotal?: number;
   series: SeriesPoint[];
   unit: 'number' | 'currency' | 'rating';
+  meta?: Record<string, any>;
+}
+
+export type KpiMetric = 'listings' | 'gbv' | 'churn' | 'reviews';
+
+export interface KpiDetailRow {
+  id: string;
+  primary: string;       // main label (nickname / guest / etc.)
+  secondary?: string;    // sub label
+  value?: number | string;
+  date?: string;
+  extra?: Record<string, any>;
 }
 
 export const AGGREGATION_LABELS: Record<Aggregation, string> = {
