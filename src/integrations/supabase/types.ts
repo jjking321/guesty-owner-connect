@@ -691,6 +691,45 @@ export type Database = {
           },
         ]
       }
+      listing_activation_events: {
+        Row: {
+          actor_id: string | null
+          actor_name: string | null
+          created_at: string
+          event_type: string
+          id: string
+          listing_id: string
+          occurred_at: string
+          organization_id: string
+          raw: Json | null
+          source: string | null
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          event_type: string
+          id?: string
+          listing_id: string
+          occurred_at: string
+          organization_id: string
+          raw?: Json | null
+          source?: string | null
+        }
+        Update: {
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          listing_id?: string
+          occurred_at?: string
+          organization_id?: string
+          raw?: Json | null
+          source?: string | null
+        }
+        Relationships: []
+      }
       listing_booking_stats: {
         Row: {
           avg_booking_window: number | null
