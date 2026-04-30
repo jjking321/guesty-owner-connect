@@ -49,7 +49,7 @@ export function KpiCard({
   const handleChartClick = (e: any) => {
     if (!onSelectBucket || !e?.activePayload?.[0]?.payload) return;
     const p = e.activePayload[0].payload;
-    onSelectBucket(new Date(p.bucketStart), null, p.bucket);
+    onSelectBucket(new Date(p.bucketStart), p.bucketEnd ? new Date(p.bucketEnd) : null, p.bucket);
   };
 
   const meta = result?.meta as { totalReservations?: number; withSubTotal?: number; usedFallback?: number } | undefined;
