@@ -177,14 +177,10 @@ Deno.serve(async (req) => {
       const orgId = orgByAccount.get(l.guesty_account_id);
       if (!token || !orgId) continue;
 
-      const log = await fetchPropertyLog(token, l.id);
+      const entries = await fetchAllPropertyLogs(token, l.id);
       processed++;
-      const entries: any[] = log?.results || log?.logs || log?.entries || log?.data || (Array.isArray(log) ? log : []);
-      if (processed <= 2) {
-        console.log(`[debug ${l.id}] keys=${log ? Object.keys(log).join(',') : 'null'} entries=${entries.length} sample=${JSON.stringify(entries[0] ?? log)?.slice(0, 500)}`);
-      }
       if (!entries.length) {
-        await sleep(150);
+        await sleep(120);
         continue;
       }
 
