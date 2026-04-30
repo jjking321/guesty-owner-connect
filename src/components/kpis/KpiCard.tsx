@@ -39,11 +39,23 @@ function formatValue(v: number, unit: KpiResult['unit']): string {
 export function KpiCard({
   title, icon: Icon, result, isLoading, error,
   primaryLabel, compareLabel, chartType = 'line', rightSlot,
+  description, helpText, onSelectBucket, onClickHeadline,
 }: Props) {
   const delta =
     result?.compareTotal !== undefined && result.compareTotal !== 0
       ? ((result.total - result.compareTotal) / result.compareTotal) * 100
       : null;
+
+  const handleChartClick = (e: any) => {
+    if (!onSelectBucket || !e?.activePayload?.[0]?.payload) return;
+    const p = e.activePayload[0].payload;
+    onSelectBucket(new Date(p.bucketStart), null, p.bucket);
+  };
+
+  const meta = result?.meta as { totalReservations?: number; withSubTotal?: number; usedFallback?: number } | undefined;
+  const fallbackPct = meta && meta.totalReservations
+    ? Math.round(((meta.usedFallback ?? 0) / meta.totalReservations) * 100)
+    : null;
 
   return (
     <Card>
@@ -54,8 +66,22 @@ export function KpiCard({
               <Icon className="w-5 h-5 text-accent" />
             </div>
             <div>
-              <p className="text-sm font-medium text-muted-foreground">{title}</p>
-              <p className="text-xs text-muted-foreground">{primaryLabel}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-medium text-muted-foreground">{title}</p>
+                {helpText && (
+                  <TooltipProvider delayDuration={150}>
+                    <UiTooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="w-3.5 h-3.5 text-muted-foreground/70 cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs text-xs">{helpText}</TooltipContent>
+                    </UiTooltip>
+                  </TooltipProvider>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {description ? `${description} · ` : ''}{primaryLabel}
+              </p>
             </div>
           </div>
           {rightSlot}
@@ -67,7 +93,14 @@ export function KpiCard({
           <p className="text-sm text-destructive">Error: {error.message}</p>
         ) : result ? (
           <div className="space-y-1">
-            <p className="text-3xl font-bold">{formatValue(result.total, result.unit)}</p>
+            <button
+              type="button"
+              className={`text-3xl font-bold text-left ${onClickHeadline ? 'hover:text-primary cursor-pointer transition-colors' : ''}`}
+              onClick={onClickHeadline}
+              disabled={!onClickHeadline}
+            >
+              {formatValue(result.total, result.unit)}
+            </button>
             {result.compareTotal !== undefined && compareLabel && (
               <p className="text-xs text-muted-foreground">
                 vs {compareLabel}: {formatValue(result.compareTotal, result.unit)}
@@ -78,6 +111,11 @@ export function KpiCard({
                 )}
               </p>
             )}
+            {fallbackPct != null && fallbackPct > 0 && (
+              <p className="text-[11px] text-amber-600">
+                Data quality: {meta!.withSubTotal}/{meta!.totalReservations} reservations have full subtotals; {fallbackPct}% fall back to accommodation fare only (lower bound).
+              </p>
+            )}
           </div>
         ) : null}
 
@@ -85,7 +123,7 @@ export function KpiCard({
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               {chartType === 'bar' ? (
-                <BarChart data={result.series}>
+                <BarChart data={result.series} onClick={handleChartClick}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatValue(v, result.unit)} width={70} />
@@ -94,13 +132,13 @@ export function KpiCard({
                     contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
                   />
                   {result.series.some((p) => p.compareValue !== undefined) && <Legend />}
-                  <Bar dataKey="value" name={primaryLabel} fill="hsl(var(--primary))" />
+                  <Bar dataKey="value" name={primaryLabel} fill="hsl(var(--primary))" cursor={onSelectBucket ? 'pointer' : undefined} />
                   {result.series.some((p) => p.compareValue !== undefined) && (
                     <Bar dataKey="compareValue" name={compareLabel || 'Compare'} fill="hsl(var(--muted-foreground))" />
                   )}
                 </BarChart>
               ) : (
-                <LineChart data={result.series}>
+                <LineChart data={result.series} onClick={handleChartClick}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatValue(v, result.unit)} width={70} />
@@ -109,7 +147,7 @@ export function KpiCard({
                     contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
                   />
                   {result.series.some((p) => p.compareValue !== undefined) && <Legend />}
-                  <Line type="monotone" dataKey="value" name={primaryLabel} stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="value" name={primaryLabel} stroke="hsl(var(--primary))" strokeWidth={2} dot={!!onSelectBucket} activeDot={{ r: 6, cursor: onSelectBucket ? 'pointer' : undefined }} />
                   {result.series.some((p) => p.compareValue !== undefined) && (
                     <Line type="monotone" dataKey="compareValue" name={compareLabel || 'Compare'}
                           stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" strokeWidth={2} dot={false} />
@@ -117,6 +155,9 @@ export function KpiCard({
                 </LineChart>
               )}
             </ResponsiveContainer>
+            {onSelectBucket && (
+              <p className="text-[10px] text-muted-foreground mt-1 text-center">Click a bar/point to drill down · Click the headline number for the full period</p>
+            )}
           </div>
         )}
       </CardContent>
