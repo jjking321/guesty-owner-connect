@@ -128,15 +128,17 @@ export async function fetchGbv(
   return { total, compareTotal, series, unit: 'currency' };
 }
 
-async function computeGbvSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
+async function computeGbvSeries(
+  range: ResolvedRange,
+  buckets: Bucket[],
+): Promise<{ points: SeriesPoint[]; meta: { totalReservations: number; withSubTotal: number; usedFallback: number } }> {
   const { start, end } = rangeISO(range);
-  // Fetch reservations whose check_in is in range; exclude owner & cancelled
   const all: any[] = [];
   let from = 0;
   while (true) {
     const { data, error } = await supabase
       .from('reservations')
-      .select('check_in, sub_total, source, status')
+      .select('check_in, sub_total, fare_accommodation_adjusted, source, status')
       .gte('check_in', start)
       .lte('check_in', end)
       .range(from, from + BATCH - 1);
@@ -147,16 +149,23 @@ async function computeGbvSeries(range: ResolvedRange, buckets: Bucket[]): Promis
     from += BATCH;
   }
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, value: 0 }));
+  let totalReservations = 0, withSubTotal = 0, usedFallback = 0;
   for (const r of all) {
     if (r.source === 'owner') continue;
     if (r.status && !['confirmed', 'checked_in', 'checked_out'].includes(r.status)) continue;
-    const sub = Number(r.sub_total ?? 0);
-    if (!sub || !r.check_in) continue;
+    if (!r.check_in) continue;
+    const sub = r.sub_total != null ? Number(r.sub_total) : null;
+    const fare = r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : null;
+    const value = sub ?? fare ?? 0;
+    if (!value) continue;
+    totalReservations++;
+    if (sub != null) withSubTotal++;
+    else if (fare != null) usedFallback++;
     const d = new Date(r.check_in + 'T00:00:00');
     const idx = findBucketIdx(buckets, d);
-    if (idx >= 0) points[idx].value += sub;
+    if (idx >= 0) points[idx].value += value;
   }
-  return points;
+  return { points, meta: { totalReservations, withSubTotal, usedFallback } };
 }
 
 // ---------- Churn ----------
