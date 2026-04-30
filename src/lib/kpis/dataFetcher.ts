@@ -93,14 +93,14 @@ async function computeListingSeries(currentlyActive: ListingRow[], buckets: Buck
       }
     }
     if (snapValue !== undefined) {
-      return { bucket: b.label, bucketStart: b.start, value: snapValue };
+      return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: snapValue };
     }
     // Backfill: cumulative count of currently-active listings created on or before bucket end
     const value = currentlyActive.filter((l) => {
       if (!l.created_at_guesty) return false;
       return new Date(l.created_at_guesty) <= b.end;
     }).length;
-    return { bucket: b.label, bucketStart: b.start, value };
+    return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value };
   });
 }
 
@@ -149,7 +149,7 @@ async function computeGbvSeries(
     if (data.length < BATCH) break;
     from += BATCH;
   }
-  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, value: 0 }));
+  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   let totalReservations = 0, withSubTotal = 0, usedFallback = 0;
   for (const r of all) {
     if (r.source === 'owner') continue;
@@ -200,7 +200,7 @@ async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Prom
     .gte('churned_at', start)
     .lte('churned_at', end + 'T23:59:59');
   if (error) throw error;
-  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, value: 0 }));
+  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const r of (data ?? []) as any[]) {
     const d = new Date(r.churned_at);
     const idx = findBucketIdx(buckets, d);

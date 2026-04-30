@@ -36,6 +36,7 @@ export interface ResolvedRange {
 export interface SeriesPoint {
   bucket: string;     // human label
   bucketStart: Date;  // for sorting / aligning
+  bucketEnd?: Date;
   value: number;
   compareValue?: number;
 }
