@@ -738,6 +738,86 @@ export type Database = {
           },
         ]
       }
+      listing_churn_events: {
+        Row: {
+          category: string | null
+          churned_at: string
+          created_at: string
+          id: string
+          listing_id: string
+          notes: string | null
+          organization_id: string
+          reason: string | null
+          restored_at: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          category?: string | null
+          churned_at?: string
+          created_at?: string
+          id?: string
+          listing_id: string
+          notes?: string | null
+          organization_id: string
+          reason?: string | null
+          restored_at?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          category?: string | null
+          churned_at?: string
+          created_at?: string
+          id?: string
+          listing_id?: string
+          notes?: string | null
+          organization_id?: string
+          reason?: string | null
+          restored_at?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "listing_churn_events_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      listing_status_snapshots: {
+        Row: {
+          created_at: string
+          organization_id: string
+          snapshot_date: string
+          total_active: number
+          total_archived: number
+          total_churned: number
+          total_listed: number
+        }
+        Insert: {
+          created_at?: string
+          organization_id: string
+          snapshot_date: string
+          total_active?: number
+          total_archived?: number
+          total_churned?: number
+          total_listed?: number
+        }
+        Update: {
+          created_at?: string
+          organization_id?: string
+          snapshot_date?: string
+          total_active?: number
+          total_archived?: number
+          total_churned?: number
+          total_listed?: number
+        }
+        Relationships: []
+      }
       listing_tax_settings: {
         Row: {
           behalf_platforms: string[] | null
@@ -799,6 +879,7 @@ export type Database = {
           imported_at: string
           is_composite: boolean | null
           is_listed: boolean | null
+          last_active_at: string | null
           live_airbnb_rating: number | null
           live_airbnb_review_count: number | null
           live_rating_scrape_error: string | null
@@ -824,6 +905,7 @@ export type Database = {
           imported_at?: string
           is_composite?: boolean | null
           is_listed?: boolean | null
+          last_active_at?: string | null
           live_airbnb_rating?: number | null
           live_airbnb_review_count?: number | null
           live_rating_scrape_error?: string | null
@@ -849,6 +931,7 @@ export type Database = {
           imported_at?: string
           is_composite?: boolean | null
           is_listed?: boolean | null
+          last_active_at?: string | null
           live_airbnb_rating?: number | null
           live_airbnb_review_count?: number | null
           live_rating_scrape_error?: string | null

@@ -1,96 +1,90 @@
+# KPI Dashboard
 
-
-# Custom Reports Builder
-
-A new **Reports** tab where any internal user can compose, save, and export custom reports. Every saved report and template is shared with the whole organization.
+A new top-level **KPIs** page that tracks four key business metrics over time, with user-selectable period and comparison period — modeled on the screenshot's date-aggregation + range UX.
 
 ## What you get
 
-- **New `/reports` route** in the sidebar (visible to super_admin, admin, member — not owners).
-- **Three pages:**
-  - **Reports list** — all saved reports + templates in the org, with "New Report" button.
-  - **Report builder** — drag-free, form-driven canvas where you add modules (widgets) and configure each one.
-  - **Report viewer** — the rendered report, with PDF export and per-module CSV export.
+- **New `/kpis` route** in the sidebar (visible to super_admin / admin / member).
+- **Global controls** at the top of the page:
+  - Date aggregation: Daily, Weekly, Monthly, Quarterly, Yearly
+  - Date range: presets (This month, YTD, TTM, Last 30/90/365 days, Last year, Custom) + custom from/to picker
+  - Compare to: None, Previous period, Last year, 2 years ago, Last 30 days, Last 90 days, Last month
+- **Four KPI cards + trend charts**, each showing:
+  - Big-number total for the period
+  - Comparison total + % delta vs compare period
+  - Line/bar chart bucketed by the chosen aggregation, with the compare series overlaid
 
-## Building a report
+## The four KPIs
 
-A report is a **title + description + ordered list of modules**. Each module is one widget. To add a module you pick:
+### 1. Listing growth (active & listed units)
+- **Source**: hybrid (per your answer).
+- **Backfill**: cumulative count of listings where `created_at_guesty <= bucket end` AND currently `is_listed = true AND active = true AND archived = false`. Gives a clean historical curve immediately.
+- **Going forward**: a new `listing_status_snapshots` table records a daily count per organization (active/listed/archived/churned). A nightly cron job writes one row per org per day. Once snapshots exist, the chart prefers snapshot data over the backfill calculation for any date with a snapshot — so dates after launch correctly reflect past de-listings/churn.
 
-1. **Widget type** — KPI card, table, line chart, or bar chart
-2. **Data source** — Revenue, Nights Booked, Occupancy %, ADR, RevPAR, Goals (target), or Forecast (P50)
-3. **Scope** — All listings, specific listings (multi-select), a Group, or an Owner
-4. **Date range** — preset (This month / YTD / TTM / Last year / Custom) or explicit start/end
-5. **Breakdown** (table & chart only) — by Month, by Listing, by Owner, or by Group
-6. **Optional comparison** — vs Last Year, vs Goal, or none
+### 2. Gross Booking Value (GBV)
+- Sum of `reservations.sub_total` (Guesty `money.subTotalPrice`, all fees included, taxes excluded — matches your project rule).
+- Excludes `source = 'owner'` and cancelled reservations.
+- Bucketed by **check-in date** (so revenue lands in the period the stay starts — ask if you'd prefer night-distributed instead).
+- Compare period uses the same logic over the shifted range.
 
-The same `monthlyMetrics` / `reservation_nights` / `property_goals` data already powering Property Detail and Goals Review feeds the builder, so numbers match the rest of the app exactly.
+### 3. Churned units
+- **Definition** (per your answer): a listing is churned the first time it is observed with `is_listed = false AND active = false`. Until that flips, it isn't churned. If it later flips back to listed/active, the churn record is cleared.
+- **New table** `listing_churn_events`: `listing_id`, `organization_id`, `churned_at` (last_active_date from Guesty when available, else first detected date), `restored_at` (nullable), `reason` (nullable, free-form for now), `category` (nullable, enum-as-text — populated later when categories are defined), `notes`, `updated_by`.
+- **Detection**: nightly job scans listings, opens a churn event when a listing flips into the churned state and there is no open event, closes an event when a listing flips back. Backfills one initial pass at deployment.
+- **last_active_date from Guesty**: the existing listing sync is extended to also pull/store Guesty's `lastActivityAt` (or equivalent field) when present, used as the authoritative `churned_at` timestamp.
+- **UI**: KPI card shows count of churn events whose `churned_at` falls in the period. A "Manage churned units" drawer opens a paginated table where users can edit the reason, add a category, and add notes per event.
 
-## Templates vs saved reports
+### 4. Guest review score
+- Uses existing `reviews` table (already excludes removed reviews) + the existing `get_monthly_rating_trend` RPC for the chart.
+- **Per-module toggle** (your answer): "Reviews dated within period" (mean of period reviews) vs "Lifetime-to-date as of period end" (rolling cumulative average).
+- KPI card shows the chosen aggregation's average + comparison delta.
 
-- **Saved Report** — a fully-configured report you can re-open and view anytime. Re-runs against live data each time.
-- **Template** — same shape, but treated as a starting point: "New Report from Template" clones it so you can tweak before saving.
-- Both live in one shared library; a checkbox `is_template` distinguishes them. Anyone in the org can create, edit, clone, or delete either.
+## Sidebar entry
 
-## Export
+Inserted under Reports, gated on `super_admin / admin / member` (owners excluded), matching the existing pattern.
 
-- **Per module:** every rendered widget has a "CSV" button (same blob-download pattern already used in Pacing, Monthly Breakdown, and Performance Metrics).
-- **Whole report → PDF:** "Export PDF" button at the top of the viewer. Client-side rendering via `html2canvas` + `jspdf` (each module captured as an image, paginated, with the report title and date range in the header).
+## Page layout
 
-## Out of scope (v1)
-
-Reviews data, compset/comparables, booking probabilities, pacing/curves, custom formulas, pivot tables, and scheduled email delivery. These are intentionally deferred so v1 ships clean — easy to add as new "data sources" later because the builder is data-driven.
-
----
+```text
++----------------------------------------------------------+
+|  KPIs                                                    |
+|  [Aggregation: Monthly v]  [Range: YTD v ...]            |
+|  [Compare: Last year v]                                  |
++----------------------------------------------------------+
+|  [Listings]    [GBV]    [Churned]    [Review score]      |
+|   1,248         $4.2M     17           4.78               |
+|   +12 vs LY     +18% LY   -3 vs LY     +0.04 LY           |
++----------------------------------------------------------+
+|  Listings over time              GBV over time           |
+|  [line chart w/ compare]         [bar chart w/ compare]  |
+|                                                          |
+|  Churned units over time         Review score over time  |
+|  [bar chart]                     [line chart]            |
++----------------------------------------------------------+
+|  [Manage churned units] (drawer w/ table + edit reason)  |
++----------------------------------------------------------+
+```
 
 ## Technical details
 
-### Database
-One new migration adds:
+### New tables (migration)
+- `listing_status_snapshots(organization_id uuid, snapshot_date date, total_listed int, total_active int, total_archived int, total_churned int, primary key (organization_id, snapshot_date))` — RLS: org members can SELECT; service role inserts.
+- `listing_churn_events(id uuid pk, organization_id uuid, listing_id text, churned_at timestamptz, restored_at timestamptz null, reason text null, category text null, notes text null, updated_by uuid null, created_at, updated_at)` — RLS: org members SELECT; admins/super_admins UPDATE/INSERT/DELETE; one open event per listing enforced via partial unique index where `restored_at is null`.
+- Extend `listings` with `last_active_at timestamptz null` (populated from Guesty sync when available).
 
-```sql
-create table public.custom_reports (
-  id uuid primary key default gen_random_uuid(),
-  organization_id uuid not null,
-  created_by uuid not null,
-  name text not null,
-  description text,
-  is_template boolean not null default false,
-  config jsonb not null,           -- { modules: [...], default_date_range: {...} }
-  created_at timestamptz default now(),
-  updated_at timestamptz default now()
-);
-alter table public.custom_reports enable row level security;
--- SELECT/INSERT/UPDATE/DELETE: any organization member (matches "shared with org")
-```
-
-`config.modules[]` shape:
-```ts
-{
-  id: string,
-  type: 'kpi' | 'table' | 'line' | 'bar',
-  title: string,
-  metric: 'revenue' | 'nights' | 'occupancy' | 'adr' | 'revpar' | 'goal' | 'forecast_p50',
-  scope: { kind: 'all' | 'listings' | 'group' | 'owner', ids?: string[] },
-  dateRange: { preset: string } | { start: string, end: string },
-  breakdown?: 'month' | 'listing' | 'owner' | 'group',
-  compare?: 'last_year' | 'goal' | null,
-}
-```
+### New edge function
+- `snapshot-listing-status` — runs nightly via `pg_cron` + `pg_net`. For each org: writes today's snapshot row, opens new churn events for newly-churned listings, closes events for restored listings. Idempotent on `(organization_id, snapshot_date)`.
 
 ### Frontend
-- `src/pages/Reports.tsx` — list view (cards/table of saved reports + templates, "New" button).
-- `src/pages/ReportBuilder.tsx` — `/reports/new` and `/reports/:id/edit`. Left panel = report metadata + module list with up/down/delete. Right panel = module config form. Live preview pane.
-- `src/pages/ReportViewer.tsx` — `/reports/:id`. Renders modules read-only with CSV/PDF export.
-- `src/components/reports/modules/{KpiCard,DataTable,LineChartModule,BarChartModule}.tsx` — one component per widget type, all accept the same `(config, data)` props.
-- `src/lib/reports/dataFetcher.ts` — single function `fetchModuleData(module)` that maps a module config to the right Supabase query (`reservation_nights` for revenue/nights/occupancy/ADR/RevPAR aggregations, `property_goals` for goals, `forecast_aggregates` for forecast_p50). Re-uses existing batched-fetching pattern to bypass the 1000-row limit.
-- `src/components/AppSidebar.tsx` — add `Reports` entry (icon: `FileBarChart`).
-- `src/App.tsx` — add the three routes.
+- New page `src/pages/Kpis.tsx`.
+- New components in `src/components/kpis/`: `KpiControls.tsx`, `KpiCard.tsx`, `ListingsChart.tsx`, `GbvChart.tsx`, `ChurnChart.tsx`, `ReviewScoreChart.tsx`, `ManageChurnDrawer.tsx`.
+- Shared bucketing helper in `src/lib/kpis/bucket.ts` that aggregates daily/weekly/monthly/quarterly/yearly using `date-fns`.
+- Sidebar entry added in `src/components/AppSidebar.tsx`; route registered in `src/App.tsx`.
 
-### Export
-- Add `jspdf` and `html2canvas` deps. PDF = walk the rendered viewer DOM, snapshot each `[data-report-module]` element, place each on its own page (or stack short ones), prepend a cover with title + range + generated-at.
-- CSV per module reuses the existing `Blob` + `URL.createObjectURL` helper pattern already in the codebase.
+### Data fetching pattern
+- All listing/reservation/review queries respect RLS and use the existing batched-fetch pattern (chunks of 60 IDs, 1000-row pagination) to bypass the 1k row limit, consistent with `src/lib/reports/dataFetcher.ts`.
 
-### Permissions
-- Sidebar entry filtered to `super_admin / admin / member` (matches the answer).
-- RLS policies use `is_organization_member(organization_id, auth.uid())` for all four verbs, so everyone in the org sees everything — no ownership checks.
-
+### Out of scope for MVP
+- Filtering KPIs by group / owner / specific listings (can add later — same scope picker as Reports).
+- Embedding these KPIs as modules inside the Reports builder (separate effort).
+- A formal `churn_category` enum — left as free text + nullable category field so categories can be added later without a schema change.

@@ -24,6 +24,7 @@ import TaxReport from "./pages/TaxReport";
 import Reports from "./pages/Reports";
 import ReportBuilder from "./pages/ReportBuilder";
 import ReportViewer from "./pages/ReportViewer";
+import Kpis from "./pages/Kpis";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,6 +63,7 @@ const App = () => (
           <Route path="/reports/new" element={<ReportBuilder />} />
           <Route path="/reports/:id" element={<ReportViewer />} />
           <Route path="/reports/:id/edit" element={<ReportBuilder />} />
+          <Route path="/kpis" element={<Kpis />} />
           <Route path="/forecast-admin" element={<ForecastAdmin />} />
           <Route path="/accept-invitation" element={<AcceptInvitation />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
