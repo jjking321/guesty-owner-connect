@@ -111,12 +111,13 @@ export async function fetchGbv(
   compare: ResolvedRange | null,
 ): Promise<KpiResult> {
   const buckets = buildBuckets(range.start, range.end, agg);
-  const series = await computeGbvSeries(range, buckets);
+  const { points: series, meta } = await computeGbvSeries(range, buckets);
 
   let compareSeries: SeriesPoint[] | null = null;
   if (compare) {
     const compareBuckets = buildBuckets(compare.start, compare.end, agg);
-    compareSeries = await computeGbvSeries(compare, compareBuckets);
+    const cmp = await computeGbvSeries(compare, compareBuckets);
+    compareSeries = cmp.points;
     for (let i = 0; i < series.length; i++) {
       if (compareSeries[i]) series[i].compareValue = compareSeries[i].value;
     }
@@ -125,7 +126,7 @@ export async function fetchGbv(
   const total = series.reduce((a, p) => a + p.value, 0);
   const compareTotal = compareSeries?.reduce((a, p) => a + p.value, 0);
 
-  return { total, compareTotal, series, unit: 'currency' };
+  return { total, compareTotal, series, unit: 'currency', meta };
 }
 
 async function computeGbvSeries(
