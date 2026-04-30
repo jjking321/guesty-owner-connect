@@ -318,10 +318,11 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
 
   while (true) {
     console.log(`Fetching listings: skip=${skip}, limit=${limit}`);
+    // Note: omit `fields` filter so Guesty returns lastActivityAt — including it in the
+    // whitelist (along with non-existent activatedAt/deactivatedAt) causes Guesty to drop it.
     const data = await fetchGuestyData(apiToken, 'listings', {
       limit,
       skip,
-      fields: '_id createdAt nickname status isListed active lastActivityAt activatedAt deactivatedAt listedAt propertyType accommodates bedrooms address picture pictures integrations',
     }, 5); // 5 retries for listings
 
     const listings = data.results || [];

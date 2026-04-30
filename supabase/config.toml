@@ -132,3 +132,9 @@ verify_jwt = false
 [functions.save-guesty-credentials]
 verify_jwt = true
 
+[functions.sync-listing-activation-logs]
+verify_jwt = false
+
+[functions.backfill-listing-last-active]
+verify_jwt = false
+

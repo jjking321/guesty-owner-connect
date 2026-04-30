@@ -59,7 +59,7 @@ async function fetchPage(token: string, skip: number, limit: number) {
     const url = new URL('https://open-api.guesty.com/v1/listings');
     url.searchParams.set('limit', String(limit));
     url.searchParams.set('skip', String(skip));
-    url.searchParams.set('fields', '_id lastActivityAt activatedAt deactivatedAt listedAt');
+    // Omit fields= so Guesty returns lastActivityAt (whitelisting drops it)
     const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
     if (r.status === 429) {
       const wait = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
