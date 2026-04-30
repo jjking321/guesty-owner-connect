@@ -56,10 +56,13 @@ async function getToken(supabase: any, accountId: string): Promise<string | null
 
 async function fetchPropertyLog(token: string, listingId: string): Promise<any | null> {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const r = await fetch(`https://open-api.guesty.com/v1/property-logs/${listingId}`, {
+    const url = new URL(`https://open-api.guesty.com/v1/property-logs/${listingId}`);
+    url.searchParams.set('limit', '100');
+    url.searchParams.set('skip', '0');
+    const r = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     });
-    if (r.status === 429) {
+    if (r.status === 429 || r.status === 500) {
       await sleep(Math.min(2000 * Math.pow(2, attempt - 1), 30000));
       continue;
     }
@@ -68,7 +71,11 @@ async function fetchPropertyLog(token: string, listingId: string): Promise<any |
       console.error(`property-logs ${listingId} failed: ${r.status} ${await r.text()}`);
       return null;
     }
-    return r.json();
+    const j = await r.json();
+    if (attempt === 1) {
+      console.log(`[debug ${listingId}] response keys=${Object.keys(j).join(',')} sample=${JSON.stringify(j).slice(0, 800)}`);
+    }
+    return j;
   }
   return null;
 }
@@ -155,7 +162,10 @@ Deno.serve(async (req) => {
 
       const log = await fetchPropertyLog(token, l.id);
       processed++;
-      const entries: any[] = log?.results || log?.logs || log?.entries || (Array.isArray(log) ? log : []);
+      const entries: any[] = log?.results || log?.logs || log?.entries || log?.data || (Array.isArray(log) ? log : []);
+      if (processed <= 2) {
+        console.log(`[debug ${l.id}] keys=${log ? Object.keys(log).join(',') : 'null'} entries=${entries.length} sample=${JSON.stringify(entries[0] ?? log)?.slice(0, 500)}`);
+      }
       if (!entries.length) {
         await sleep(150);
         continue;
