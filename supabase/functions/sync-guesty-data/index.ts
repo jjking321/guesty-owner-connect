@@ -37,6 +37,10 @@ interface GuestyListing {
   status: string;
   isListed: boolean;
   active: boolean;
+  lastActivityAt?: string;
+  activatedAt?: string;
+  deactivatedAt?: string;
+  listedAt?: string;
   propertyType: string;
   accommodates: number;
   bedrooms: number;
@@ -317,7 +321,7 @@ async function fetchAllListings(apiToken: string, onProgress?: (fetched: number,
     const data = await fetchGuestyData(apiToken, 'listings', {
       limit,
       skip,
-      fields: '_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures integrations',
+      fields: '_id createdAt nickname status isListed active lastActivityAt activatedAt deactivatedAt listedAt propertyType accommodates bedrooms address picture pictures integrations',
     }, 5); // 5 retries for listings
 
     const listings = data.results || [];
@@ -695,6 +699,7 @@ Deno.serve(async (req) => {
       status: listing.status,
       is_listed: listing.isListed,
       active: listing.active,
+      last_active_at: listing.lastActivityAt || listing.deactivatedAt || listing.activatedAt || null,
       property_type: listing.propertyType,
       accommodates: listing.accommodates,
       bedrooms: listing.bedrooms,

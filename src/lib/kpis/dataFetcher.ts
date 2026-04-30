@@ -1,6 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { format, addYears, differenceInCalendarDays } from 'date-fns';
-import type { Aggregation, KpiResult, ResolvedRange, SeriesPoint } from './types';
+import type { Aggregation, KpiResult, ResolvedRange, SeriesPoint, KpiDetailRow } from './types';
 import { buildBuckets, findBucketIdx, type Bucket } from './bucket';
 import { rangeISO } from './range';
 
@@ -93,14 +93,14 @@ async function computeListingSeries(currentlyActive: ListingRow[], buckets: Buck
       }
     }
     if (snapValue !== undefined) {
-      return { bucket: b.label, bucketStart: b.start, value: snapValue };
+      return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: snapValue };
     }
     // Backfill: cumulative count of currently-active listings created on or before bucket end
     const value = currentlyActive.filter((l) => {
       if (!l.created_at_guesty) return false;
       return new Date(l.created_at_guesty) <= b.end;
     }).length;
-    return { bucket: b.label, bucketStart: b.start, value };
+    return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value };
   });
 }
 
@@ -111,12 +111,13 @@ export async function fetchGbv(
   compare: ResolvedRange | null,
 ): Promise<KpiResult> {
   const buckets = buildBuckets(range.start, range.end, agg);
-  const series = await computeGbvSeries(range, buckets);
+  const { points: series, meta } = await computeGbvSeries(range, buckets);
 
   let compareSeries: SeriesPoint[] | null = null;
   if (compare) {
     const compareBuckets = buildBuckets(compare.start, compare.end, agg);
-    compareSeries = await computeGbvSeries(compare, compareBuckets);
+    const cmp = await computeGbvSeries(compare, compareBuckets);
+    compareSeries = cmp.points;
     for (let i = 0; i < series.length; i++) {
       if (compareSeries[i]) series[i].compareValue = compareSeries[i].value;
     }
@@ -125,18 +126,20 @@ export async function fetchGbv(
   const total = series.reduce((a, p) => a + p.value, 0);
   const compareTotal = compareSeries?.reduce((a, p) => a + p.value, 0);
 
-  return { total, compareTotal, series, unit: 'currency' };
+  return { total, compareTotal, series, unit: 'currency', meta };
 }
 
-async function computeGbvSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
+async function computeGbvSeries(
+  range: ResolvedRange,
+  buckets: Bucket[],
+): Promise<{ points: SeriesPoint[]; meta: { totalReservations: number; withSubTotal: number; usedFallback: number } }> {
   const { start, end } = rangeISO(range);
-  // Fetch reservations whose check_in is in range; exclude owner & cancelled
   const all: any[] = [];
   let from = 0;
   while (true) {
     const { data, error } = await supabase
       .from('reservations')
-      .select('check_in, sub_total, source, status')
+      .select('check_in, sub_total, fare_accommodation_adjusted, source, status')
       .gte('check_in', start)
       .lte('check_in', end)
       .range(from, from + BATCH - 1);
@@ -146,17 +149,24 @@ async function computeGbvSeries(range: ResolvedRange, buckets: Bucket[]): Promis
     if (data.length < BATCH) break;
     from += BATCH;
   }
-  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, value: 0 }));
+  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
+  let totalReservations = 0, withSubTotal = 0, usedFallback = 0;
   for (const r of all) {
     if (r.source === 'owner') continue;
     if (r.status && !['confirmed', 'checked_in', 'checked_out'].includes(r.status)) continue;
-    const sub = Number(r.sub_total ?? 0);
-    if (!sub || !r.check_in) continue;
+    if (!r.check_in) continue;
+    const sub = r.sub_total != null ? Number(r.sub_total) : null;
+    const fare = r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : null;
+    const value = sub ?? fare ?? 0;
+    if (!value) continue;
+    totalReservations++;
+    if (sub != null) withSubTotal++;
+    else if (fare != null) usedFallback++;
     const d = new Date(r.check_in + 'T00:00:00');
     const idx = findBucketIdx(buckets, d);
-    if (idx >= 0) points[idx].value += sub;
+    if (idx >= 0) points[idx].value += value;
   }
-  return points;
+  return { points, meta: { totalReservations, withSubTotal, usedFallback } };
 }
 
 // ---------- Churn ----------
@@ -190,7 +200,7 @@ async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Prom
     .gte('churned_at', start)
     .lte('churned_at', end + 'T23:59:59');
   if (error) throw error;
-  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, value: 0 }));
+  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const r of (data ?? []) as any[]) {
     const d = new Date(r.churned_at);
     const idx = findBucketIdx(buckets, d);
@@ -270,6 +280,7 @@ async function computeReviewSeries(range: ResolvedRange, buckets: Bucket[], mode
     return buckets.map((b, i) => ({
       bucket: b.label,
       bucketStart: b.start,
+      bucketEnd: b.end,
       value: sums[i].n > 0 ? sums[i].s / sums[i].n : 0,
     }));
   }
@@ -291,7 +302,7 @@ async function computeReviewSeries(range: ResolvedRange, buckets: Bucket[], mode
       const t = new Date(r.review_date).getTime();
       if (t <= cutoff) { s += Number(r.rating || 0); n++; } else break;
     }
-    return { bucket: b.label, bucketStart: b.start, value: n > 0 ? s / n : 0 };
+    return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: n > 0 ? s / n : 0 };
   });
 }
 
@@ -307,4 +318,129 @@ async function paginate(query: any): Promise<any[]> {
     from += BATCH;
   }
   return all;
+}
+
+// ============= Drill-down detail fetchers =============
+
+export interface BucketWindow {
+  start: Date;
+  end: Date;
+}
+
+// Active & Listed: list of currently-active listings as of windowEnd (point in time)
+export async function fetchListingDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const listings = await fetchAllListings();
+  const cutoff = window.end.getTime();
+  const rows = listings
+    .filter((l) => l.is_listed && l.active && !l.archived)
+    .filter((l) => !l.created_at_guesty || new Date(l.created_at_guesty).getTime() <= cutoff);
+  // Fetch nicknames in batch
+  const ids = rows.map((r) => r.id);
+  const nameMap = new Map<string, { nickname: string | null; bedrooms: number | null; property_type: string | null; last_active_at: string | null }>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const slice = ids.slice(i, i + 200);
+    const { data } = await supabase
+      .from('listings')
+      .select('id, nickname, bedrooms, property_type, last_active_at')
+      .in('id', slice);
+    for (const r of (data ?? []) as any[]) nameMap.set(r.id, r);
+  }
+  return rows.map((r) => {
+    const m = nameMap.get(r.id);
+    return {
+      id: r.id,
+      primary: m?.nickname || r.id,
+      secondary: [m?.property_type, m?.bedrooms ? `${m.bedrooms} BR` : null].filter(Boolean).join(' · '),
+      date: m?.last_active_at ?? undefined,
+      extra: { is_listed: r.is_listed, active: r.active },
+    };
+  }).sort((a, b) => a.primary.localeCompare(b.primary));
+}
+
+// GBV: reservations checking in within window
+export async function fetchGbvDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const start = format(window.start, 'yyyy-MM-dd');
+  const end = format(window.end, 'yyyy-MM-dd');
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('id, listing_id, check_in, nights_count, sub_total, fare_accommodation_adjusted, source, status, confirmation_code, guest_name')
+      .gte('check_in', start)
+      .lte('check_in', end)
+  );
+  const valid = all.filter((r: any) =>
+    r.source !== 'owner' &&
+    (!r.status || ['confirmed', 'checked_in', 'checked_out'].includes(r.status))
+  );
+  const ids = Array.from(new Set(valid.map((r: any) => r.listing_id).filter(Boolean)));
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase.from('listings').select('id, nickname').in('id', ids.slice(i, i + 200));
+    for (const r of (data ?? []) as any[]) nameMap.set(r.id, r.nickname || r.id);
+  }
+  return valid.map((r: any) => {
+    const sub = r.sub_total != null ? Number(r.sub_total) : null;
+    const fare = r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : null;
+    const value = sub ?? fare ?? 0;
+    return {
+      id: r.id,
+      primary: nameMap.get(r.listing_id) || r.listing_id || '—',
+      secondary: `${r.guest_name || 'Guest'} · ${r.confirmation_code || ''} · ${r.nights_count || 0}n${sub == null && fare != null ? ' · fare fallback' : ''}`,
+      date: r.check_in,
+      value,
+      extra: { source: r.source, used_fallback: sub == null && fare != null },
+    };
+  }).sort((a, b) => (b.value as number) - (a.value as number));
+}
+
+// Churn: events in window
+export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const start = format(window.start, 'yyyy-MM-dd');
+  const end = format(window.end, 'yyyy-MM-dd');
+  const { data, error } = await supabase
+    .from('listing_churn_events')
+    .select('id, listing_id, churned_at, restored_at, reason, category, notes')
+    .gte('churned_at', start)
+    .lte('churned_at', end + 'T23:59:59')
+    .order('churned_at', { ascending: false });
+  if (error) throw error;
+  const ids = Array.from(new Set((data ?? []).map((r: any) => r.listing_id)));
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: ls } = await supabase.from('listings').select('id, nickname').in('id', ids.slice(i, i + 200));
+    for (const r of (ls ?? []) as any[]) nameMap.set(r.id, r.nickname || r.id);
+  }
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    primary: nameMap.get(r.listing_id) || r.listing_id,
+    secondary: [r.category, r.reason].filter(Boolean).join(' — ') || 'No reason set',
+    date: r.churned_at,
+    extra: { listing_id: r.listing_id, restored_at: r.restored_at, notes: r.notes, reason: r.reason, category: r.category },
+  }));
+}
+
+// Reviews: reviews in window
+export async function fetchReviewDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const start = format(window.start, 'yyyy-MM-dd');
+  const end = format(window.end, 'yyyy-MM-dd');
+  const data = await paginate(
+    supabase.from('reviews')
+      .select('id, listing_id, rating, review_date, source, review_text')
+      .eq('is_removed', false)
+      .not('rating', 'is', null)
+      .gte('review_date', start)
+      .lte('review_date', end)
+  );
+  const ids = Array.from(new Set(data.map((r: any) => r.listing_id).filter(Boolean)));
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: ls } = await supabase.from('listings').select('id, nickname').in('id', ids.slice(i, i + 200));
+    for (const r of (ls ?? []) as any[]) nameMap.set(r.id, r.nickname || r.id);
+  }
+  return data.map((r: any) => ({
+    id: r.id,
+    primary: nameMap.get(r.listing_id) || r.listing_id || '—',
+    secondary: `${r.source || ''} · ${typeof r.review_text === 'string' ? r.review_text.slice(0, 100) : ''}`,
+    value: Number(r.rating),
+    date: r.review_date,
+  })).sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime());
 }

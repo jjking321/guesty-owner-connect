@@ -4,19 +4,30 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { KpiControls } from '@/components/kpis/KpiControls';
 import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
+import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
 import { Building2, DollarSign, TrendingDown, Star } from 'lucide-react';
 import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
   fetchListingGrowth, fetchGbv, fetchChurn, fetchReviewScore, type ReviewScoreMode,
+  type BucketWindow,
 } from '@/lib/kpis/dataFetcher';
-import type { Aggregation, ComparePreset, KpiRange } from '@/lib/kpis/types';
+import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const TITLES: Record<KpiMetric, string> = {
+  listings: 'Active & listed units',
+  gbv: 'Gross Booking Value',
+  churn: 'Churned units',
+  reviews: 'Guest review score',
+};
 
 export default function Kpis() {
   const [aggregation, setAggregation] = useState<Aggregation>('monthly');
   const [range, setRange] = useState<KpiRange>({ preset: 'ytd' });
   const [compare, setCompare] = useState<ComparePreset>('last_year');
   const [reviewMode, setReviewMode] = useState<ReviewScoreMode>('period');
+
+  const [drilldown, setDrilldown] = useState<{ metric: KpiMetric; window: BucketWindow; label: string } | null>(null);
 
   const resolved = useMemo(() => resolveRange(range), [range]);
   const compareResolved = useMemo(() => resolveCompare(resolved, compare), [resolved, compare]);
@@ -40,6 +51,21 @@ export default function Kpis() {
     queryKey: ['kpi-reviews', ...queryKey, reviewMode],
     queryFn: () => fetchReviewScore(resolved, aggregation, compareResolved, reviewMode),
   });
+
+  const openBucket = (metric: KpiMetric) => (start: Date, end: Date | null, label: string) => {
+    setDrilldown({
+      metric,
+      window: { start, end: end ?? resolved.end },
+      label,
+    });
+  };
+  const openHeadline = (metric: KpiMetric) => () => {
+    setDrilldown({
+      metric,
+      window: { start: resolved.start, end: resolved.end },
+      label: resolved.label,
+    });
+  };
 
   return (
     <DashboardLayout>
@@ -68,6 +94,8 @@ export default function Kpis() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <KpiCard
             title="Active & listed units"
+            description="Currently listed on a channel and enabled in Guesty"
+            helpText="Counts listings where Guesty's isListed is true (published on at least one channel) AND active is true (enabled in Guesty) AND not archived in our system. Past values use historical snapshots when available, otherwise a backfill from Guesty createdAt."
             icon={Building2}
             result={listingsQ.data}
             isLoading={listingsQ.isLoading}
@@ -75,9 +103,13 @@ export default function Kpis() {
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="line"
+            onSelectBucket={openBucket('listings')}
+            onClickHeadline={openHeadline('listings')}
           />
           <KpiCard
             title="Gross Booking Value"
+            description="Subtotal incl. fees, excl. taxes"
+            helpText="Sum of Guesty subTotalPrice (accommodation fare + cleaning + extras + guest service fees, excluding taxes) for reservations checking in within the bucket. Excludes owner stays and cancellations. Falls back to fare_accommodation_adjusted when subTotal is not yet backfilled."
             icon={DollarSign}
             result={gbvQ.data}
             isLoading={gbvQ.isLoading}
@@ -85,9 +117,13 @@ export default function Kpis() {
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="bar"
+            onSelectBucket={openBucket('gbv')}
+            onClickHeadline={openHeadline('gbv')}
           />
           <KpiCard
             title="Churned units"
+            description="Listings that went unlisted + inactive"
+            helpText="A listing is considered churned when both isListed and active flip to false in Guesty. The churn date uses Guesty's lastActivityAt."
             icon={TrendingDown}
             result={churnQ.data}
             isLoading={churnQ.isLoading}
@@ -95,9 +131,13 @@ export default function Kpis() {
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="bar"
+            onSelectBucket={openBucket('churn')}
+            onClickHeadline={openHeadline('churn')}
           />
           <KpiCard
             title="Guest review score"
+            description="Average guest rating"
+            helpText="Average rating across all platforms. 'Reviews in period' averages reviews dated within the bucket; 'Lifetime as of period' shows cumulative average up to that date."
             icon={Star}
             result={reviewQ.data}
             isLoading={reviewQ.isLoading}
@@ -105,6 +145,8 @@ export default function Kpis() {
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="line"
+            onSelectBucket={openBucket('reviews')}
+            onClickHeadline={openHeadline('reviews')}
             rightSlot={
               <Select value={reviewMode} onValueChange={(v) => setReviewMode(v as ReviewScoreMode)}>
                 <SelectTrigger className="w-44 h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -117,6 +159,15 @@ export default function Kpis() {
           />
         </div>
       </div>
+
+      <KpiDetailSheet
+        open={!!drilldown}
+        onOpenChange={(o) => { if (!o) setDrilldown(null); }}
+        metric={drilldown?.metric ?? null}
+        window={drilldown?.window ?? null}
+        title={drilldown ? TITLES[drilldown.metric] : ''}
+        bucketLabel={drilldown?.label}
+      />
     </DashboardLayout>
   );
 }
