@@ -1,6 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { format, addYears, differenceInCalendarDays } from 'date-fns';
-import type { Aggregation, KpiResult, ResolvedRange, SeriesPoint } from './types';
+import type { Aggregation, KpiResult, ResolvedRange, SeriesPoint, KpiDetailRow } from './types';
 import { buildBuckets, findBucketIdx, type Bucket } from './bucket';
 import { rangeISO } from './range';
 
@@ -321,7 +321,6 @@ async function paginate(query: any): Promise<any[]> {
 }
 
 // ============= Drill-down detail fetchers =============
-import type { KpiDetailRow } from './types';
 
 export interface BucketWindow {
   start: Date;
