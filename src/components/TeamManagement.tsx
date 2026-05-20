@@ -102,22 +102,31 @@ export function TeamManagement() {
       // Get all members of the organization
       const { data: membersData, error } = await supabase
         .from("organization_members")
-        .select(`
-          id,
-          user_id,
-          role,
-          created_at,
-          profiles:user_id (
-            email,
-            full_name
-          )
-        `)
+        .select("id, user_id, role, created_at")
         .eq("organization_id", membership.organization_id)
         .order("created_at");
 
       if (error) throw error;
 
-      setMembers(membersData as any || []);
+      // Fetch profiles separately (avoids relationship cache issues)
+      const userIds = (membersData || []).map((m) => m.user_id);
+      let profilesById: Record<string, { email: string; full_name?: string }> = {};
+      if (userIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("id, email, full_name")
+          .in("id", userIds);
+        for (const p of profilesData || []) {
+          profilesById[p.id] = { email: p.email, full_name: p.full_name ?? undefined };
+        }
+      }
+
+      setMembers(
+        (membersData || []).map((m) => ({
+          ...m,
+          profiles: profilesById[m.user_id] || { email: "(unknown)" },
+        })) as any
+      );
 
       // Get pending invitations
       const { data: invitationsData, error: invitationsError } = await supabase
