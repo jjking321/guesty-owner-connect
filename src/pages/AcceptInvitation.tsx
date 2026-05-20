@@ -45,19 +45,23 @@ export default function AcceptInvitation() {
 
       // Check if user is authenticated
       const { data: { user } } = await supabase.auth.getUser();
-      
+      setCurrentUserEmail(user?.email ?? null);
+
       if (!user) {
-        // Don't redirect yet, let user see invitation details
         setLoading(false);
         return;
       }
 
-      // Check if logged-in user's email matches invitation
-      if (user.email !== inviteData.email) {
-        toast.error(`Please log in with ${inviteData.email} to accept this invitation`);
-        setLoading(false);
+      // If logged in with the correct email, auto-accept the invitation
+      if (user.email?.toLowerCase() === inviteData.email.toLowerCase()) {
+        await acceptInvitation(user.id);
         return;
       }
+
+      // Logged in as someone else
+      toast.error(`Please log in with ${inviteData.email} to accept this invitation`);
+      setLoading(false);
+      return;
 
     } catch (error: any) {
       console.error('Error checking invitation:', error);
