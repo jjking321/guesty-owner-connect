@@ -1,72 +1,47 @@
-## Findings from investigation
+## Goal
 
-### 1. Gross Booking Value — you are right to be suspicious
-- `reservations.sub_total` (Guesty `money.subTotalPrice`) is currently set on only **11,253 of 42,239** reservations from 2025+ (~27%). The field was added later and most historical rows are NULL.
-- `fare_accommodation_adjusted` is populated on **42,229 of 42,239** (~100%).
-- Today the KPI sums `sub_total` only, so the GBV number is severely understated.
-- `subTotalPrice` in Guesty = accommodation fare + cleaning + extras + guest service fees, **excluding taxes**. That matches your definition. We just need to backfill it and fall back gracefully.
+A super admin should be a super admin of every organization and should be able to toggle between them. Only an existing super admin can grant the super_admin role to another user.
 
-### 2. Active & Listed Units — what it currently counts
-The metric counts `listings` rows where:
-- `is_listed = true` (Guesty `isListed`, i.e. listing is published on at least one channel)
-- `active = true` (Guesty `active`, i.e. listing is enabled in Guesty)
-- `archived = false` (not soft-deleted in our DB)
+## What to change
 
-Current totals in DB: 485 active+listed, 275 with both flags off, 37 archived (826 total).
+### 1. Backfill: make every existing super admin a member of every org
 
-This needs to be visible in the UI so it's not a black box.
+Insert a `super_admin` row in `organization_members` for each (super_admin user × organization) pair that doesn't already exist. This immediately fixes Jeff's toggle to Renjoy — when he switches, RLS will pass and he'll see Renjoy's listings, reservations, etc.
 
-### 3. Last active date — Guesty does expose it
-Guesty's listing object includes `lastActivityAt`, plus `activatedAt`, `deactivatedAt`, `listedAt`. We are not currently fetching any of them — the listing sync field list is `_id createdAt nickname status isListed active propertyType accommodates bedrooms address picture pictures integrations`. That's why `listings.last_active_at` is 0/826 populated and churn events fall back to "now".
+### 2. Auto-add new super admins to all orgs
 
-### 4. Drill-down
-No way today to see which listings are inside a KPI count. We'll add a click-to-list modal.
+Database trigger on `organization_members`: when a row is inserted/updated with `role = 'super_admin'`, also insert a `super_admin` row for that user in every other organization (idempotent via `ON CONFLICT DO NOTHING`).
 
----
+### 3. Auto-add all existing super admins to any new org
 
-## Plan
+Database trigger on `organizations`: when a new org is created, insert a `super_admin` membership row for every user who is a super_admin anywhere.
 
-### A. Backend: pull `lastActivityAt` from Guesty
-1. Add `lastActivityAt deactivatedAt activatedAt` to the listing `fields` string in:
-   - `sync-guesty-data/index.ts`
-   - any other listing-fetching function that writes `is_listed`/`active`
-2. Map `lastActivityAt` → `listings.last_active_at` on every upsert. Prefer `lastActivityAt`, fall back to `deactivatedAt` then current time.
-3. One-time backfill: small edge function `backfill-listing-last-active` that pages all listings with the new field set and updates `last_active_at`.
-4. Update `snapshot-listing-status`: when opening a churn event, use the listing's `last_active_at` (now reliable) instead of `now()`.
+### 4. Restrict who can create super admins
 
-### B. Fix GBV calculation
-1. Change `fetchGbv` in `src/lib/kpis/dataFetcher.ts` to use `COALESCE(sub_total, fare_accommodation_adjusted)` per reservation. This gives correct GBV where `sub_total` exists and a safe lower-bound elsewhere, instead of dropping the row entirely.
-2. Add a small "Data quality" footnote on the GBV card showing the share of reservations in the period that have true `sub_total` vs are falling back to fare. So you can see when the number is fully accurate.
-3. Trigger / surface the existing `backfill-reservation-subtotals` function from the KPI page header (admin-only button) so you can fill the gap.
+Replace the current "admins and super_admins can insert/update members" policies with split rules:
 
-### C. Clarify "Active & Listed" in the UI
-1. Add an info tooltip on the card title explaining the exact criteria: `is_listed = true AND active = true AND archived = false` (using Guesty's `isListed` and `active` flags).
-2. Subtitle on the card: "Currently listed on a channel and enabled in Guesty."
+- Inserting/updating a row with `role = 'super_admin'` → only existing super admins (anywhere) can do this.
+- Inserting/updating a row with `role IN ('admin', 'member')` → current rule (org admins or super admins of that org) still applies.
 
-### D. Drill-down: click a KPI to see the units
-1. Make each KPI card clickable. Opens a side sheet listing the underlying records for the **selected bucket** (or the latest bucket if you click the headline number).
-2. Per-card content:
-   - **Active & Listed units** → list of listings counted at that point in time (id, nickname, property type, bedrooms, last_active_at, status flags). Search + CSV export.
-   - **GBV** → reservations contributing to the bucket (confirmation code, listing nickname, check-in, nights, sub_total used, source). Footer shows totals and how many used fallback.
-   - **Churned units** → list of churn events in the bucket (listing nickname, churned_at from Guesty, reason, category, notes). Inline edit reason/category like the existing manage drawer.
-   - **Guest review score** → list of reviews in the bucket (date, listing, OTA, rating, snippet). Sortable.
-3. Implementation: extend each `fetchXxx` in `src/lib/kpis/dataFetcher.ts` with a sibling `fetchXxxDetail(bucketStart, bucketEnd)` returning the row list. New component `src/components/kpis/KpiDetailSheet.tsx`.
+Same split on the invitation table — only a super admin can send an invite with `role = 'super_admin'`.
 
-### E. Memory updates
-- Note that `subTotalPrice` is the canonical GBV source with `fare_accommodation_adjusted` as fallback during backfill.
-- Note that `lastActivityAt` is the Guesty source for `listings.last_active_at` and underpins churn `churned_at`.
+### 5. Front-end: invalidate queries on org switch
 
----
+The `OrganizationSwitcher` already writes to localStorage and dispatches `active-organization-changed`. Wire a small listener at the app root that calls `queryClient.invalidateQueries()` (and `queryClient.clear()` for caches keyed on org) when that event fires, so the listings/reservations refetch under the new org context without a hard page reload.
 
-## Files to change
-- `supabase/functions/sync-guesty-data/index.ts` (listing fields + mapping)
-- `supabase/functions/snapshot-listing-status/index.ts` (use last_active_at)
-- new `supabase/functions/backfill-listing-last-active/index.ts`
-- `src/lib/kpis/dataFetcher.ts` (GBV coalesce, detail fetchers, data-quality stat)
-- `src/components/kpis/KpiCard.tsx` (clickable, tooltip, footnote)
-- new `src/components/kpis/KpiDetailSheet.tsx`
-- `src/pages/Kpis.tsx` (wire up detail sheet, optional admin backfill buttons)
+### 6. Hide the "Add super admin" option in the Team UI
 
-## Out of scope (ask if you want them now)
-- Categorizing churn reasons with a fixed picklist (currently free text + category text).
-- Backfilling historical `last_active_at` from reservation activity for listings Guesty doesn't return a date for.
+In `TeamManagement.tsx`, only show the "super_admin" choice in the role selector if `useUserRole().role === 'super_admin'`. Other admins can only invite/promote up to `admin`.
+
+## Technical details
+
+- New helper function: `is_super_admin_anywhere(uuid) returns boolean` (already added in prior migration — reuse it).
+- New trigger functions: `sync_super_admin_to_all_orgs()` on `organization_members` AFTER INSERT/UPDATE, and `seed_super_admins_to_new_org()` on `organizations` AFTER INSERT.
+- RLS replacement on `organization_members` and `organization_invitations`: two INSERT policies and two UPDATE policies — one for super_admin role assignments (gated by `is_super_admin_anywhere(auth.uid())`) and one for non-super_admin roles (current rule).
+- Frontend touchpoints: `src/App.tsx` (or `main.tsx`) to add the org-change → invalidateQueries listener; `src/components/TeamManagement.tsx` to filter the role options.
+- No edge-function changes needed.
+
+## Out of scope
+
+- Existing admins/members keep their per-org scoping. This change only affects the super_admin role.
+- No UI for revoking super_admin across all orgs at once — removing the home-org membership doesn't auto-remove the propagated ones (we can add that later if you want).
