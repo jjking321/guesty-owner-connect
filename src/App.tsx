@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -37,8 +38,20 @@ const queryClient = new QueryClient({
   },
 });
 
+const OrgChangeInvalidator = () => {
+  useEffect(() => {
+    const handler = () => {
+      queryClient.clear();
+    };
+    window.addEventListener("active-organization-changed", handler);
+    return () => window.removeEventListener("active-organization-changed", handler);
+  }, []);
+  return null;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
+    <OrgChangeInvalidator />
     <TooltipProvider>
       <Toaster />
       <Sonner />
