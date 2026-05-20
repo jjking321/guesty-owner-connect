@@ -79,13 +79,25 @@ export function TeamManagement() {
       setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
+      setCurrentUserId(user.id);
 
-      // Get user's organization
-      const { data: membership } = await supabase
+      // Determine active organization (profile-driven, falls back to first membership)
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("active_organization_id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      let activeOrgId = profile?.active_organization_id as string | null;
+
+      // Get the user's membership in the active org (or fall back)
+      let membershipQuery = supabase
         .from("organization_members")
         .select("organization_id, role")
-        .eq("user_id", user.id)
-        .single();
+        .eq("user_id", user.id);
+      if (activeOrgId) membershipQuery = membershipQuery.eq("organization_id", activeOrgId);
+      const { data: memberships } = await membershipQuery.limit(1);
+      const membership = memberships?.[0];
 
       if (!membership) {
         toast({
@@ -93,6 +105,7 @@ export function TeamManagement() {
           description: "Please contact support",
           variant: "destructive",
         });
+
         return;
       }
 
