@@ -135,8 +135,12 @@ export function useUserRole(): UserRoleData {
     return () => window.removeEventListener(ORG_CHANGE_EVENT, handler);
   }, [load]);
 
-  const switchOrganization = useCallback((orgId: string) => {
+  const switchOrganization = useCallback(async (orgId: string) => {
     localStorage.setItem(ACTIVE_ORG_KEY, orgId);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from('profiles').update({ active_organization_id: orgId }).eq('id', user.id);
+    }
     window.dispatchEvent(new Event(ORG_CHANGE_EVENT));
   }, []);
 
