@@ -72,36 +72,40 @@ export default function AcceptInvitation() {
     }
   };
 
-  const handleAcceptInvitation = async () => {
+  const acceptInvitation = async (userId: string) => {
     if (!token) return;
-
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      // Call the accept invitation function
       const { data, error } = await supabase.rpc('accept_organization_invitation', {
         _token: token,
-        _user_id: user.id,
+        _user_id: userId,
       });
 
       if (error) throw error;
 
       const result = data as { success: boolean; message?: string; error?: string };
-      
+
       if (result?.success) {
         toast.success('Successfully joined the organization!');
-        navigate('/dashboard');
+        navigate('/properties/bulk-edit');
       } else {
         toast.error(result?.error || 'Failed to accept invitation');
+        setLoading(false);
       }
     } catch (error: any) {
       console.error('Error accepting invitation:', error);
       toast.error(error.message || 'Failed to accept invitation');
-    } finally {
       setLoading(false);
     }
+  };
+
+  const handleAcceptInvitation = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('Not authenticated');
+      return;
+    }
+    await acceptInvitation(user.id);
   };
 
   if (loading) {
@@ -113,13 +117,16 @@ export default function AcceptInvitation() {
   }
 
   const handleGoToAuth = () => {
-    navigate(`/auth?redirect=/accept-invitation?token=${token}&email=${invitation?.email}`);
+    const redirect = `/accept-invitation?token=${token}`;
+    navigate(
+      `/auth?redirect=${encodeURIComponent(redirect)}&email=${encodeURIComponent(invitation?.email ?? '')}`
+    );
   };
 
-  const checkIfLoggedInWithCorrectEmail = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    return user?.email === invitation?.email;
-  };
+  const isLoggedInWithCorrectEmail =
+    !!currentUserEmail &&
+    !!invitation?.email &&
+    currentUserEmail.toLowerCase() === invitation.email.toLowerCase();
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -136,16 +143,13 @@ export default function AcceptInvitation() {
               <span className="font-semibold">Email:</span> {invitation?.email}
             </p>
             <p className="text-sm text-muted-foreground">
-              <span className="font-semibold">Role:</span> <span className="capitalize">{invitation?.role}</span>
+              <span className="font-semibold">Role:</span>{' '}
+              <span className="capitalize">{invitation?.role}</span>
             </p>
           </div>
-          
-          {checkIfLoggedInWithCorrectEmail() ? (
-            <Button 
-              onClick={handleAcceptInvitation} 
-              disabled={loading}
-              className="w-full"
-            >
+
+          {isLoggedInWithCorrectEmail ? (
+            <Button onClick={handleAcceptInvitation} disabled={loading} className="w-full">
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -158,12 +162,11 @@ export default function AcceptInvitation() {
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Please sign up or log in with <span className="font-semibold">{invitation?.email}</span> to accept this invitation.
+                Please sign up or log in with{' '}
+                <span className="font-semibold">{invitation?.email}</span> to accept this
+                invitation.
               </p>
-              <Button 
-                onClick={handleGoToAuth}
-                className="w-full"
-              >
+              <Button onClick={handleGoToAuth} className="w-full">
                 Continue to Sign In
               </Button>
             </div>
