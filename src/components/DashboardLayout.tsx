@@ -8,6 +8,7 @@ import type { User } from "@supabase/supabase-js";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { OrganizationSwitcher } from "@/components/OrganizationSwitcher";
 interface DashboardLayoutProps {
   children: ReactNode;
 }
@@ -79,6 +80,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 </div>
               </div>
               <div className="flex items-center gap-4">
+                <OrganizationSwitcher />
                 <GlobalSearch />
                 <Button variant="ghost" size="icon" onClick={handleSignOut}>
                   <LogOut className="h-5 w-5" />
