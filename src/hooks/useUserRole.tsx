@@ -94,9 +94,24 @@ export function useUserRole(): UserRoleData {
         return;
       }
 
-      const stored = typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_ORG_KEY) : null;
+      // Read persisted active org from profile (authoritative for RLS)
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('active_organization_id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const stored = profile?.active_organization_id
+        || (typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_ORG_KEY) : null);
       const active = memberships.find(m => m.organizationId === stored) || memberships[0];
-      if (stored !== active.organizationId) {
+
+      if (profile?.active_organization_id !== active.organizationId) {
+        await supabase
+          .from('profiles')
+          .update({ active_organization_id: active.organizationId })
+          .eq('id', user.id);
+      }
+      if (typeof window !== 'undefined') {
         localStorage.setItem(ACTIVE_ORG_KEY, active.organizationId);
       }
 
