@@ -11,6 +11,7 @@ export default function AcceptInvitation() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [invitation, setInvitation] = useState<any>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const token = searchParams.get('token');
 
   useEffect(() => {
