@@ -501,52 +501,66 @@ export function TeamManagement() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {canManageMembers && member.role !== 'super_admin' ? (
-                    <Select
-                      value={member.role}
-                      onValueChange={(value) => handleUpdateRole(member.id, value as any)}
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="member">Member</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        {currentUserRole === 'super_admin' && (
-                          <SelectItem value="super_admin">Super Admin</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Badge variant={member.role === 'super_admin' ? 'default' : 'secondary'}>
-                      {formatRole(member.role)}
-                    </Badge>
-                  )}
-                  {canManageMembers && member.role !== 'super_admin' && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Remove member?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Are you sure you want to remove {member.profiles?.email} from the organization?
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleRemoveMember(member.id, member.profiles?.email)}
+                  {(() => {
+                    const isSelf = currentUserId === member.user_id;
+                    // Super admins can manage everyone except themselves.
+                    // Regular admins can manage only non-super_admin members.
+                    const canEditThisRow =
+                      !isSelf &&
+                      canManageMembers &&
+                      (currentUserRole === 'super_admin' || member.role !== 'super_admin');
+
+                    return (
+                      <>
+                        {canEditThisRow ? (
+                          <Select
+                            value={member.role}
+                            onValueChange={(value) => handleUpdateRole(member.id, value as any)}
                           >
-                            Remove
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  )}
+                            <SelectTrigger className="w-32">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="member">Member</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                              {currentUserRole === 'super_admin' && (
+                                <SelectItem value="super_admin">Super Admin</SelectItem>
+                              )}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge variant={member.role === 'super_admin' ? 'default' : 'secondary'}>
+                            {formatRole(member.role)}
+                          </Badge>
+                        )}
+                        {canEditThisRow && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Remove member?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to remove {member.profiles?.email} from the organization?
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleRemoveMember(member.id, member.profiles?.email)}
+                                >
+                                  Remove
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             ))}
