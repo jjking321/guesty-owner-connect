@@ -15,7 +15,7 @@ interface UserRoleData {
   organizationId: string | null;
   memberships: OrgMembership[];
   loading: boolean;
-  switchOrganization: (orgId: string) => void;
+  switchOrganization: (orgId: string) => Promise<void>;
 }
 
 const ACTIVE_ORG_KEY = 'activeOrganizationId';
