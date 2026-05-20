@@ -58,17 +58,36 @@ export function useUserRole(): UserRoleData {
         return;
       }
 
-      // All organization memberships
+      // Direct memberships
       const { data: members } = await supabase
         .from('organization_members')
-        .select('role, organization_id, organizations(name)')
+        .select('role, organization_id')
         .eq('user_id', user.id);
 
-      const memberships: OrgMembership[] = (members || []).map((m: any) => ({
-        organizationId: m.organization_id,
-        organizationName: m.organizations?.name || 'Organization',
-        role: m.role,
-      }));
+      const directMemberships = (members || []) as Array<{ role: OrgMembership['role']; organization_id: string }>;
+      const isSuperAdmin = directMemberships.some(m => m.role === 'super_admin');
+
+      // Super admins can access ALL organizations
+      let memberships: OrgMembership[] = [];
+      if (isSuperAdmin) {
+        const { data: allOrgs } = await supabase.rpc('get_accessible_organizations');
+        memberships = (allOrgs || []).map((o: any) => ({
+          organizationId: o.id,
+          organizationName: o.name,
+          role: o.role,
+        }));
+      } else {
+        const orgIds = directMemberships.map(m => m.organization_id);
+        const { data: orgs } = orgIds.length
+          ? await supabase.from('organizations').select('id, name').in('id', orgIds)
+          : { data: [] as any[] };
+        const nameById = new Map((orgs || []).map((o: any) => [o.id, o.name]));
+        memberships = directMemberships.map(m => ({
+          organizationId: m.organization_id,
+          organizationName: nameById.get(m.organization_id) || 'Organization',
+          role: m.role,
+        }));
+      }
 
       if (memberships.length === 0) {
         setState({ role: null, ownerId: null, organizationId: null, memberships: [], loading: false });

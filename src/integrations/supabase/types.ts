@@ -2169,6 +2169,14 @@ export type Database = {
         Returns: Json
       }
       cancel_sync_job: { Args: { job_id: string }; Returns: undefined }
+      get_accessible_organizations: {
+        Args: never
+        Returns: {
+          id: string
+          name: string
+          role: Database["public"]["Enums"]["member_role"]
+        }[]
+      }
       get_composite_nights_for_listing: {
         Args: { p_end_date: string; p_listing_id: string; p_start_date: string }
         Returns: number
@@ -2257,6 +2265,7 @@ export type Database = {
         Args: { _parent_group_id: string; _user_id: string }
         Returns: boolean
       }
+      is_super_admin_anywhere: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
       member_role: "super_admin" | "admin" | "member" | "owner"
