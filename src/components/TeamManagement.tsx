@@ -68,6 +68,7 @@ export function TeamManagement() {
   const [pendingInvitations, setPendingInvitations] = useState<PendingInvitation[]>([]);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string>('member');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showInviteForm, setShowInviteForm] = useState(false);
 
   useEffect(() => {
