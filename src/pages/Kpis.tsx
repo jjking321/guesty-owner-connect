@@ -123,7 +123,7 @@ export default function Kpis() {
           <KpiCard
             title="Churned units"
             description="Listings that went unlisted + inactive"
-            helpText="A listing is considered churned when both isListed and active flip to false in Guesty. The churn date uses Guesty's lastActivityAt."
+            helpText="A listing is considered churned when both isListed and active are false in Guesty. The churn date uses a manual churn event when available, otherwise Guesty's lastActivityAt; if that is missing or older than the listing creation date, it uses Guesty's createdAt so newly added churned units are counted in the right year."
             icon={TrendingDown}
             result={churnQ.data}
             isLoading={churnQ.isLoading}

@@ -192,24 +192,43 @@ export async function fetchChurn(
   return { total, compareTotal, series, unit: 'number' };
 }
 
+function getChurnSignalDate(row: { churned_at?: string | null; last_active_at?: string | null; created_at_guesty?: string | null }) {
+  if (row.churned_at) return row.churned_at;
+  if (!row.created_at_guesty) return row.last_active_at ?? null;
+  if (!row.last_active_at) return row.created_at_guesty;
+
+  const created = new Date(row.created_at_guesty).getTime();
+  const lastActive = new Date(row.last_active_at).getTime();
+  return lastActive >= created ? row.last_active_at : row.created_at_guesty;
+}
+
 async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
   const { start, end } = rangeISO(range);
-  // Derive churn directly from listings: currently unlisted+inactive+non-archived with last_active_at in range.
+  const openEvents = await paginate(
+    supabase
+      .from('listing_churn_events')
+      .select('listing_id, churned_at')
+      .is('restored_at', null)
+  );
+  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+
+  // Derive churn from the current Guesty state, using explicit churn events when present.
+  // If Guesty's lastActivityAt is blank/stale, fall back to created_at_guesty so newly-added 2026 units
+  // that are now unlisted+inactive are not incorrectly pushed into an old year or dropped entirely.
   const all = await paginate(
     supabase
       .from('listings')
-      .select('id, last_active_at')
+      .select('id, last_active_at, created_at_guesty')
       .eq('is_listed', false)
       .eq('active', false)
       .eq('archived', false)
-      .not('last_active_at', 'is', null)
-      .gte('last_active_at', start)
-      .lte('last_active_at', end + 'T23:59:59')
   );
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const r of all) {
-    if (!r.last_active_at) continue;
-    const d = new Date(r.last_active_at);
+    const signalDate = getChurnSignalDate({ ...r, churned_at: eventByListing.get(r.id) as string | undefined });
+    if (!signalDate) continue;
+    const d = new Date(signalDate);
+    if (d < range.start || d > range.end) continue;
     const idx = findBucketIdx(buckets, d);
     if (idx >= 0) points[idx].value += 1;
   }
@@ -399,21 +418,15 @@ export async function fetchGbvDetail(window: BucketWindow): Promise<KpiDetailRow
   }).sort((a, b) => (b.value as number) - (a.value as number));
 }
 
-// Churn: currently-churned listings whose last_active_at falls in the window
+// Churn: currently-churned listings whose churn signal falls in the window
 export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
-  const start = format(window.start, 'yyyy-MM-dd');
-  const end = format(window.end, 'yyyy-MM-dd');
   const listings = await paginate(
     supabase
       .from('listings')
-      .select('id, nickname, last_active_at')
+      .select('id, nickname, last_active_at, created_at_guesty')
       .eq('is_listed', false)
       .eq('active', false)
       .eq('archived', false)
-      .not('last_active_at', 'is', null)
-      .gte('last_active_at', start)
-      .lte('last_active_at', end + 'T23:59:59')
-      .order('last_active_at', { ascending: false })
   );
   const ids = listings.map((l: any) => l.id);
   // Enrich with most recent churn event metadata (category/reason/notes) if user has entered any.
@@ -431,11 +444,15 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
   }
   return listings.map((l: any) => {
     const e = eventByListing.get(l.id);
+    const signalDate = getChurnSignalDate({ ...l, churned_at: e?.churned_at });
+    if (!signalDate) return null;
+    const d = new Date(signalDate);
+    if (d < window.start || d > window.end) return null;
     return {
       id: e?.id ?? l.id,
       primary: l.nickname || l.id,
       secondary: [e?.category, e?.reason].filter(Boolean).join(' — ') || 'No reason set',
-      date: l.last_active_at,
+      date: signalDate,
       extra: {
         listing_id: l.id,
         restored_at: e?.restored_at,
@@ -444,7 +461,7 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
         category: e?.category,
       },
     };
-  });
+  }).filter(Boolean).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) as KpiDetailRow[];
 }
 
 // Reviews: reviews in window
