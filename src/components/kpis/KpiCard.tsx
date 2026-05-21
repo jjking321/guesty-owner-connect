@@ -119,14 +119,36 @@ export function KpiCard({
           </div>
         ) : null}
 
-        {result && result.series.length > 0 && (
+        {result && result.series.length > 0 && (() => {
+          // For rating unit, zoom Y-axis tightly to data range so MoM changes are visible.
+          let yDomain: [number | string, number | string] = ['auto', 'auto'];
+          let yTicks: number[] | undefined;
+          if (result.unit === 'rating') {
+            const vals: number[] = [];
+            for (const p of result.series) {
+              if (typeof p.value === 'number' && p.value > 0) vals.push(p.value);
+              if (typeof (p as any).compareValue === 'number' && (p as any).compareValue > 0) vals.push((p as any).compareValue);
+            }
+            if (vals.length > 0) {
+              const mn = Math.min(...vals);
+              const mx = Math.max(...vals);
+              const pad = Math.max(0.05, (mx - mn) * 0.25 || 0.1);
+              const lo = Math.max(1, Math.floor((mn - pad) * 20) / 20);
+              const hi = Math.min(5, Math.ceil((mx + pad) * 20) / 20);
+              yDomain = [lo, hi];
+              const step = (hi - lo) <= 0.3 ? 0.05 : (hi - lo) <= 0.8 ? 0.1 : 0.25;
+              yTicks = [];
+              for (let v = lo; v <= hi + 1e-9; v += step) yTicks.push(Number(v.toFixed(2)));
+            }
+          }
+          return (
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               {chartType === 'bar' ? (
                 <BarChart data={result.series} onClick={handleChartClick}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatValue(v, result.unit)} width={70} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatValue(v, result.unit)} width={70} domain={yDomain as any} ticks={yTicks} />
                   <Tooltip
                     formatter={(v: any) => formatValue(Number(v), result.unit)}
                     contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
@@ -141,7 +163,7 @@ export function KpiCard({
                 <LineChart data={result.series} onClick={handleChartClick}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatValue(v, result.unit)} width={70} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatValue(v, result.unit)} width={70} domain={yDomain as any} ticks={yTicks} />
                   <Tooltip
                     formatter={(v: any) => formatValue(Number(v), result.unit)}
                     contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
@@ -155,6 +177,7 @@ export function KpiCard({
                 </LineChart>
               )}
             </ResponsiveContainer>
+
             {onSelectBucket && (
               <p className="text-[10px] text-muted-foreground mt-1 text-center">Click a bar/point to drill down · Click the headline number for the full period</p>
             )}
