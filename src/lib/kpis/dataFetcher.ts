@@ -193,11 +193,19 @@ export async function fetchChurn(
 }
 
 function getChurnSignalDate(row: { churned_at?: string | null; last_active_at?: string | null; created_at_guesty?: string | null }) {
-  if (row.churned_at) return row.churned_at;
-  if (!row.created_at_guesty) return row.last_active_at ?? null;
+  const created = row.created_at_guesty ? new Date(row.created_at_guesty).getTime() : null;
+
+  // Prefer an explicit churn event, but only if it is plausible (>= listing creation).
+  // Older event dates were written by an earlier snapshot bug using stale lastActivityAt.
+  if (row.churned_at) {
+    const churned = new Date(row.churned_at).getTime();
+    if (created == null || churned >= created) return row.churned_at;
+    return row.created_at_guesty;
+  }
+
+  if (created == null) return row.last_active_at ?? null;
   if (!row.last_active_at) return row.created_at_guesty;
 
-  const created = new Date(row.created_at_guesty).getTime();
   const lastActive = new Date(row.last_active_at).getTime();
   return lastActive >= created ? row.last_active_at : row.created_at_guesty;
 }
