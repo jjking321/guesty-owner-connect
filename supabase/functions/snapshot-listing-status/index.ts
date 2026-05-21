@@ -25,13 +25,22 @@ Deno.serve(async (req) => {
       orgIds.add(a.organization_id);
     }
 
+    const getChurnedAt = (listing: { last_active_at?: string | null; created_at_guesty?: string | null }) => {
+      if (!listing.created_at_guesty) return listing.last_active_at ?? new Date().toISOString();
+      if (!listing.last_active_at) return listing.created_at_guesty;
+
+      const created = new Date(listing.created_at_guesty).getTime();
+      const lastActive = new Date(listing.last_active_at).getTime();
+      return lastActive >= created ? listing.last_active_at : listing.created_at_guesty;
+    };
+
     // Fetch all listings (paginate)
     const listings: any[] = [];
     let from = 0;
     while (true) {
       const { data, error } = await supabase
         .from('listings')
-        .select('id, guesty_account_id, is_listed, active, archived, last_active_at')
+        .select('id, guesty_account_id, is_listed, active, archived, last_active_at, created_at_guesty')
         .range(from, from + 999);
       if (error) throw error;
       if (!data || data.length === 0) break;
@@ -44,7 +53,7 @@ Deno.serve(async (req) => {
     const counts: Record<string, { listed: number; active: number; archived: number; churned: number }> = {};
     for (const id of orgIds) counts[id] = { listed: 0, active: 0, archived: 0, churned: 0 };
 
-    const churnedListings: { id: string; org: string; lastActive: string | null }[] = [];
+  const churnedListings: { id: string; org: string; churnedAt: string }[] = [];
     const restoredListings: { id: string; org: string }[] = [];
 
     for (const l of listings) {
@@ -57,7 +66,7 @@ Deno.serve(async (req) => {
       const isChurnedNow = !l.is_listed && !l.active;
       if (isChurnedNow) {
         counts[org].churned++;
-        churnedListings.push({ id: l.id, org, lastActive: l.last_active_at });
+        churnedListings.push({ id: l.id, org, churnedAt: getChurnedAt(l) });
       } else {
         restoredListings.push({ id: l.id, org });
       }
@@ -92,7 +101,7 @@ Deno.serve(async (req) => {
       .map((c) => ({
         organization_id: c.org,
         listing_id: c.id,
-        churned_at: c.lastActive ?? new Date().toISOString(),
+        churned_at: c.churnedAt,
       }));
     if (toOpen.length) {
       const { error } = await supabase.from('listing_churn_events').insert(toOpen);
