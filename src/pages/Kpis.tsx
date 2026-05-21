@@ -5,6 +5,7 @@ import { KpiControls } from '@/components/kpis/KpiControls';
 import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
 import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
+import { BackfillSubtotals } from '@/components/BackfillSubtotals';
 import { Building2, DollarSign, TrendingDown, Star } from 'lucide-react';
 import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
@@ -157,6 +158,17 @@ export default function Kpis() {
               </Select>
             }
           />
+        </div>
+
+        <div className="space-y-2">
+          <div>
+            <h2 className="text-lg font-semibold">Backfill Gross Booking Value</h2>
+            <p className="text-sm text-muted-foreground">
+              GBV uses Guesty's <code className="text-xs bg-muted px-1 py-0.5 rounded">money.subTotal</code> when available.
+              Run a backfill below for any months still falling back to fare-only revenue.
+            </p>
+          </div>
+          <BackfillSubtotals />
         </div>
       </div>
 
