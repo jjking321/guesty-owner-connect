@@ -182,7 +182,9 @@ export function KpiCard({
               <p className="text-[10px] text-muted-foreground mt-1 text-center">Click a bar/point to drill down · Click the headline number for the full period</p>
             )}
           </div>
-        )}
+          );
+        })()}
+
       </CardContent>
     </Card>
   );
