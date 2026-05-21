@@ -159,6 +159,17 @@ export default function Kpis() {
             }
           />
         </div>
+
+        <div className="space-y-2">
+          <div>
+            <h2 className="text-lg font-semibold">Backfill Gross Booking Value</h2>
+            <p className="text-sm text-muted-foreground">
+              GBV uses Guesty's <code className="text-xs bg-muted px-1 py-0.5 rounded">money.subTotal</code> when available.
+              Run a backfill below for any months still falling back to fare-only revenue.
+            </p>
+          </div>
+          <BackfillSubtotals />
+        </div>
       </div>
 
       <KpiDetailSheet
