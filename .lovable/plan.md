@@ -1,47 +1,42 @@
-## Goal
+## Problem
 
-A super admin should be a super admin of every organization and should be able to toggle between them. Only an existing super admin can grant the super_admin role to another user.
+Churned units shows 0 because `listing_churn_events` is empty — the nightly `snapshot-listing-status` job that populates it has never produced rows for this org. Meanwhile, the `listings` table already has **114 listings** that are currently churned (`is_listed=false AND active=false AND !archived`) with a `last_active_at` timestamp we can use as the churn date.
 
-## What to change
+## Fix
 
-### 1. Backfill: make every existing super admin a member of every org
+Stop relying solely on the events table. Derive churn directly from `listings` and use the events table only as an enrichment layer for category/reason/notes.
 
-Insert a `super_admin` row in `organization_members` for each (super_admin user × organization) pair that doesn't already exist. This immediately fixes Jeff's toggle to Renjoy — when he switches, RLS will pass and he'll see Renjoy's listings, reservations, etc.
+### 1. Backfill `listing_churn_events` from current listing state (migration)
 
-### 2. Auto-add new super admins to all orgs
+One-time SQL: for every listing where `is_listed=false AND active=false AND archived=false AND last_active_at IS NOT NULL` that doesn't already have an open churn event, insert one with `churned_at = last_active_at`. This unblocks the existing drawer + drill-down UI immediately and gives the snapshot job a clean baseline going forward.
 
-Database trigger on `organization_members`: when a row is inserted/updated with `role = 'super_admin'`, also insert a `super_admin` row for that user in every other organization (idempotent via `ON CONFLICT DO NOTHING`).
+### 2. Change `computeChurnSeries` / `fetchChurnDetail` in `src/lib/kpis/dataFetcher.ts`
 
-### 3. Auto-add all existing super admins to any new org
+Switch the source of truth from `listing_churn_events` to a query against `listings`:
 
-Database trigger on `organizations`: when a new org is created, insert a `super_admin` membership row for every user who is a super_admin anywhere.
+```
+SELECT id, nickname, last_active_at, guesty_account_id
+FROM listings
+WHERE is_listed = false
+  AND active   = false
+  AND archived = false
+  AND last_active_at BETWEEN <range.start> AND <range.end>
+```
 
-### 4. Restrict who can create super admins
+- Bucket each listing by `last_active_at` to build the time series.
+- Drill-down returns one row per churned listing with nickname + churn date. Left-join `listing_churn_events` (most recent open event per listing_id) so any category/reason/notes the user has entered in the Manage drawer still appear.
 
-Replace the current "admins and super_admins can insert/update members" policies with split rules:
+### 3. Keep the snapshot/events pipeline as the system of record for edits
 
-- Inserting/updating a row with `role = 'super_admin'` → only existing super admins (anywhere) can do this.
-- Inserting/updating a row with `role IN ('admin', 'member')` → current rule (org admins or super admins of that org) still applies.
+The Manage Churned Units drawer continues to read/write `listing_churn_events`. After step 1's backfill, every currently churned listing has a row, so edits work. The nightly snapshot function keeps opening/closing events for future transitions — no changes needed there.
 
-Same split on the invitation table — only a super admin can send an invite with `role = 'super_admin'`.
+### Why this works
 
-### 5. Front-end: invalidate queries on org switch
+- Headline number stops being 0 immediately: we have 114 listings the DB already knows are churned.
+- Time-series bucketing uses `last_active_at`, which is what the snapshot job itself would have used.
+- We don't lose the human-entered metadata (category/reason/notes) because we still join the events table.
 
-The `OrganizationSwitcher` already writes to localStorage and dispatches `active-organization-changed`. Wire a small listener at the app root that calls `queryClient.invalidateQueries()` (and `queryClient.clear()` for caches keyed on org) when that event fires, so the listings/reservations refetch under the new org context without a hard page reload.
+### Out of scope
 
-### 6. Hide the "Add super admin" option in the Team UI
-
-In `TeamManagement.tsx`, only show the "super_admin" choice in the role selector if `useUserRole().role === 'super_admin'`. Other admins can only invite/promote up to `admin`.
-
-## Technical details
-
-- New helper function: `is_super_admin_anywhere(uuid) returns boolean` (already added in prior migration — reuse it).
-- New trigger functions: `sync_super_admin_to_all_orgs()` on `organization_members` AFTER INSERT/UPDATE, and `seed_super_admins_to_new_org()` on `organizations` AFTER INSERT.
-- RLS replacement on `organization_members` and `organization_invitations`: two INSERT policies and two UPDATE policies — one for super_admin role assignments (gated by `is_super_admin_anywhere(auth.uid())`) and one for non-super_admin roles (current rule).
-- Frontend touchpoints: `src/App.tsx` (or `main.tsx`) to add the org-change → invalidateQueries listener; `src/components/TeamManagement.tsx` to filter the role options.
-- No edge-function changes needed.
-
-## Out of scope
-
-- Existing admins/members keep their per-org scoping. This change only affects the super_admin role.
-- No UI for revoking super_admin across all orgs at once — removing the home-org membership doesn't auto-remove the propagated ones (we can add that later if you want).
+- No edge function changes. We can optionally trigger `snapshot-listing-status` manually later, but it isn't required for this fix.
+- No UI changes to `ManageChurnDrawer` or `KpiDetailSheet`.

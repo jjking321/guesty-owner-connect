@@ -194,15 +194,22 @@ export async function fetchChurn(
 
 async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
   const { start, end } = rangeISO(range);
-  const { data, error } = await supabase
-    .from('listing_churn_events')
-    .select('churned_at')
-    .gte('churned_at', start)
-    .lte('churned_at', end + 'T23:59:59');
-  if (error) throw error;
+  // Derive churn directly from listings: currently unlisted+inactive+non-archived with last_active_at in range.
+  const all = await paginate(
+    supabase
+      .from('listings')
+      .select('id, last_active_at')
+      .eq('is_listed', false)
+      .eq('active', false)
+      .eq('archived', false)
+      .not('last_active_at', 'is', null)
+      .gte('last_active_at', start)
+      .lte('last_active_at', end + 'T23:59:59')
+  );
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
-  for (const r of (data ?? []) as any[]) {
-    const d = new Date(r.churned_at);
+  for (const r of all) {
+    if (!r.last_active_at) continue;
+    const d = new Date(r.last_active_at);
     const idx = findBucketIdx(buckets, d);
     if (idx >= 0) points[idx].value += 1;
   }
@@ -392,30 +399,52 @@ export async function fetchGbvDetail(window: BucketWindow): Promise<KpiDetailRow
   }).sort((a, b) => (b.value as number) - (a.value as number));
 }
 
-// Churn: events in window
+// Churn: currently-churned listings whose last_active_at falls in the window
 export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
   const start = format(window.start, 'yyyy-MM-dd');
   const end = format(window.end, 'yyyy-MM-dd');
-  const { data, error } = await supabase
-    .from('listing_churn_events')
-    .select('id, listing_id, churned_at, restored_at, reason, category, notes')
-    .gte('churned_at', start)
-    .lte('churned_at', end + 'T23:59:59')
-    .order('churned_at', { ascending: false });
-  if (error) throw error;
-  const ids = Array.from(new Set((data ?? []).map((r: any) => r.listing_id)));
-  const nameMap = new Map<string, string>();
+  const listings = await paginate(
+    supabase
+      .from('listings')
+      .select('id, nickname, last_active_at')
+      .eq('is_listed', false)
+      .eq('active', false)
+      .eq('archived', false)
+      .not('last_active_at', 'is', null)
+      .gte('last_active_at', start)
+      .lte('last_active_at', end + 'T23:59:59')
+      .order('last_active_at', { ascending: false })
+  );
+  const ids = listings.map((l: any) => l.id);
+  // Enrich with most recent churn event metadata (category/reason/notes) if user has entered any.
+  const eventByListing = new Map<string, any>();
   for (let i = 0; i < ids.length; i += 200) {
-    const { data: ls } = await supabase.from('listings').select('id, nickname').in('id', ids.slice(i, i + 200));
-    for (const r of (ls ?? []) as any[]) nameMap.set(r.id, r.nickname || r.id);
+    const slice = ids.slice(i, i + 200);
+    const { data: evs } = await supabase
+      .from('listing_churn_events')
+      .select('id, listing_id, churned_at, restored_at, reason, category, notes')
+      .in('listing_id', slice)
+      .order('churned_at', { ascending: false });
+    for (const e of (evs ?? []) as any[]) {
+      if (!eventByListing.has(e.listing_id)) eventByListing.set(e.listing_id, e);
+    }
   }
-  return (data ?? []).map((r: any) => ({
-    id: r.id,
-    primary: nameMap.get(r.listing_id) || r.listing_id,
-    secondary: [r.category, r.reason].filter(Boolean).join(' — ') || 'No reason set',
-    date: r.churned_at,
-    extra: { listing_id: r.listing_id, restored_at: r.restored_at, notes: r.notes, reason: r.reason, category: r.category },
-  }));
+  return listings.map((l: any) => {
+    const e = eventByListing.get(l.id);
+    return {
+      id: e?.id ?? l.id,
+      primary: l.nickname || l.id,
+      secondary: [e?.category, e?.reason].filter(Boolean).join(' — ') || 'No reason set',
+      date: l.last_active_at,
+      extra: {
+        listing_id: l.id,
+        restored_at: e?.restored_at,
+        notes: e?.notes,
+        reason: e?.reason,
+        category: e?.category,
+      },
+    };
+  });
 }
 
 // Reviews: reviews in window
