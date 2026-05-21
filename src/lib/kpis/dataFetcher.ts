@@ -418,21 +418,15 @@ export async function fetchGbvDetail(window: BucketWindow): Promise<KpiDetailRow
   }).sort((a, b) => (b.value as number) - (a.value as number));
 }
 
-// Churn: currently-churned listings whose last_active_at falls in the window
+// Churn: currently-churned listings whose churn signal falls in the window
 export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
-  const start = format(window.start, 'yyyy-MM-dd');
-  const end = format(window.end, 'yyyy-MM-dd');
   const listings = await paginate(
     supabase
       .from('listings')
-      .select('id, nickname, last_active_at')
+      .select('id, nickname, last_active_at, created_at_guesty')
       .eq('is_listed', false)
       .eq('active', false)
       .eq('archived', false)
-      .not('last_active_at', 'is', null)
-      .gte('last_active_at', start)
-      .lte('last_active_at', end + 'T23:59:59')
-      .order('last_active_at', { ascending: false })
   );
   const ids = listings.map((l: any) => l.id);
   // Enrich with most recent churn event metadata (category/reason/notes) if user has entered any.
@@ -450,11 +444,15 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
   }
   return listings.map((l: any) => {
     const e = eventByListing.get(l.id);
+    const signalDate = getChurnSignalDate({ ...l, churned_at: e?.churned_at });
+    if (!signalDate) return null;
+    const d = new Date(signalDate);
+    if (d < window.start || d > window.end) return null;
     return {
       id: e?.id ?? l.id,
       primary: l.nickname || l.id,
       secondary: [e?.category, e?.reason].filter(Boolean).join(' — ') || 'No reason set',
-      date: l.last_active_at,
+      date: signalDate,
       extra: {
         listing_id: l.id,
         restored_at: e?.restored_at,
@@ -463,7 +461,7 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
         category: e?.category,
       },
     };
-  });
+  }).filter(Boolean).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()) as KpiDetailRow[];
 }
 
 // Reviews: reviews in window
