@@ -192,24 +192,43 @@ export async function fetchChurn(
   return { total, compareTotal, series, unit: 'number' };
 }
 
+function getChurnSignalDate(row: { churned_at?: string | null; last_active_at?: string | null; created_at_guesty?: string | null }) {
+  if (row.churned_at) return row.churned_at;
+  if (!row.created_at_guesty) return row.last_active_at ?? null;
+  if (!row.last_active_at) return row.created_at_guesty;
+
+  const created = new Date(row.created_at_guesty).getTime();
+  const lastActive = new Date(row.last_active_at).getTime();
+  return lastActive >= created ? row.last_active_at : row.created_at_guesty;
+}
+
 async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
   const { start, end } = rangeISO(range);
-  // Derive churn directly from listings: currently unlisted+inactive+non-archived with last_active_at in range.
+  const openEvents = await paginate(
+    supabase
+      .from('listing_churn_events')
+      .select('listing_id, churned_at')
+      .is('restored_at', null)
+  );
+  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+
+  // Derive churn from the current Guesty state, using explicit churn events when present.
+  // If Guesty's lastActivityAt is blank/stale, fall back to created_at_guesty so newly-added 2026 units
+  // that are now unlisted+inactive are not incorrectly pushed into an old year or dropped entirely.
   const all = await paginate(
     supabase
       .from('listings')
-      .select('id, last_active_at')
+      .select('id, last_active_at, created_at_guesty')
       .eq('is_listed', false)
       .eq('active', false)
       .eq('archived', false)
-      .not('last_active_at', 'is', null)
-      .gte('last_active_at', start)
-      .lte('last_active_at', end + 'T23:59:59')
   );
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const r of all) {
-    if (!r.last_active_at) continue;
-    const d = new Date(r.last_active_at);
+    const signalDate = getChurnSignalDate({ ...r, churned_at: eventByListing.get(r.id) as string | undefined });
+    if (!signalDate) continue;
+    const d = new Date(signalDate);
+    if (d < range.start || d > range.end) continue;
     const idx = findBucketIdx(buckets, d);
     if (idx >= 0) points[idx].value += 1;
   }
