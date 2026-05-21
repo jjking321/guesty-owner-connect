@@ -194,15 +194,22 @@ export async function fetchChurn(
 
 async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
   const { start, end } = rangeISO(range);
-  const { data, error } = await supabase
-    .from('listing_churn_events')
-    .select('churned_at')
-    .gte('churned_at', start)
-    .lte('churned_at', end + 'T23:59:59');
-  if (error) throw error;
+  // Derive churn directly from listings: currently unlisted+inactive+non-archived with last_active_at in range.
+  const all = await paginate(
+    supabase
+      .from('listings')
+      .select('id, last_active_at')
+      .eq('is_listed', false)
+      .eq('active', false)
+      .eq('archived', false)
+      .not('last_active_at', 'is', null)
+      .gte('last_active_at', start)
+      .lte('last_active_at', end + 'T23:59:59')
+  );
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
-  for (const r of (data ?? []) as any[]) {
-    const d = new Date(r.churned_at);
+  for (const r of all) {
+    if (!r.last_active_at) continue;
+    const d = new Date(r.last_active_at);
     const idx = findBucketIdx(buckets, d);
     if (idx >= 0) points[idx].value += 1;
   }
