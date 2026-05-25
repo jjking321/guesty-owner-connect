@@ -63,86 +63,115 @@ serve(async (req) => {
 
     const progressId = progressRecord?.id;
 
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    // Detect Supabase Functions rate-limit errors and extract retryAfterMs.
+    const getRateLimitWaitMs = (err: any): number | null => {
+      if (!err) return null;
+      const ctx = err.context ?? err.cause ?? err;
+      const name = ctx?.name || err?.name;
+      const retryAfterMs = ctx?.retryAfterMs ?? err?.retryAfterMs;
+      if (name === 'RateLimitError' || typeof retryAfterMs === 'number') {
+        return Math.min(Math.max(retryAfterMs ?? 2000, 500), 30000);
+      }
+      const msg = String(err?.message ?? '');
+      if (/rate limit/i.test(msg)) return 5000;
+      return null;
+    };
+
+    type ForecastOutcome = 'success' | 'rate_limited' | 'error';
+
+    const invokeForecast = async (
+      listing: { id: string; nickname: string | null },
+      year: number,
+    ): Promise<ForecastOutcome> => {
+      const MAX_ATTEMPTS = 5;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        try {
+          const { data, error } = await supabase.functions.invoke('forecast-revenue', {
+            body: { listingId: listing.id, year, simulations: 10000 },
+          });
+          if (error) {
+            const waitMs = getRateLimitWaitMs(error);
+            if (waitMs != null && attempt < MAX_ATTEMPTS) {
+              const jitter = Math.floor(Math.random() * 500);
+              console.warn(`⏳ rate-limited ${year} ${listing.nickname} attempt ${attempt}, waiting ${waitMs + jitter}ms`);
+              await sleep(waitMs + jitter);
+              continue;
+            }
+            if (waitMs != null) {
+              console.error(`✗ rate-limited (gave up) ${year} ${listing.nickname}`);
+              return 'rate_limited';
+            }
+            console.error(`✗ ${year} for ${listing.nickname}:`, error);
+            return 'error';
+          }
+          console.log(`✓ ${year} ${listing.nickname}: $${data?.totalForecast?.p50?.toFixed(0) || 0}`);
+          return 'success';
+        } catch (err: any) {
+          const waitMs = getRateLimitWaitMs(err);
+          if (waitMs != null && attempt < MAX_ATTEMPTS) {
+            const jitter = Math.floor(Math.random() * 500);
+            console.warn(`⏳ rate-limited (thrown) ${year} ${listing.nickname} attempt ${attempt}, waiting ${waitMs + jitter}ms`);
+            await sleep(waitMs + jitter);
+            continue;
+          }
+          if (waitMs != null) return 'rate_limited';
+          console.error(`✗ thrown ${year} for ${listing.nickname}:`, err);
+          return 'error';
+        }
+      }
+      return 'rate_limited';
+    };
+
     // Start background task
     const backgroundTask = async () => {
       const currentYear = new Date().getFullYear();
       const nextYear = currentYear + 1;
-      const BATCH_SIZE = 10;
+      // Throttle: small concurrency + inter-call spacing keeps us under the
+      // Supabase per-function invocation rate limit even on large accounts.
+      const CONCURRENCY = 5;
+      const INTER_CALL_DELAY_MS = 200;
       let successCount = 0;
-      let failureCount = 0;
+      let rateLimitedCount = 0;
+      let errorCount = 0;
 
-      // Process in batches
-      for (let i = 0; i < (listings || []).length; i += BATCH_SIZE) {
-        const batch = (listings || []).slice(i, i + BATCH_SIZE);
-        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(totalProperties / BATCH_SIZE)}`);
-
-        const batchPromises = batch.flatMap(listing => [
-          // Current year forecast
-          supabase.functions.invoke('forecast-revenue', {
-            body: {
-              listingId: listing.id,
-              year: currentYear,
-              simulations: 10000
-            }
-          }).then(({ data, error }) => {
-            if (error) {
-              console.error(`✗ ${currentYear} for ${listing.nickname}:`, error);
-              return { success: false, listing, year: currentYear };
-            }
-            console.log(`✓ ${currentYear} forecast for ${listing.nickname}: $${data?.totalForecast?.p50?.toFixed(0) || 0}`);
-            return { success: true, listing, year: currentYear };
-          }).catch(err => {
-            console.error(`✗ Error ${currentYear} for ${listing.nickname}:`, err);
-            return { success: false, listing, year: currentYear };
-          }),
-          
-          // Next year forecast
-          supabase.functions.invoke('forecast-revenue', {
-            body: {
-              listingId: listing.id,
-              year: nextYear,
-              simulations: 10000
-            }
-          }).then(({ data, error }) => {
-            if (error) {
-              console.error(`✗ ${nextYear} for ${listing.nickname}:`, error);
-              return { success: false, listing, year: nextYear };
-            }
-            console.log(`✓ ${nextYear} forecast for ${listing.nickname}: $${data?.totalForecast?.p50?.toFixed(0) || 0}`);
-            return { success: true, listing, year: nextYear };
-          }).catch(err => {
-            console.error(`✗ Error ${nextYear} for ${listing.nickname}:`, err);
-            return { success: false, listing, year: nextYear };
-          })
-        ]);
-
-        const batchResults = await Promise.allSettled(batchPromises);
-        
-        batchResults.forEach(result => {
-          if (result.status === 'fulfilled' && result.value.success) {
-            successCount++;
-          } else {
-            failureCount++;
-          }
-        });
-
-        console.log(`Batch complete. Progress: ${successCount} success, ${failureCount} failures`);
-
-        // Update progress
-        if (progressId) {
-          await supabase
-            .from('forecast_generation_progress')
-            .update({
-              completed_forecasts: successCount,
-              failed_forecasts: failureCount
-            })
-            .eq('id', progressId);
-        }
+      const jobs: { listing: { id: string; nickname: string | null }; year: number }[] = [];
+      for (const l of listings || []) {
+        jobs.push({ listing: l, year: currentYear });
+        jobs.push({ listing: l, year: nextYear });
       }
 
-      console.log(`Background forecast generation complete: ${successCount} success, ${failureCount} failures out of ${totalProperties * 2} total forecasts`);
+      let nextIndex = 0;
+      const worker = async () => {
+        while (true) {
+          const idx = nextIndex++;
+          if (idx >= jobs.length) return;
+          const job = jobs[idx];
+          const outcome = await invokeForecast(job.listing, job.year);
+          if (outcome === 'success') successCount++;
+          else if (outcome === 'rate_limited') rateLimitedCount++;
+          else errorCount++;
 
-      // Mark progress as complete
+          if (progressId && idx % 10 === 0) {
+            await supabase
+              .from('forecast_generation_progress')
+              .update({
+                completed_forecasts: successCount,
+                failed_forecasts: rateLimitedCount + errorCount,
+              })
+              .eq('id', progressId);
+          }
+          await sleep(INTER_CALL_DELAY_MS);
+        }
+      };
+
+      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+
+      console.log(
+        `Forecast generation complete: ${successCount} success, ${rateLimitedCount} rate-limited, ${errorCount} errors (of ${jobs.length})`,
+      );
+
       if (progressId) {
         await supabase
           .from('forecast_generation_progress')
@@ -150,7 +179,7 @@ serve(async (req) => {
             status: 'completed',
             completed_at: new Date().toISOString(),
             completed_forecasts: successCount,
-            failed_forecasts: failureCount
+            failed_forecasts: rateLimitedCount + errorCount,
           })
           .eq('id', progressId);
       }
