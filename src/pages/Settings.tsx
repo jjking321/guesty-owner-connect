@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { TeamManagement } from "@/components/TeamManagement";
 import { AIPromptsSettings } from "@/components/AIPromptsSettings";
+import { OrganizationSettings } from "@/components/OrganizationSettings";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1211,6 +1212,8 @@ export default function Settings() {
             </CardContent>
           </Card>
         )}
+
+        <OrganizationSettings />
 
         <TeamManagement />
 
