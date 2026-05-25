@@ -1213,6 +1213,8 @@ export default function Settings() {
           </Card>
         )}
 
+        <OrganizationSettings />
+
         <TeamManagement />
 
         <AIPromptsSettings />
