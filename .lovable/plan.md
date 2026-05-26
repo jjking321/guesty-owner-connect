@@ -1,34 +1,29 @@
-## Findings
+## Goal
 
-- The backend has **21 non-archived listings created in 2026** that are currently both `is_listed = false` and `active = false`.
-- The KPI dashboard now shows **9** churned units in YTD 2026 after the prior frontend fallback change, so it is no longer literally 0 in the preview I tested.
-- The remaining undercount is because many inactive/unlisted listings have a `last_active_at` value from **before** their `created_at_guesty` date. The current fallback only uses `created_at_guesty` when `last_active_at` is missing or older than `created_at_guesty`, but the UI is still not matching the raw backend count that you expect.
-- There are **0 `listing_churn_events` for 2026**, so the app is still inferring churn instead of using a true churn transition log.
+Use the uploaded Guesty deactivation report as the **source of truth** for churn dates, replacing the fuzzy `last_active_at` / `created_at_guesty` fallbacks currently feeding the Churned Units KPI.
 
-## Plan
+## What I'll do
 
-1. **Make the churn KPI match the current Guesty state for the selected year**
-   - Count any non-archived listing that is currently `is_listed = false` and `active = false`.
-   - Use this date priority for bucketing:
-     1. explicit manual/open `listing_churn_events.churned_at`
-     2. `created_at_guesty` when the listing was created in the selected range and is now churned
-     3. `last_active_at` only when it is a plausible date after the listing was created
-   - This should make YTD 2026 include the 21 listings currently visible in the backend data.
+1. **Parse the CSV** (~154 records, 3 lines each: `listingId`, `deactivatedDate`, `deactivatedBy`) into clean `{listing_id, churned_at, deactivated_by}` rows.
 
-2. **Update drilldown details to use the same source of truth**
-   - The Churned Units detail sheet should list the same properties counted in the headline and chart.
-   - Add enough context in the row metadata to show whether the date came from a manual churn event, Guesty created date fallback, or Guesty last activity.
+2. **Match to our DB** — join on `listings.id` (Guesty ObjectId). Report any IDs in the CSV that don't exist in our listings table so we can spot mismatches (likely archived or in a different org).
 
-3. **Fix the nightly snapshot/churn event job consistently**
-   - Keep the deployed snapshot fallback, but tighten it to use the same date-priority helper as the KPI.
-   - This prevents new churn events from being opened with stale pre-creation dates.
+3. **Upsert `listing_churn_events`** for the Beachside VR org:
+   - For each matched listing currently churned (`is_listed=false AND active=false`): create or update a churn event with `churned_at = deactivatedDate` from the CSV.
+   - Store `deactivatedBy` in the `notes` column (e.g. `"Deactivated by Brooke VanDerLinden (imported from Guesty report)"`).
+   - If a churn event already exists for that listing with a different date, **overwrite** `churned_at` with the CSV value (CSV wins).
+   - Skip listings that are currently active/listed (they were reactivated — leave existing closed events alone).
 
-4. **Validate against live data**
-   - Confirm the raw backend count for 2026 inactive/unlisted non-archived listings.
-   - Confirm the `/kpis` preview shows the same YTD total and the drilldown count matches.
+4. **Update the KPI date-priority logic** so manual `listing_churn_events.churned_at` is always preferred over Guesty fallbacks (this is already the intent, but I'll verify both `dataFetcher.ts` and `snapshot-listing-status/index.ts` use the same priority and the imported events flow through to the YTD count).
+
+5. **Validate**: re-check the YTD 2026 Churned Units count on `/kpis` and confirm the drilldown lists the same properties with the imported dates.
 
 ## Technical notes
 
-- No schema migration is needed.
-- No data updates are needed unless we decide to backfill `listing_churn_events`; this plan only fixes the reporting logic.
-- If you want true historical churn transition dates later, we should run/backfill Guesty activation logs, but that is separate from making the current YTD KPI stop undercounting.
+- One-off import via the insert tool — no migration needed.
+- Will run a dry-run SELECT first to show: total parsed, matched to DB, unmatched (with their IDs), and how many will be inserted vs updated. You approve before I write.
+- Won't touch listings that the CSV doesn't mention.
+
+## Open question
+
+The CSV spans **Jul 2025 → May 2026** and includes ~154 listings. Should I import **all of them**, or only the ones that are currently still churned in our DB (skip ones that were since reactivated)?
