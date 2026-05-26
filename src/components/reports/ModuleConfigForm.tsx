@@ -222,35 +222,21 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
         )}
 
         {module.scope.kind === 'group' && (
-          <div className="space-y-1">
-            <Label>Group</Label>
-            <Select
-              value={module.scope.ids?.[0] ?? ''}
-              onValueChange={(v) => update({ scope: { kind: 'group', ids: [v] } })}
-            >
-              <SelectTrigger><SelectValue placeholder="Select a group" /></SelectTrigger>
-              <SelectContent>
-                {groups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          <GenericMultiSelect
+            label="Groups"
+            options={groups.map((g) => ({ id: g.id, label: g.name }))}
+            selectedIds={module.scope.ids ?? []}
+            onChange={(ids) => update({ scope: { kind: 'group', ids } })}
+          />
         )}
 
         {module.scope.kind === 'owner' && (
-          <div className="space-y-1">
-            <Label>Owner</Label>
-            <Select
-              value={module.scope.ids?.[0] ?? ''}
-              onValueChange={(v) => update({ scope: { kind: 'owner', ids: [v] } })}
-            >
-              <SelectTrigger><SelectValue placeholder="Select an owner" /></SelectTrigger>
-              <SelectContent>
-                {owners.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>{o.full_name || o.id}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <GenericMultiSelect
+            label="Owners"
+            options={owners.map((o) => ({ id: o.id, label: o.full_name || o.id }))}
+            selectedIds={module.scope.ids ?? []}
+            onChange={(ids) => update({ scope: { kind: 'owner', ids } })}
+          />
         )}
 
         <div className="grid grid-cols-2 gap-3">
