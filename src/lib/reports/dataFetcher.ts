@@ -49,17 +49,17 @@ async function resolveScopeListings(module: ReportModule): Promise<ListingMeta[]
       return allListings.filter((l) => ids.has(l.id));
     }
     case 'owner': {
-      const ownerId = module.scope.ids?.[0];
-      if (!ownerId) return [];
-      return allListings.filter((l) => l.owner_id === ownerId);
+      const ownerIds = new Set(module.scope.ids ?? []);
+      if (ownerIds.size === 0) return [];
+      return allListings.filter((l) => l.owner_id && ownerIds.has(l.owner_id));
     }
     case 'group': {
-      const groupId = module.scope.ids?.[0];
-      if (!groupId) return [];
+      const groupIds = module.scope.ids ?? [];
+      if (groupIds.length === 0) return [];
       const { data, error } = await supabase
         .from('property_group_members')
         .select('listing_id')
-        .eq('group_id', groupId);
+        .in('group_id', groupIds);
       if (error) throw error;
       const ids = new Set((data ?? []).map((r: any) => r.listing_id));
       return allListings.filter((l) => ids.has(l.id));
