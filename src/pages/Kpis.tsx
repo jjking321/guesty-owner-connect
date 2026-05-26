@@ -131,6 +131,16 @@ export default function Kpis() {
             chartType="bar"
             onSelectBucket={openBucket('churn')}
             onClickHeadline={openHeadline('churn')}
+            rightSlot={
+              <ManageChurnDrawer
+                trigger={
+                  <button type="button" className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground h-8 w-8 -mr-2">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    <span className="sr-only">Manage churned units</span>
+                  </button>
+                }
+              />
+            }
           />
           <KpiCard
             title="Guest review score"
