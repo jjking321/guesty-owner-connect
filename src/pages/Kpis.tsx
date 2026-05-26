@@ -6,7 +6,7 @@ import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
 import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
 import { BackfillSubtotals } from '@/components/BackfillSubtotals';
-import { Building2, DollarSign, TrendingDown, Star } from 'lucide-react';
+import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal } from 'lucide-react';
 import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
   fetchListingGrowth, fetchGbv, fetchChurn, fetchReviewScore, type ReviewScoreMode,
