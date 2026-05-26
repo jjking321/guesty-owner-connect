@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger,
@@ -26,7 +26,7 @@ interface ChurnEvent {
 
 interface ListingMini { id: string; nickname: string | null }
 
-export function ManageChurnDrawer() {
+export function ManageChurnDrawer({ trigger }: { trigger?: ReactNode } = {}) {
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<ChurnEvent[]>([]);
   const [listings, setListings] = useState<Record<string, ListingMini>>({});
@@ -104,10 +104,12 @@ export function ManageChurnDrawer() {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Settings2 className="h-4 w-4 mr-2" />
-          Manage churned units
-        </Button>
+        {trigger ?? (
+          <Button variant="outline" size="sm">
+            <Settings2 className="h-4 w-4 mr-2" />
+            Manage churned units
+          </Button>
+        )}
       </SheetTrigger>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader>
