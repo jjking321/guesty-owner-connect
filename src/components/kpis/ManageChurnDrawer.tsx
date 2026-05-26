@@ -26,7 +26,7 @@ interface ChurnEvent {
 
 interface ListingMini { id: string; nickname: string | null }
 
-export function ManageChurnDrawer() {
+export function ManageChurnDrawer({ trigger }: { trigger?: ReactNode } = {}) {
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<ChurnEvent[]>([]);
   const [listings, setListings] = useState<Record<string, ListingMini>>({});
