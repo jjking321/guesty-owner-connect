@@ -1,0 +1,2 @@
+ALTER TABLE public.listing_churn_events ADD COLUMN IF NOT EXISTS ignored boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_listing_churn_events_ignored ON public.listing_churn_events(ignored) WHERE ignored = false;

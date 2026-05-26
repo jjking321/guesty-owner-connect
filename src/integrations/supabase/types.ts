@@ -783,6 +783,7 @@ export type Database = {
           churned_at: string
           created_at: string
           id: string
+          ignored: boolean
           listing_id: string
           notes: string | null
           organization_id: string
@@ -796,6 +797,7 @@ export type Database = {
           churned_at?: string
           created_at?: string
           id?: string
+          ignored?: boolean
           listing_id: string
           notes?: string | null
           organization_id: string
@@ -809,6 +811,7 @@ export type Database = {
           churned_at?: string
           created_at?: string
           id?: string
+          ignored?: boolean
           listing_id?: string
           notes?: string | null
           organization_id?: string
