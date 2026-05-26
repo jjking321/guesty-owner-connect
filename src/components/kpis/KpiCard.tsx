@@ -153,7 +153,7 @@ export function KpiCard({
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               {chartType === 'bar' ? (
-                <BarChart data={result.series} onClick={handleChartClick}>
+                <BarChart data={result.series}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="bucket" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatValue(v, result.unit)} width={70} domain={yDomain as any} ticks={yTicks} />
@@ -162,7 +162,8 @@ export function KpiCard({
                     contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
                   />
                   {result.series.some((p) => p.compareValue !== undefined) && <Legend />}
-                  <Bar dataKey="value" name={primaryLabel} fill="hsl(var(--primary))" cursor={onSelectBucket ? 'pointer' : undefined} />
+                  <Bar dataKey="value" name={primaryLabel} fill="hsl(var(--primary))" cursor={onSelectBucket ? 'pointer' : undefined}
+                       onClick={(d: any) => onSelectBucket && d?.bucketStart && onSelectBucket(new Date(d.bucketStart), d.bucketEnd ? new Date(d.bucketEnd) : null, d.bucket)} />
                   {result.series.some((p) => p.compareValue !== undefined) && (
                     <Bar dataKey="compareValue" name={compareLabel || 'Compare'} fill="hsl(var(--muted-foreground))" cursor={onSelectBucket ? 'pointer' : undefined} onClick={handleCompareBarClick} />
                   )}
