@@ -477,6 +477,7 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
       date: signalDate,
       extra: {
         listing_id: l.id,
+        event_id: e?.id ?? null,
         restored_at: e?.restored_at,
         notes: e?.notes,
         reason: e?.reason,

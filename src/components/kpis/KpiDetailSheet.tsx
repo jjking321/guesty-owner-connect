@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { Download } from 'lucide-react';
+import { Download, EyeOff } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 import {
   fetchListingDetail, fetchGbvDetail, fetchChurnDetail, fetchReviewDetail,
   type BucketWindow,
@@ -34,6 +36,9 @@ function formatCurrency(v: number) {
 
 export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title, bucketLabel }: Props) {
   const [search, setSearch] = useState('');
+  const [ignoring, setIgnoring] = useState<string | null>(null);
+  const { toast } = useToast();
+  const qc = useQueryClient();
   useEffect(() => { if (!open) setSearch(''); }, [open]);
 
   const enabled = open && metric != null && win != null;
@@ -86,6 +91,49 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
     a.click();
     URL.revokeObjectURL(url);
   };
+  const ignoreChurn = async (row: KpiDetailRow) => {
+    let eventId = row.extra?.event_id as string | null | undefined;
+    const listingId = row.extra?.listing_id as string | undefined;
+    if (!listingId) return;
+    setIgnoring(row.id);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!eventId) {
+        // Create a churn event so we have something to flag as ignored.
+        const { data: listing } = await supabase
+          .from('listings').select('organization_id').eq('id', listingId).maybeSingle();
+        const orgId = (listing as any)?.organization_id;
+        if (!orgId) throw new Error('Listing organization not found');
+        const { data: created, error: insErr } = await supabase
+          .from('listing_churn_events')
+          .insert({
+            organization_id: orgId,
+            listing_id: listingId,
+            churned_at: row.date ?? new Date().toISOString(),
+            ignored: true,
+            updated_by: user?.id,
+            notes: 'Excluded from churn via drill-down',
+          })
+          .select('id').single();
+        if (insErr) throw insErr;
+        eventId = created.id;
+      } else {
+        const { error } = await supabase
+          .from('listing_churn_events')
+          .update({ ignored: true, updated_by: user?.id })
+          .eq('id', eventId);
+        if (error) throw error;
+      }
+      toast({ title: 'Excluded from churn' });
+      await qc.invalidateQueries({ queryKey: ['kpi-detail', 'churn'] });
+      await qc.invalidateQueries({ queryKey: ['kpi-churn'] });
+    } catch (err: any) {
+      toast({ title: 'Failed to exclude', description: err.message, variant: 'destructive' });
+    } finally {
+      setIgnoring(null);
+    }
+  };
+
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -134,14 +182,29 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
                     <p className="text-xs text-muted-foreground truncate">{r.secondary}</p>
                   )}
                 </div>
-                <div className="text-right text-xs text-muted-foreground shrink-0">
-                  {r.date && <div>{format(new Date(r.date), 'MMM d, yyyy')}</div>}
-                  {typeof r.value === 'number' && (
-                    <div className="font-medium text-foreground">
-                      {metric === 'gbv' ? formatCurrency(r.value) :
-                       metric === 'reviews' ? r.value.toFixed(1) :
-                       r.value}
-                    </div>
+                <div className="text-right text-xs text-muted-foreground shrink-0 flex items-center gap-2">
+                  <div>
+                    {r.date && <div>{format(new Date(r.date), 'MMM d, yyyy')}</div>}
+                    {typeof r.value === 'number' && (
+                      <div className="font-medium text-foreground">
+                        {metric === 'gbv' ? formatCurrency(r.value) :
+                         metric === 'reviews' ? r.value.toFixed(1) :
+                         r.value}
+                      </div>
+                    )}
+                  </div>
+                  {metric === 'churn' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2"
+                      disabled={ignoring === r.id}
+                      onClick={() => ignoreChurn(r)}
+                      title="Exclude from churn (duplicate / not a real churn)"
+                    >
+                      <EyeOff className="h-3 w-3 mr-1" />
+                      {ignoring === r.id ? '…' : 'Ignore'}
+                    </Button>
                   )}
                 </div>
               </div>
