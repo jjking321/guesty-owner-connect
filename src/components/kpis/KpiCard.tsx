@@ -164,7 +164,7 @@ export function KpiCard({
                   {result.series.some((p) => p.compareValue !== undefined) && <Legend />}
                   <Bar dataKey="value" name={primaryLabel} fill="hsl(var(--primary))" cursor={onSelectBucket ? 'pointer' : undefined} />
                   {result.series.some((p) => p.compareValue !== undefined) && (
-                    <Bar dataKey="compareValue" name={compareLabel || 'Compare'} fill="hsl(var(--muted-foreground))" />
+                    <Bar dataKey="compareValue" name={compareLabel || 'Compare'} fill="hsl(var(--muted-foreground))" cursor={onSelectBucket ? 'pointer' : undefined} onClick={handleCompareBarClick} />
                   )}
                 </BarChart>
               ) : (
