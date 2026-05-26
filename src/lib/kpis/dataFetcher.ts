@@ -215,10 +215,20 @@ async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Prom
   const openEvents = await paginate(
     supabase
       .from('listing_churn_events')
-      .select('listing_id, churned_at')
+      .select('listing_id, churned_at, ignored')
       .is('restored_at', null)
+      .eq('ignored', false)
   );
+  const ignoredEvents = await paginate(
+    supabase
+      .from('listing_churn_events')
+      .select('listing_id')
+      .is('restored_at', null)
+      .eq('ignored', true)
+  );
+  const ignoredSet = new Set(ignoredEvents.map((e: any) => e.listing_id));
   const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+
 
   // Derive churn from the current Guesty state, using explicit churn events when present.
   // If Guesty's lastActivityAt is blank/stale, fall back to created_at_guesty so newly-added 2026 units
