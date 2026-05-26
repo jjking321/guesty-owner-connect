@@ -455,7 +455,7 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
     const slice = ids.slice(i, i + 200);
     const { data: evs } = await supabase
       .from('listing_churn_events')
-      .select('id, listing_id, churned_at, restored_at, reason, category, notes')
+      .select('id, listing_id, churned_at, restored_at, reason, category, notes, ignored')
       .in('listing_id', slice)
       .order('churned_at', { ascending: false });
     for (const e of (evs ?? []) as any[]) {
@@ -464,10 +464,12 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
   }
   return listings.map((l: any) => {
     const e = eventByListing.get(l.id);
+    if (e?.ignored) return null;
     const signalDate = getChurnSignalDate({ ...l, churned_at: e?.churned_at });
     if (!signalDate) return null;
     const d = new Date(signalDate);
     if (d < window.start || d > window.end) return null;
+
     return {
       id: e?.id ?? l.id,
       primary: l.nickname || l.id,
