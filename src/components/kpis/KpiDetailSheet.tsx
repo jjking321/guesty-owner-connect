@@ -91,6 +91,49 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
     a.click();
     URL.revokeObjectURL(url);
   };
+  const ignoreChurn = async (row: KpiDetailRow) => {
+    let eventId = row.extra?.event_id as string | null | undefined;
+    const listingId = row.extra?.listing_id as string | undefined;
+    if (!listingId) return;
+    setIgnoring(row.id);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!eventId) {
+        // Create a churn event so we have something to flag as ignored.
+        const { data: listing } = await supabase
+          .from('listings').select('organization_id').eq('id', listingId).maybeSingle();
+        const orgId = (listing as any)?.organization_id;
+        if (!orgId) throw new Error('Listing organization not found');
+        const { data: created, error: insErr } = await supabase
+          .from('listing_churn_events')
+          .insert({
+            organization_id: orgId,
+            listing_id: listingId,
+            churned_at: row.date ?? new Date().toISOString(),
+            ignored: true,
+            updated_by: user?.id,
+            notes: 'Excluded from churn via drill-down',
+          })
+          .select('id').single();
+        if (insErr) throw insErr;
+        eventId = created.id;
+      } else {
+        const { error } = await supabase
+          .from('listing_churn_events')
+          .update({ ignored: true, updated_by: user?.id })
+          .eq('id', eventId);
+        if (error) throw error;
+      }
+      toast({ title: 'Excluded from churn' });
+      await qc.invalidateQueries({ queryKey: ['kpi-detail', 'churn'] });
+      await qc.invalidateQueries({ queryKey: ['kpi-churn'] });
+    } catch (err: any) {
+      toast({ title: 'Failed to exclude', description: err.message, variant: 'destructive' });
+    } finally {
+      setIgnoring(null);
+    }
+  };
+
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
