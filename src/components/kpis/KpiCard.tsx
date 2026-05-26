@@ -51,6 +51,14 @@ export function KpiCard({
     const p = e.activePayload[0].payload;
     onSelectBucket(new Date(p.bucketStart), p.bucketEnd ? new Date(p.bucketEnd) : null, p.bucket);
   };
+  const handleCompareBarClick = (data: any) => {
+    if (!onSelectBucket || !data?.compareBucketStart) return;
+    onSelectBucket(
+      new Date(data.compareBucketStart),
+      data.compareBucketEnd ? new Date(data.compareBucketEnd) : null,
+      data.compareBucket || compareLabel || 'Compare',
+    );
+  };
 
   const meta = result?.meta as { totalReservations?: number; withSubTotal?: number; usedFallback?: number } | undefined;
   const fallbackPct = meta && meta.totalReservations
