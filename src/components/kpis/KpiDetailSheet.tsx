@@ -182,14 +182,29 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
                     <p className="text-xs text-muted-foreground truncate">{r.secondary}</p>
                   )}
                 </div>
-                <div className="text-right text-xs text-muted-foreground shrink-0">
-                  {r.date && <div>{format(new Date(r.date), 'MMM d, yyyy')}</div>}
-                  {typeof r.value === 'number' && (
-                    <div className="font-medium text-foreground">
-                      {metric === 'gbv' ? formatCurrency(r.value) :
-                       metric === 'reviews' ? r.value.toFixed(1) :
-                       r.value}
-                    </div>
+                <div className="text-right text-xs text-muted-foreground shrink-0 flex items-center gap-2">
+                  <div>
+                    {r.date && <div>{format(new Date(r.date), 'MMM d, yyyy')}</div>}
+                    {typeof r.value === 'number' && (
+                      <div className="font-medium text-foreground">
+                        {metric === 'gbv' ? formatCurrency(r.value) :
+                         metric === 'reviews' ? r.value.toFixed(1) :
+                         r.value}
+                      </div>
+                    )}
+                  </div>
+                  {metric === 'churn' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2"
+                      disabled={ignoring === r.id}
+                      onClick={() => ignoreChurn(r)}
+                      title="Exclude from churn (duplicate / not a real churn)"
+                    >
+                      <EyeOff className="h-3 w-3 mr-1" />
+                      {ignoring === r.id ? '…' : 'Ignore'}
+                    </Button>
                   )}
                 </div>
               </div>
