@@ -36,6 +36,9 @@ function formatCurrency(v: number) {
 
 export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title, bucketLabel }: Props) {
   const [search, setSearch] = useState('');
+  const [ignoring, setIgnoring] = useState<string | null>(null);
+  const { toast } = useToast();
+  const qc = useQueryClient();
   useEffect(() => { if (!open) setSearch(''); }, [open]);
 
   const enabled = open && metric != null && win != null;
