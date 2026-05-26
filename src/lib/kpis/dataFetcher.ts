@@ -54,7 +54,7 @@ export async function fetchListingGrowth(
   // Align compare to primary by index
   if (compareSeries) {
     for (let i = 0; i < series.length; i++) {
-      if (compareSeries[i]) series[i].compareValue = compareSeries[i].value;
+      if (compareSeries[i]) { series[i].compareValue = compareSeries[i].value; series[i].compareBucket = compareSeries[i].bucket; series[i].compareBucketStart = compareSeries[i].bucketStart; series[i].compareBucketEnd = compareSeries[i].bucketEnd; }
     }
   }
 
@@ -119,7 +119,7 @@ export async function fetchGbv(
     const cmp = await computeGbvSeries(compare, compareBuckets);
     compareSeries = cmp.points;
     for (let i = 0; i < series.length; i++) {
-      if (compareSeries[i]) series[i].compareValue = compareSeries[i].value;
+      if (compareSeries[i]) { series[i].compareValue = compareSeries[i].value; series[i].compareBucket = compareSeries[i].bucket; series[i].compareBucketStart = compareSeries[i].bucketStart; series[i].compareBucketEnd = compareSeries[i].bucketEnd; }
     }
   }
 
@@ -183,7 +183,7 @@ export async function fetchChurn(
     const compareBuckets = buildBuckets(compare.start, compare.end, agg);
     compareSeries = await computeChurnSeries(compare, compareBuckets);
     for (let i = 0; i < series.length; i++) {
-      if (compareSeries[i]) series[i].compareValue = compareSeries[i].value;
+      if (compareSeries[i]) { series[i].compareValue = compareSeries[i].value; series[i].compareBucket = compareSeries[i].bucket; series[i].compareBucketStart = compareSeries[i].bucketStart; series[i].compareBucketEnd = compareSeries[i].bucketEnd; }
     }
   }
 
@@ -272,7 +272,7 @@ export async function fetchReviewScore(
     const compareBuckets = buildBuckets(compare.start, compare.end, agg);
     compareSeries = await computeReviewSeries(compare, compareBuckets, mode);
     for (let i = 0; i < series.length; i++) {
-      if (compareSeries[i]) series[i].compareValue = compareSeries[i].value;
+      if (compareSeries[i]) { series[i].compareValue = compareSeries[i].value; series[i].compareBucket = compareSeries[i].bucket; series[i].compareBucketStart = compareSeries[i].bucketStart; series[i].compareBucketEnd = compareSeries[i].bucketEnd; }
     }
   }
 
