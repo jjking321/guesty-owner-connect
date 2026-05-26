@@ -39,6 +39,9 @@ export interface SeriesPoint {
   bucketEnd?: Date;
   value: number;
   compareValue?: number;
+  compareBucket?: string;
+  compareBucketStart?: Date;
+  compareBucketEnd?: Date;
 }
 
 export interface KpiResult {
