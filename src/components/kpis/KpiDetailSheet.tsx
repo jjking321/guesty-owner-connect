@@ -101,8 +101,11 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
       if (!eventId) {
         // Create a churn event so we have something to flag as ignored.
         const { data: listing } = await supabase
-          .from('listings').select('organization_id').eq('id', listingId).maybeSingle();
-        const orgId = (listing as any)?.organization_id;
+          .from('listings')
+          .select('guesty_account_id, guesty_accounts(organization_id)')
+          .eq('id', listingId)
+          .maybeSingle();
+        const orgId = (listing as any)?.guesty_accounts?.organization_id;
         if (!orgId) throw new Error('Listing organization not found');
         const { data: created, error: insErr } = await supabase
           .from('listing_churn_events')
