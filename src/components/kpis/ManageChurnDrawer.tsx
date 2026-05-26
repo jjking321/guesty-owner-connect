@@ -104,10 +104,12 @@ export function ManageChurnDrawer({ trigger }: { trigger?: ReactNode } = {}) {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Settings2 className="h-4 w-4 mr-2" />
-          Manage churned units
-        </Button>
+        {trigger ?? (
+          <Button variant="outline" size="sm">
+            <Settings2 className="h-4 w-4 mr-2" />
+            Manage churned units
+          </Button>
+        )}
       </SheetTrigger>
       <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
         <SheetHeader>
