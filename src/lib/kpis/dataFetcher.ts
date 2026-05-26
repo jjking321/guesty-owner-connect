@@ -215,10 +215,20 @@ async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Prom
   const openEvents = await paginate(
     supabase
       .from('listing_churn_events')
-      .select('listing_id, churned_at')
+      .select('listing_id, churned_at, ignored')
       .is('restored_at', null)
+      .eq('ignored', false)
   );
+  const ignoredEvents = await paginate(
+    supabase
+      .from('listing_churn_events')
+      .select('listing_id')
+      .is('restored_at', null)
+      .eq('ignored', true)
+  );
+  const ignoredSet = new Set(ignoredEvents.map((e: any) => e.listing_id));
   const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+
 
   // Derive churn from the current Guesty state, using explicit churn events when present.
   // If Guesty's lastActivityAt is blank/stale, fall back to created_at_guesty so newly-added 2026 units
@@ -233,6 +243,7 @@ async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Prom
   );
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const r of all) {
+    if (ignoredSet.has(r.id)) continue;
     const signalDate = getChurnSignalDate({ ...r, churned_at: eventByListing.get(r.id) as string | undefined });
     if (!signalDate) continue;
     const d = new Date(signalDate);
@@ -240,6 +251,7 @@ async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Prom
     const idx = findBucketIdx(buckets, d);
     if (idx >= 0) points[idx].value += 1;
   }
+
   return points;
 }
 
@@ -443,7 +455,7 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
     const slice = ids.slice(i, i + 200);
     const { data: evs } = await supabase
       .from('listing_churn_events')
-      .select('id, listing_id, churned_at, restored_at, reason, category, notes')
+      .select('id, listing_id, churned_at, restored_at, reason, category, notes, ignored')
       .in('listing_id', slice)
       .order('churned_at', { ascending: false });
     for (const e of (evs ?? []) as any[]) {
@@ -452,10 +464,12 @@ export async function fetchChurnDetail(window: BucketWindow): Promise<KpiDetailR
   }
   return listings.map((l: any) => {
     const e = eventByListing.get(l.id);
+    if (e?.ignored) return null;
     const signalDate = getChurnSignalDate({ ...l, churned_at: e?.churned_at });
     if (!signalDate) return null;
     const d = new Date(signalDate);
     if (d < window.start || d > window.end) return null;
+
     return {
       id: e?.id ?? l.id,
       primary: l.nickname || l.id,
