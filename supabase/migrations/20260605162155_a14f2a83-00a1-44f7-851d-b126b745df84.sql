@@ -1,0 +1,1 @@
+ALTER TABLE public.kpi_saved_views ADD CONSTRAINT kpi_saved_views_user_id_name_key UNIQUE (user_id, name);
