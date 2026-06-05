@@ -52,7 +52,7 @@ export interface KpiResult {
   meta?: Record<string, any>;
 }
 
-export type KpiMetric = 'listings' | 'gbv' | 'churn' | 'reviews';
+export type KpiMetric = 'listings' | 'gbv' | 'churn' | 'reviews' | 'net_growth' | 'owner_concentration' | 'channel_mix' | 'adr' | 'cancellation';
 
 export interface KpiDetailRow {
   id: string;
