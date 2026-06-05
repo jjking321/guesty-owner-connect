@@ -30,14 +30,16 @@ export function BackfillSubtotals() {
     enabled: !!organizationId,
   });
 
-  // Generate last 24 months as options
+  // 48 months back + 18 months forward (covers historic data and OTB future bookings)
   const now = new Date();
   const monthOptions = useMemo(
     () =>
-      Array.from({ length: 24 }, (_, i) => {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      Array.from({ length: 66 }, (_, i) => {
+        // i = 0 → +18 months (future); i = 65 → -47 months (past)
+        const offset = 17 - i;
+        const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
         const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        const label = format(d, "MMMM yyyy");
+        const label = format(d, "MMM yyyy");
         return { value, label };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
