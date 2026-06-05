@@ -6,10 +6,11 @@ import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
 import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
 import { BackfillSubtotals } from '@/components/BackfillSubtotals';
-import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal } from 'lucide-react';
+import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart, Banknote, XCircle } from 'lucide-react';
 import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
   fetchListingGrowth, fetchGbv, fetchChurn, fetchReviewScore, type ReviewScoreMode,
+  fetchNetGrowth, fetchOwnerConcentration, fetchChannelMix, fetchAdr, fetchCancellationRate,
   type BucketWindow,
 } from '@/lib/kpis/dataFetcher';
 import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis/types';
@@ -20,6 +21,11 @@ const TITLES: Record<KpiMetric, string> = {
   gbv: 'Gross Booking Value',
   churn: 'Churned units',
   reviews: 'Guest review score',
+  net_growth: 'Net unit growth',
+  owner_concentration: 'Owner concentration',
+  channel_mix: 'Channel mix',
+  adr: 'Average Daily Rate',
+  cancellation: 'Cancellation rate',
 };
 
 export default function Kpis() {
@@ -51,6 +57,26 @@ export default function Kpis() {
   const reviewQ = useQuery({
     queryKey: ['kpi-reviews', ...queryKey, reviewMode],
     queryFn: () => fetchReviewScore(resolved, aggregation, compareResolved, reviewMode),
+  });
+  const netGrowthQ = useQuery({
+    queryKey: ['kpi-net-growth', ...queryKey],
+    queryFn: () => fetchNetGrowth(resolved, aggregation, compareResolved),
+  });
+  const ownerConcQ = useQuery({
+    queryKey: ['kpi-owner-concentration', ...queryKey],
+    queryFn: () => fetchOwnerConcentration(resolved, aggregation, compareResolved),
+  });
+  const channelMixQ = useQuery({
+    queryKey: ['kpi-channel-mix', ...queryKey],
+    queryFn: () => fetchChannelMix(resolved, aggregation, compareResolved),
+  });
+  const adrQ = useQuery({
+    queryKey: ['kpi-adr', ...queryKey],
+    queryFn: () => fetchAdr(resolved, aggregation, compareResolved),
+  });
+  const cancelQ = useQuery({
+    queryKey: ['kpi-cancellation', ...queryKey],
+    queryFn: () => fetchCancellationRate(resolved, aggregation, compareResolved),
   });
 
   const openBucket = (metric: KpiMetric) => (start: Date, end: Date | null, label: string) => {
@@ -165,7 +191,78 @@ export default function Kpis() {
               </Select>
             }
           />
+          <KpiCard
+            title="Net unit growth"
+            description="Additions minus churned units per bucket"
+            helpText="Net = listings added (by Guesty createdAt) minus listings churned (using the same signal as Churned units) within each bucket. Excludes archived listings."
+            icon={TrendingUp}
+            result={netGrowthQ.data}
+            isLoading={netGrowthQ.isLoading}
+            error={netGrowthQ.error as Error | null}
+            primaryLabel={resolved.label}
+            compareLabel={compareLabel}
+            chartType="line"
+            onSelectBucket={openBucket('net_growth')}
+            onClickHeadline={openHeadline('net_growth')}
+          />
+          <KpiCard
+            title="Owner concentration"
+            description="Share of portfolio held by top owner"
+            helpText="Largest owner's share of currently active & listed units, as of the end of each bucket. The drill-down lists every owner with their unit count and portfolio share."
+            icon={Users}
+            result={ownerConcQ.data}
+            isLoading={ownerConcQ.isLoading}
+            error={ownerConcQ.error as Error | null}
+            primaryLabel={resolved.label}
+            compareLabel={compareLabel}
+            chartType="line"
+            onSelectBucket={openBucket('owner_concentration')}
+            onClickHeadline={openHeadline('owner_concentration')}
+          />
+          <KpiCard
+            title="Channel mix"
+            description="Top channel's share of GBV"
+            helpText="Reservations are grouped by source into Airbnb, Vrbo/HomeAway, Booking.com, Direct, and Other. The bar shows the dominant channel's GBV share per bucket; the drill-down lists each channel with reservation counts and GBV."
+            icon={PieChart}
+            result={channelMixQ.data}
+            isLoading={channelMixQ.isLoading}
+            error={channelMixQ.error as Error | null}
+            primaryLabel={resolved.label}
+            compareLabel={compareLabel}
+            chartType="bar"
+            onSelectBucket={openBucket('channel_mix')}
+            onClickHeadline={openHeadline('channel_mix')}
+          />
+          <KpiCard
+            title="Average Daily Rate"
+            description="GBV per booked night"
+            helpText="Sum of reservation subtotal (or fare fallback) divided by total nights, for reservations checking in within the bucket. Excludes owner stays and cancellations."
+            icon={Banknote}
+            result={adrQ.data}
+            isLoading={adrQ.isLoading}
+            error={adrQ.error as Error | null}
+            primaryLabel={resolved.label}
+            compareLabel={compareLabel}
+            chartType="line"
+            onSelectBucket={openBucket('adr')}
+            onClickHeadline={openHeadline('adr')}
+          />
+          <KpiCard
+            title="Cancellation rate"
+            description="Cancellations ÷ bookings (by booking date)"
+            helpText="Reservations are bucketed by Guesty createdAt (when the booking was made). Rate = canceled / (confirmed + checked_in + checked_out + canceled). Excludes owner stays and inquiries/expired/declined."
+            icon={XCircle}
+            result={cancelQ.data}
+            isLoading={cancelQ.isLoading}
+            error={cancelQ.error as Error | null}
+            primaryLabel={resolved.label}
+            compareLabel={compareLabel}
+            chartType="line"
+            onSelectBucket={openBucket('cancellation')}
+            onClickHeadline={openHeadline('cancellation')}
+          />
         </div>
+
 
         <div className="space-y-2">
           <div>

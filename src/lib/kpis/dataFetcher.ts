@@ -513,3 +513,478 @@ export async function fetchReviewDetail(window: BucketWindow): Promise<KpiDetail
     date: r.review_date,
   })).sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime());
 }
+
+// ============= New KPI fetchers =============
+
+const CHANNEL_RULES: Array<{ name: string; test: (s: string) => boolean }> = [
+  { name: 'Airbnb', test: (s) => /airbnb/i.test(s) },
+  { name: 'Vrbo / HomeAway', test: (s) => /vrbo|homeaway/i.test(s) },
+  { name: 'Booking.com', test: (s) => /booking/i.test(s) && !/booking engine/i.test(s) },
+  { name: 'Direct', test: (s) => /direct|website|booking engine|manual/i.test(s) },
+];
+function channelOf(source: string | null | undefined): string {
+  if (!source) return 'Other';
+  for (const r of CHANNEL_RULES) if (r.test(source)) return r.name;
+  return 'Other';
+}
+
+// ---------- Net unit growth ----------
+export async function fetchNetGrowth(
+  range: ResolvedRange,
+  agg: Aggregation,
+  compare: ResolvedRange | null,
+): Promise<KpiResult> {
+  const buckets = buildBuckets(range.start, range.end, agg);
+  const series = await computeNetGrowthSeries(range, buckets);
+  let compareSeries: SeriesPoint[] | null = null;
+  if (compare) {
+    const compareBuckets = buildBuckets(compare.start, compare.end, agg);
+    compareSeries = await computeNetGrowthSeries(compare, compareBuckets);
+    for (let i = 0; i < series.length; i++) {
+      if (compareSeries[i]) {
+        series[i].compareValue = compareSeries[i].value;
+        series[i].compareBucket = compareSeries[i].bucket;
+        series[i].compareBucketStart = compareSeries[i].bucketStart;
+        series[i].compareBucketEnd = compareSeries[i].bucketEnd;
+      }
+    }
+  }
+  const total = series.reduce((a, p) => a + p.value, 0);
+  const compareTotal = compareSeries?.reduce((a, p) => a + p.value, 0);
+  return { total, compareTotal, series, unit: 'number' };
+}
+
+async function computeNetGrowthSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
+  // Additions: any listing whose created_at_guesty falls in bucket
+  const allListings = await paginate(
+    supabase.from('listings').select('id, created_at_guesty, is_listed, active, archived, last_active_at')
+  );
+  // Churn signals
+  const openEvents = await paginate(
+    supabase.from('listing_churn_events').select('listing_id, churned_at, ignored').is('restored_at', null).eq('ignored', false)
+  );
+  const ignoredEvents = await paginate(
+    supabase.from('listing_churn_events').select('listing_id').is('restored_at', null).eq('ignored', true)
+  );
+  const ignoredSet = new Set(ignoredEvents.map((e: any) => e.listing_id));
+  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+
+  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
+  for (const l of allListings) {
+    if (l.archived) continue;
+    if (l.created_at_guesty) {
+      const d = new Date(l.created_at_guesty);
+      if (d >= range.start && d <= range.end) {
+        const idx = findBucketIdx(buckets, d);
+        if (idx >= 0) points[idx].value += 1;
+      }
+    }
+    // Subtract churn for this listing
+    if (!l.is_listed && !l.active && !ignoredSet.has(l.id)) {
+      const signal = getChurnSignalDate({ ...l, churned_at: eventByListing.get(l.id) as string | undefined });
+      if (signal) {
+        const d = new Date(signal);
+        if (d >= range.start && d <= range.end) {
+          const idx = findBucketIdx(buckets, d);
+          if (idx >= 0) points[idx].value -= 1;
+        }
+      }
+    }
+  }
+  return points;
+}
+
+export async function fetchNetGrowthDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const listings = await paginate(
+    supabase.from('listings').select('id, nickname, created_at_guesty, is_listed, active, archived, last_active_at')
+  );
+  const openEvents = await paginate(
+    supabase.from('listing_churn_events').select('listing_id, churned_at, ignored, restored_at').eq('ignored', false).is('restored_at', null)
+  );
+  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+  const rows: KpiDetailRow[] = [];
+  for (const l of listings) {
+    if (l.archived) continue;
+    if (l.created_at_guesty) {
+      const d = new Date(l.created_at_guesty);
+      if (d >= window.start && d <= window.end) {
+        rows.push({
+          id: `add-${l.id}`,
+          primary: l.nickname || l.id,
+          secondary: 'Added',
+          date: l.created_at_guesty,
+          value: 1,
+        });
+      }
+    }
+    if (!l.is_listed && !l.active) {
+      const signal = getChurnSignalDate({ ...l, churned_at: eventByListing.get(l.id) as string | undefined });
+      if (signal) {
+        const d = new Date(signal);
+        if (d >= window.start && d <= window.end) {
+          rows.push({
+            id: `churn-${l.id}`,
+            primary: l.nickname || l.id,
+            secondary: 'Churned',
+            date: signal,
+            value: -1,
+          });
+        }
+      }
+    }
+  }
+  return rows.sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime());
+}
+
+// ---------- Owner concentration ----------
+export async function fetchOwnerConcentration(
+  range: ResolvedRange,
+  agg: Aggregation,
+  compare: ResolvedRange | null,
+): Promise<KpiResult> {
+  const buckets = buildBuckets(range.start, range.end, agg);
+  const { series, breakdown } = await computeOwnerConcentrationSeries(buckets);
+  let compareTotal: number | undefined;
+  let compareSeries: SeriesPoint[] | null = null;
+  if (compare) {
+    const cBuckets = buildBuckets(compare.start, compare.end, agg);
+    const cmp = await computeOwnerConcentrationSeries(cBuckets);
+    compareSeries = cmp.series;
+    compareTotal = cmp.series.length ? cmp.series[cmp.series.length - 1].value : undefined;
+    for (let i = 0; i < series.length; i++) {
+      if (compareSeries[i]) {
+        series[i].compareValue = compareSeries[i].value;
+        series[i].compareBucket = compareSeries[i].bucket;
+        series[i].compareBucketStart = compareSeries[i].bucketStart;
+        series[i].compareBucketEnd = compareSeries[i].bucketEnd;
+      }
+    }
+  }
+  const total = series.length ? series[series.length - 1].value : 0;
+  return { total, compareTotal, series, unit: 'percent', meta: { breakdown } };
+}
+
+async function computeOwnerConcentrationSeries(buckets: Bucket[]): Promise<{ series: SeriesPoint[]; breakdown: Array<[string, number]> }> {
+  const listings = await paginate(
+    supabase.from('listings').select('id, owner_id, created_at_guesty, is_listed, active, archived')
+  );
+  // Current breakdown (point-in-time, end of range)
+  const series = buckets.map((b) => {
+    const activeAsOf = listings.filter((l: any) => {
+      if (l.archived) return false;
+      if (!l.is_listed || !l.active) return false;
+      if (!l.created_at_guesty) return true;
+      return new Date(l.created_at_guesty) <= b.end;
+    });
+    const counts = new Map<string, number>();
+    for (const l of activeAsOf) {
+      if (!l.owner_id) continue;
+      counts.set(l.owner_id, (counts.get(l.owner_id) ?? 0) + 1);
+    }
+    const total = activeAsOf.length;
+    const top = Math.max(0, ...Array.from(counts.values()));
+    return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: total > 0 ? top / total : 0 };
+  });
+
+  // Build breakdown for the final bucket
+  const last = listings.filter((l: any) => l.is_listed && l.active && !l.archived);
+  const counts = new Map<string, number>();
+  for (const l of last) {
+    if (!l.owner_id) continue;
+    counts.set(l.owner_id, (counts.get(l.owner_id) ?? 0) + 1);
+  }
+  const breakdown = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  return { series, breakdown };
+}
+
+export async function fetchOwnerConcentrationDetail(_window: BucketWindow): Promise<KpiDetailRow[]> {
+  const listings = await paginate(
+    supabase.from('listings').select('id, owner_id, is_listed, active, archived')
+  );
+  const active = listings.filter((l: any) => l.is_listed && l.active && !l.archived);
+  const total = active.length;
+  const counts = new Map<string, number>();
+  for (const l of active) {
+    if (!l.owner_id) continue;
+    counts.set(l.owner_id, (counts.get(l.owner_id) ?? 0) + 1);
+  }
+  const ownerIds = Array.from(counts.keys());
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ownerIds.length; i += 200) {
+    const { data } = await supabase.from('owners').select('id, full_name, first_name, last_name, email').in('id', ownerIds.slice(i, i + 200));
+    for (const o of (data ?? []) as any[]) {
+      nameMap.set(o.id, o.full_name || [o.first_name, o.last_name].filter(Boolean).join(' ') || o.email || o.id);
+    }
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).map(([ownerId, cnt]) => ({
+    id: ownerId,
+    primary: nameMap.get(ownerId) || ownerId,
+    secondary: `${cnt} unit${cnt === 1 ? '' : 's'} · ${total > 0 ? ((cnt / total) * 100).toFixed(1) : '0'}% of portfolio`,
+    value: cnt,
+  }));
+}
+
+// ---------- Channel mix ----------
+export async function fetchChannelMix(
+  range: ResolvedRange,
+  agg: Aggregation,
+  compare: ResolvedRange | null,
+): Promise<KpiResult> {
+  const buckets = buildBuckets(range.start, range.end, agg);
+  const { series, breakdown, topShare } = await computeChannelMixSeries(range, buckets);
+  let compareSeries: SeriesPoint[] | null = null;
+  let compareTotal: number | undefined;
+  if (compare) {
+    const cBuckets = buildBuckets(compare.start, compare.end, agg);
+    const cmp = await computeChannelMixSeries(compare, cBuckets);
+    compareSeries = cmp.series;
+    compareTotal = cmp.topShare;
+    for (let i = 0; i < series.length; i++) {
+      if (compareSeries[i]) {
+        series[i].compareValue = compareSeries[i].value;
+        series[i].compareBucket = compareSeries[i].bucket;
+        series[i].compareBucketStart = compareSeries[i].bucketStart;
+        series[i].compareBucketEnd = compareSeries[i].bucketEnd;
+      }
+    }
+  }
+  return { total: topShare, compareTotal, series, unit: 'percent', meta: { breakdown } };
+}
+
+async function computeChannelMixSeries(range: ResolvedRange, buckets: Bucket[]) {
+  const { start, end } = rangeISO(range);
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('check_in, sub_total, fare_accommodation_adjusted, source, status')
+      .gte('check_in', start).lte('check_in', end)
+  );
+  const channelTotals = new Map<string, number>();
+  // series = top-channel GBV share per bucket
+  const perBucket = buckets.map(() => new Map<string, number>());
+  let grand = 0;
+  for (const r of all) {
+    if (r.source === 'owner') continue;
+    if (r.status && !['confirmed', 'checked_in', 'checked_out'].includes(r.status)) continue;
+    const value = r.sub_total != null ? Number(r.sub_total) : (r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : 0);
+    if (!value || !r.check_in) continue;
+    const channel = channelOf(r.source);
+    channelTotals.set(channel, (channelTotals.get(channel) ?? 0) + value);
+    grand += value;
+    const idx = findBucketIdx(buckets, new Date(r.check_in + 'T00:00:00'));
+    if (idx >= 0) {
+      const m = perBucket[idx];
+      m.set(channel, (m.get(channel) ?? 0) + value);
+    }
+  }
+  const series: SeriesPoint[] = buckets.map((b, i) => {
+    const m = perBucket[i];
+    const total = Array.from(m.values()).reduce((a, v) => a + v, 0);
+    const top = Math.max(0, ...Array.from(m.values()));
+    return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: total > 0 ? top / total : 0 };
+  });
+  const breakdown = Array.from(channelTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, gbv]) => ({ name, gbv, share: grand > 0 ? gbv / grand : 0 }));
+  const topShare = breakdown[0]?.share ?? 0;
+  return { series, breakdown, topShare };
+}
+
+export async function fetchChannelMixDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const start = format(window.start, 'yyyy-MM-dd');
+  const end = format(window.end, 'yyyy-MM-dd');
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('id, sub_total, fare_accommodation_adjusted, source, status, check_in')
+      .gte('check_in', start).lte('check_in', end)
+  );
+  const byChannel = new Map<string, { gbv: number; count: number }>();
+  let grand = 0;
+  for (const r of all) {
+    if (r.source === 'owner') continue;
+    if (r.status && !['confirmed', 'checked_in', 'checked_out'].includes(r.status)) continue;
+    const value = r.sub_total != null ? Number(r.sub_total) : (r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : 0);
+    if (!value) continue;
+    const ch = channelOf(r.source);
+    const prev = byChannel.get(ch) ?? { gbv: 0, count: 0 };
+    prev.gbv += value; prev.count += 1;
+    byChannel.set(ch, prev);
+    grand += value;
+  }
+  return Array.from(byChannel.entries()).sort((a, b) => b[1].gbv - a[1].gbv).map(([name, v]) => ({
+    id: name,
+    primary: name,
+    secondary: `${v.count} reservation${v.count === 1 ? '' : 's'} · ${grand > 0 ? ((v.gbv / grand) * 100).toFixed(1) : '0'}% of GBV`,
+    value: Math.round(v.gbv),
+  }));
+}
+
+// ---------- ADR ----------
+export async function fetchAdr(
+  range: ResolvedRange,
+  agg: Aggregation,
+  compare: ResolvedRange | null,
+): Promise<KpiResult> {
+  const buckets = buildBuckets(range.start, range.end, agg);
+  const primary = await computeAdrSeries(range, buckets);
+  let compareSeries: SeriesPoint[] | null = null;
+  let compareTotal: number | undefined;
+  if (compare) {
+    const cBuckets = buildBuckets(compare.start, compare.end, agg);
+    const cmp = await computeAdrSeries(compare, cBuckets);
+    compareSeries = cmp.series;
+    compareTotal = cmp.total;
+    for (let i = 0; i < primary.series.length; i++) {
+      if (compareSeries[i]) {
+        primary.series[i].compareValue = compareSeries[i].value;
+        primary.series[i].compareBucket = compareSeries[i].bucket;
+        primary.series[i].compareBucketStart = compareSeries[i].bucketStart;
+        primary.series[i].compareBucketEnd = compareSeries[i].bucketEnd;
+      }
+    }
+  }
+  return { total: primary.total, compareTotal, series: primary.series, unit: 'currency' };
+}
+
+async function computeAdrSeries(range: ResolvedRange, buckets: Bucket[]) {
+  const { start, end } = rangeISO(range);
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('check_in, nights_count, sub_total, fare_accommodation_adjusted, source, status')
+      .gte('check_in', start).lte('check_in', end)
+  );
+  const sums = buckets.map(() => ({ rev: 0, nights: 0 }));
+  let totalRev = 0, totalNights = 0;
+  for (const r of all) {
+    if (r.source === 'owner') continue;
+    if (r.status && !['confirmed', 'checked_in', 'checked_out'].includes(r.status)) continue;
+    const value = r.sub_total != null ? Number(r.sub_total) : (r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : 0);
+    const n = Number(r.nights_count || 0);
+    if (!value || n <= 0 || !r.check_in) continue;
+    totalRev += value; totalNights += n;
+    const idx = findBucketIdx(buckets, new Date(r.check_in + 'T00:00:00'));
+    if (idx >= 0) { sums[idx].rev += value; sums[idx].nights += n; }
+  }
+  const series: SeriesPoint[] = buckets.map((b, i) => ({
+    bucket: b.label, bucketStart: b.start, bucketEnd: b.end,
+    value: sums[i].nights > 0 ? sums[i].rev / sums[i].nights : 0,
+  }));
+  return { series, total: totalNights > 0 ? totalRev / totalNights : 0 };
+}
+
+export async function fetchAdrDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const start = format(window.start, 'yyyy-MM-dd');
+  const end = format(window.end, 'yyyy-MM-dd');
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('id, listing_id, check_in, nights_count, sub_total, fare_accommodation_adjusted, source, status, confirmation_code, guest_name')
+      .gte('check_in', start).lte('check_in', end)
+  );
+  const valid = all.filter((r: any) =>
+    r.source !== 'owner' &&
+    Number(r.nights_count) > 0 &&
+    (!r.status || ['confirmed', 'checked_in', 'checked_out'].includes(r.status))
+  );
+  const ids = Array.from(new Set(valid.map((r: any) => r.listing_id).filter(Boolean)));
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase.from('listings').select('id, nickname').in('id', ids.slice(i, i + 200));
+    for (const r of (data ?? []) as any[]) nameMap.set(r.id, r.nickname || r.id);
+  }
+  return valid.map((r: any) => {
+    const sub = r.sub_total != null ? Number(r.sub_total) : null;
+    const fare = r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : null;
+    const value = sub ?? fare ?? 0;
+    const adr = value / Number(r.nights_count);
+    return {
+      id: r.id,
+      primary: nameMap.get(r.listing_id) || r.listing_id || '—',
+      secondary: `${r.guest_name || 'Guest'} · ${r.confirmation_code || ''} · ${r.nights_count}n`,
+      date: r.check_in,
+      value: Math.round(adr),
+    };
+  }).sort((a, b) => (b.value as number) - (a.value as number));
+}
+
+// ---------- Cancellation rate ----------
+export async function fetchCancellationRate(
+  range: ResolvedRange,
+  agg: Aggregation,
+  compare: ResolvedRange | null,
+): Promise<KpiResult> {
+  const buckets = buildBuckets(range.start, range.end, agg);
+  const primary = await computeCancellationSeries(range, buckets);
+  let compareSeries: SeriesPoint[] | null = null;
+  let compareTotal: number | undefined;
+  if (compare) {
+    const cBuckets = buildBuckets(compare.start, compare.end, agg);
+    const cmp = await computeCancellationSeries(compare, cBuckets);
+    compareSeries = cmp.series;
+    compareTotal = cmp.total;
+    for (let i = 0; i < primary.series.length; i++) {
+      if (compareSeries[i]) {
+        primary.series[i].compareValue = compareSeries[i].value;
+        primary.series[i].compareBucket = compareSeries[i].bucket;
+        primary.series[i].compareBucketStart = compareSeries[i].bucketStart;
+        primary.series[i].compareBucketEnd = compareSeries[i].bucketEnd;
+      }
+    }
+  }
+  return { total: primary.total, compareTotal, series: primary.series, unit: 'percent' };
+}
+
+async function computeCancellationSeries(range: ResolvedRange, buckets: Bucket[]) {
+  const startIso = range.start.toISOString();
+  const endIso = range.end.toISOString();
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('created_at_guesty, status, source')
+      .gte('created_at_guesty', startIso).lte('created_at_guesty', endIso)
+  );
+  const counts = buckets.map(() => ({ canc: 0, denom: 0 }));
+  let totalCanc = 0, totalDenom = 0;
+  for (const r of all) {
+    if (r.source === 'owner') continue;
+    if (!r.created_at_guesty) continue;
+    const status = r.status as string | null;
+    if (!status) continue;
+    const isCanc = status === 'canceled';
+    const isCounted = isCanc || ['confirmed', 'checked_in', 'checked_out'].includes(status);
+    if (!isCounted) continue;
+    totalDenom += 1;
+    if (isCanc) totalCanc += 1;
+    const idx = findBucketIdx(buckets, new Date(r.created_at_guesty));
+    if (idx >= 0) {
+      counts[idx].denom += 1;
+      if (isCanc) counts[idx].canc += 1;
+    }
+  }
+  const series: SeriesPoint[] = buckets.map((b, i) => ({
+    bucket: b.label, bucketStart: b.start, bucketEnd: b.end,
+    value: counts[i].denom > 0 ? counts[i].canc / counts[i].denom : 0,
+  }));
+  return { series, total: totalDenom > 0 ? totalCanc / totalDenom : 0 };
+}
+
+export async function fetchCancellationDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const startIso = window.start.toISOString();
+  const endIso = window.end.toISOString();
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('id, listing_id, check_in, check_out, created_at_guesty, status, source, confirmation_code, guest_name')
+      .gte('created_at_guesty', startIso).lte('created_at_guesty', endIso)
+      .eq('status', 'canceled')
+  );
+  const valid = all.filter((r: any) => r.source !== 'owner');
+  const ids = Array.from(new Set(valid.map((r: any) => r.listing_id).filter(Boolean)));
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase.from('listings').select('id, nickname').in('id', ids.slice(i, i + 200));
+    for (const r of (data ?? []) as any[]) nameMap.set(r.id, r.nickname || r.id);
+  }
+  return valid.map((r: any) => ({
+    id: r.id,
+    primary: nameMap.get(r.listing_id) || r.listing_id || '—',
+    secondary: `${r.guest_name || 'Guest'} · ${r.confirmation_code || ''} · ${r.check_in || ''} → ${r.check_out || ''}`,
+    date: r.created_at_guesty,
+  })).sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime());
+}

@@ -48,11 +48,11 @@ export interface KpiResult {
   total: number;
   compareTotal?: number;
   series: SeriesPoint[];
-  unit: 'number' | 'currency' | 'rating';
+  unit: 'number' | 'currency' | 'rating' | 'percent';
   meta?: Record<string, any>;
 }
 
-export type KpiMetric = 'listings' | 'gbv' | 'churn' | 'reviews';
+export type KpiMetric = 'listings' | 'gbv' | 'churn' | 'reviews' | 'net_growth' | 'owner_concentration' | 'channel_mix' | 'adr' | 'cancellation';
 
 export interface KpiDetailRow {
   id: string;

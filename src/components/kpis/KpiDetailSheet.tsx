@@ -9,6 +9,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import {
   fetchListingDetail, fetchGbvDetail, fetchChurnDetail, fetchReviewDetail,
+  fetchNetGrowthDetail, fetchOwnerConcentrationDetail, fetchChannelMixDetail,
+  fetchAdrDetail, fetchCancellationDetail,
   type BucketWindow,
 } from '@/lib/kpis/dataFetcher';
 import type { KpiMetric, KpiDetailRow } from '@/lib/kpis/types';
@@ -28,6 +30,11 @@ const titles: Record<KpiMetric, string> = {
   gbv: 'Reservations',
   churn: 'Churn events',
   reviews: 'Reviews',
+  net_growth: 'Net unit growth',
+  owner_concentration: 'Owner concentration',
+  channel_mix: 'Channel mix',
+  adr: 'ADR',
+  cancellation: 'Cancellations',
 };
 
 function formatCurrency(v: number) {
@@ -51,6 +58,11 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
         case 'gbv': return fetchGbvDetail(win);
         case 'churn': return fetchChurnDetail(win);
         case 'reviews': return fetchReviewDetail(win);
+        case 'net_growth': return fetchNetGrowthDetail(win);
+        case 'owner_concentration': return fetchOwnerConcentrationDetail(win);
+        case 'channel_mix': return fetchChannelMixDetail(win);
+        case 'adr': return fetchAdrDetail(win);
+        case 'cancellation': return fetchCancellationDetail(win);
       }
     },
     enabled,

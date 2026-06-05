@@ -1,29 +1,66 @@
-## Goal
+# Expand KPI Dashboard with 5 New Metrics
 
-Use the uploaded Guesty deactivation report as the **source of truth** for churn dates, replacing the fuzzy `last_active_at` / `created_at_guesty` fallbacks currently feeding the Churned Units KPI.
+Add five new metric cards to `/kpis`, following the existing `KpiCard` + `fetch*` + drill-down pattern in `src/lib/kpis/dataFetcher.ts` and `src/pages/Kpis.tsx`.
 
-## What I'll do
+## New metrics
 
-1. **Parse the CSV** (~154 records, 3 lines each: `listingId`, `deactivatedDate`, `deactivatedBy`) into clean `{listing_id, churned_at, deactivated_by}` rows.
+### 1. Net unit growth (line chart)
+Net change per bucket = new active listings added − units churned in that bucket.
+- New: count of `currently active & listed` listings whose `created_at_guesty` falls inside the bucket.
+- Churned: reuse existing churn signal logic (`getChurnSignalDate`) within the bucket.
+- Headline = sum across range. Series shows both lines or a single net line; will use a single net line with compare.
 
-2. **Match to our DB** — join on `listings.id` (Guesty ObjectId). Report any IDs in the CSV that don't exist in our listings table so we can spot mismatches (likely archived or in a different org).
+### 2. Owner concentration
+Share of active units owned by the top owner (and Top-5 share in helpText/meta).
+- Join active listings → `owners.owner_id` → count per owner.
+- Headline = `top1_units / total_active` as a percentage (new `unit: 'percent'` added to `KpiResult`).
+- Series = top-1 share over time using snapshots when available, else cumulative backfill (same fallback strategy as listing growth).
+- Drill-down: list owners ranked by unit count with % share.
 
-3. **Upsert `listing_churn_events`** for the Beachside VR org:
-   - For each matched listing currently churned (`is_listed=false AND active=false`): create or update a churn event with `churned_at = deactivatedDate` from the CSV.
-   - Store `deactivatedBy` in the `notes` column (e.g. `"Deactivated by Brooke VanDerLinden (imported from Guesty report)"`).
-   - If a churn event already exists for that listing with a different date, **overwrite** `churned_at` with the CSV value (CSV wins).
-   - Skip listings that are currently active/listed (they were reactivated — leave existing closed events alone).
+### 3. Channel mix
+Bar chart of GBV by `source` (Airbnb, Vrbo, Booking.com, Direct, etc.) for the period.
+- Headline = % of GBV from the top channel.
+- Series buckets along time with stacked or grouped bars per channel — to keep the existing `KpiCard` chart shape simple, we'll display a **horizontal-style summary** by using bucketed bars where the primary value = the dominant channel's GBV, plus a `meta.breakdown` array `{ source, gbv, share }` rendered as a small legend under the chart.
+- Excludes owner reservations and non-revenue statuses (matches GBV rules).
+- Drill-down: per-channel totals with reservation counts.
 
-4. **Update the KPI date-priority logic** so manual `listing_churn_events.churned_at` is always preferred over Guesty fallbacks (this is already the intent, but I'll verify both `dataFetcher.ts` and `snapshot-listing-status/index.ts` use the same priority and the imported events flow through to the YTD count).
+### 4. ADR (Average Daily Rate)
+`sum(subTotal or fare fallback) / sum(nights_count)` for reservations checking in within the bucket. Excludes owner stays and cancellations (same filter as GBV).
+- `unit: 'currency'`.
+- Compare-period supported.
+- Drill-down: per-reservation ADR (value/nights), sorted desc.
 
-5. **Validate**: re-check the YTD 2026 Churned Units count on `/kpis` and confirm the drilldown lists the same properties with the imported dates.
+### 5. Cancellation rate
+`canceled / (confirmed + checked_in + checked_out + canceled)` based on `created_at_guesty` falling in the bucket (so we measure intent during the period, not check-in). Excludes owner.
+- `unit: 'percent'`.
+- Headline = overall rate for the range.
+- Drill-down: list of canceled reservations in window with listing nickname, guest, dates.
 
-## Technical notes
+## Implementation outline
 
-- One-off import via the insert tool — no migration needed.
-- Will run a dry-run SELECT first to show: total parsed, matched to DB, unmatched (with their IDs), and how many will be inserted vs updated. You approve before I write.
-- Won't touch listings that the CSV doesn't mention.
+**`src/lib/kpis/types.ts`**
+- Extend `KpiResult['unit']` to include `'percent'`.
+- `KpiMetric` union gains `'net_growth' | 'owner_concentration' | 'channel_mix' | 'adr' | 'cancellation'`.
 
-## Open question
+**`src/lib/kpis/dataFetcher.ts`**
+- New fetchers: `fetchNetGrowth`, `fetchOwnerConcentration`, `fetchChannelMix`, `fetchAdr`, `fetchCancellationRate`.
+- New drill-down fetchers wired through `KpiDetailSheet` (extend its `metric` switch).
+- Reuse `paginate`, `buildBuckets`, `findBucketIdx`. Net growth reuses `getChurnSignalDate` + listings fetched once.
 
-The CSV spans **Jul 2025 → May 2026** and includes ~154 listings. Should I import **all of them**, or only the ones that are currently still churned in our DB (skip ones that were since reactivated)?
+**`src/components/kpis/KpiCard.tsx`**
+- `formatValue` handles `'percent'` (`(v*100).toFixed(1) + '%'`).
+- Y-axis formatter and tooltip already use `formatValue`.
+
+**`src/components/kpis/KpiDetailSheet.tsx`**
+- Add cases for the 5 new metrics calling their respective `fetch*Detail` functions.
+
+**`src/pages/Kpis.tsx`**
+- Add 5 new `KpiCard` blocks in the grid with appropriate icons (`Users`, `PieChart`, `Banknote`, `XCircle`, `TrendingUp`).
+- Add helpText explaining methodology for each.
+
+## Notes / open assumptions
+- ADR denominator uses summed nights of reservations counted in GBV (consistent with GBV exclusions).
+- Cancellation rate is bucketed by `created_at_guesty` (when the booking was made). If you prefer bucketing by `check_in`, say so and I'll switch it.
+- Owner concentration "top-1 share" is the headline; the meta will also expose Top-5 share + HHI for completeness.
+
+If anything (especially the cancellation date basis or the channel-mix visualization choice) should be different, tell me before I implement.
