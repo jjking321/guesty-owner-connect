@@ -1,66 +1,28 @@
-# Expand KPI Dashboard with 5 New Metrics
+## Add "Revenue per Listing" KPI card
 
-Add five new metric cards to `/kpis`, following the existing `KpiCard` + `fetch*` + drill-down pattern in `src/lib/kpis/dataFetcher.ts` and `src/pages/Kpis.tsx`.
+Add a 10th card to the KPI dashboard showing GBV divided by average active listings for the selected period.
 
-## New metrics
-
-### 1. Net unit growth (line chart)
-Net change per bucket = new active listings added − units churned in that bucket.
-- New: count of `currently active & listed` listings whose `created_at_guesty` falls inside the bucket.
-- Churned: reuse existing churn signal logic (`getChurnSignalDate`) within the bucket.
-- Headline = sum across range. Series shows both lines or a single net line; will use a single net line with compare.
-
-### 2. Owner concentration
-Share of active units owned by the top owner (and Top-5 share in helpText/meta).
-- Join active listings → `owners.owner_id` → count per owner.
-- Headline = `top1_units / total_active` as a percentage (new `unit: 'percent'` added to `KpiResult`).
-- Series = top-1 share over time using snapshots when available, else cumulative backfill (same fallback strategy as listing growth).
-- Drill-down: list owners ranked by unit count with % share.
-
-### 3. Channel mix
-Bar chart of GBV by `source` (Airbnb, Vrbo, Booking.com, Direct, etc.) for the period.
-- Headline = % of GBV from the top channel.
-- Series buckets along time with stacked or grouped bars per channel — to keep the existing `KpiCard` chart shape simple, we'll display a **horizontal-style summary** by using bucketed bars where the primary value = the dominant channel's GBV, plus a `meta.breakdown` array `{ source, gbv, share }` rendered as a small legend under the chart.
-- Excludes owner reservations and non-revenue statuses (matches GBV rules).
-- Drill-down: per-channel totals with reservation counts.
-
-### 4. ADR (Average Daily Rate)
-`sum(subTotal or fare fallback) / sum(nights_count)` for reservations checking in within the bucket. Excludes owner stays and cancellations (same filter as GBV).
-- `unit: 'currency'`.
-- Compare-period supported.
-- Drill-down: per-reservation ADR (value/nights), sorted desc.
-
-### 5. Cancellation rate
-`canceled / (confirmed + checked_in + checked_out + canceled)` based on `created_at_guesty` falling in the bucket (so we measure intent during the period, not check-in). Excludes owner.
-- `unit: 'percent'`.
-- Headline = overall rate for the range.
-- Drill-down: list of canceled reservations in window with listing nickname, guest, dates.
-
-## Implementation outline
+### Changes
 
 **`src/lib/kpis/types.ts`**
-- Extend `KpiResult['unit']` to include `'percent'`.
-- `KpiMetric` union gains `'net_growth' | 'owner_concentration' | 'channel_mix' | 'adr' | 'cancellation'`.
+- Add `'revenue_per_listing'` to the `KpiId` union.
 
 **`src/lib/kpis/dataFetcher.ts`**
-- New fetchers: `fetchNetGrowth`, `fetchOwnerConcentration`, `fetchChannelMix`, `fetchAdr`, `fetchCancellationRate`.
-- New drill-down fetchers wired through `KpiDetailSheet` (extend its `metric` switch).
-- Reuse `paginate`, `buildBuckets`, `findBucketIdx`. Net growth reuses `getChurnSignalDate` + listings fetched once.
-
-**`src/components/kpis/KpiCard.tsx`**
-- `formatValue` handles `'percent'` (`(v*100).toFixed(1) + '%'`).
-- Y-axis formatter and tooltip already use `formatValue`.
-
-**`src/components/kpis/KpiDetailSheet.tsx`**
-- Add cases for the 5 new metrics calling their respective `fetch*Detail` functions.
+- Add a `computeRevenuePerListingSeries` (or extend the GBV/active-listings flow) that, for each bucket in the selected period:
+  - Reuses GBV per bucket (already computed for the GBV card).
+  - Computes average active listings in that bucket (reuse the active-listings series logic).
+  - Returns `gbv / avgActiveListings` per bucket, plus an aggregated value for the headline.
+- Honor the existing "exclude owner reservations" and "active, non-archived listings" rules already enforced elsewhere.
+- Support the existing compare-period logic so the card shows delta vs. prior period.
 
 **`src/pages/Kpis.tsx`**
-- Add 5 new `KpiCard` blocks in the grid with appropriate icons (`Users`, `PieChart`, `Banknote`, `XCircle`, `TrendingUp`).
-- Add helpText explaining methodology for each.
+- Register the new card in the KPI grid (label: "Revenue per Listing", currency formatting, same period/compare controls as the other cards).
+- Wire its detail sheet to show the underlying per-bucket table (GBV, avg active listings, revenue/listing) like the other cards.
+- Include it in the PDF export.
 
-## Notes / open assumptions
-- ADR denominator uses summed nights of reservations counted in GBV (consistent with GBV exclusions).
-- Cancellation rate is bucketed by `created_at_guesty` (when the booking was made). If you prefer bucketing by `check_in`, say so and I'll switch it.
-- Owner concentration "top-1 share" is the headline; the meta will also expose Top-5 share + HHI for completeness.
+**`src/components/kpis/KpiCard.tsx` / `KpiDetailSheet.tsx`**
+- No structural changes expected; just consumes the new series. Only adjust if a new formatter is needed.
 
-If anything (especially the cancellation date basis or the channel-mix visualization choice) should be different, tell me before I implement.
+### Notes
+- Formula: `GBV in period / average active listings in period` (bucketed monthly or per the current aggregation).
+- Excludes owner reservations; only `is_listed = true` listings count toward the denominator — consistent with project memory.
