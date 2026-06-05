@@ -199,12 +199,12 @@ const IDS_PER_REQUEST = 100;
 async function fetchReservationsByIds(
   apiToken: string,
   ids: string[]
-): Promise<Array<{ _id: string; money?: { subTotalPrice?: number } }>> {
+): Promise<Array<{ _id: string; money?: { subTotalPrice?: number; fareAccommodationAdjusted?: number; fareAccommodation?: number } }>> {
   if (ids.length === 0) return [];
   const filters = JSON.stringify([{ field: '_id', operator: '$in', value: ids }]);
   const params = new URLSearchParams({
     filters,
-    fields: '_id money.subTotalPrice',
+    fields: '_id money.subTotalPrice money.fareAccommodationAdjusted money.fareAccommodation',
     limit: String(ids.length),
     skip: '0',
   });
@@ -420,7 +420,14 @@ Deno.serve(async (req) => {
 
         const returnedIds = new Set(results.map((r) => r._id));
         for (const res of results) {
-          const subTotal = res.money?.subTotalPrice;
+          // Prefer Guesty's authoritative subTotalPrice, but fall back to fareAccommodationAdjusted
+          // (or fareAccommodation) so cancelled/manual/legacy reservations stop being re-skipped
+          // on every backfill run.
+          const subTotal =
+            res.money?.subTotalPrice ??
+            res.money?.fareAccommodationAdjusted ??
+            res.money?.fareAccommodation ??
+            null;
           if (subTotal != null) {
             const { error: updateError } = await supabaseAdmin
               .from('reservations').update({ sub_total: subTotal }).eq('id', res._id);
@@ -430,8 +437,27 @@ Deno.serve(async (req) => {
             skipped++;
           }
         }
-        // Ids requested but not returned by Guesty (deleted/inaccessible) → count as skipped
-        skipped += chunk.filter((id) => !returnedIds.has(id)).length;
+        // Ids requested but not returned by Guesty (deleted/inaccessible) — backfill from
+        // the local fare_accommodation_adjusted so they're no longer flagged as missing.
+        const missingFromGuesty = chunk.filter((id) => !returnedIds.has(id));
+        if (missingFromGuesty.length > 0) {
+          const { data: localRows } = await supabaseAdmin
+            .from('reservations')
+            .select('id, fare_accommodation_adjusted')
+            .in('id', missingFromGuesty);
+          for (const row of localRows ?? []) {
+            if (row.fare_accommodation_adjusted != null) {
+              const { error: updErr } = await supabaseAdmin
+                .from('reservations')
+                .update({ sub_total: row.fare_accommodation_adjusted })
+                .eq('id', row.id);
+              if (!updErr) updated++;
+              else skipped++;
+            } else {
+              skipped++;
+            }
+          }
+        }
 
         cursor += chunk.length;
         batchesProcessed++;
@@ -511,7 +537,7 @@ Deno.serve(async (req) => {
     let pagesProcessed = 0;
 
     // Process first page
-    const processPage = async (results: Array<{ _id: string; money?: { subTotalPrice?: number } }>) => {
+    const processPage = async (results: Array<{ _id: string; money?: { subTotalPrice?: number; fareAccommodationAdjusted?: number; fareAccommodation?: number } }>) => {
       const updates: { id: string; sub_total: number }[] = [];
       for (const res of results) {
         // In onlyMissing mode, skip reservations that already have sub_total in DB.
@@ -519,8 +545,14 @@ Deno.serve(async (req) => {
           skipped++;
           continue;
         }
-        const subTotal = res.money?.subTotalPrice;
-        if (subTotal != null && subTotal !== undefined) {
+        // Prefer Guesty's subTotalPrice; fall back to fareAccommodationAdjusted so
+        // legacy/manual reservations stop being re-skipped on every run.
+        const subTotal =
+          res.money?.subTotalPrice ??
+          res.money?.fareAccommodationAdjusted ??
+          res.money?.fareAccommodation ??
+          null;
+        if (subTotal != null) {
           updates.push({ id: res._id, sub_total: subTotal });
         } else {
           skipped++;
