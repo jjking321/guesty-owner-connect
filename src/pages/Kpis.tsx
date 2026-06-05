@@ -220,7 +220,7 @@ export default function Kpis() {
           />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div ref={exportRef} className="grid grid-cols-1 lg:grid-cols-2 gap-6 bg-background p-2 rounded-lg">
           <KpiCard
             title="Active & listed units"
             description="Currently listed on a channel and enabled in Guesty"
