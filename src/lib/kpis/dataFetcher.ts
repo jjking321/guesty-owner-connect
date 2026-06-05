@@ -120,22 +120,7 @@ async function computeGbvSeries(
   range: ResolvedRange,
   buckets: Bucket[],
 ): Promise<{ points: SeriesPoint[]; meta: { totalReservations: number; withSubTotal: number; usedFallback: number } }> {
-  const { start, end } = rangeISO(range);
-  const all: any[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('reservations')
-      .select('check_in, sub_total, fare_accommodation_adjusted, source, status')
-      .gte('check_in', start)
-      .lte('check_in', end)
-      .range(from, from + BATCH - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    all.push(...data);
-    if (data.length < BATCH) break;
-    from += BATCH;
-  }
+  const all = await getReservationsByCheckIn(range);
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   let totalReservations = 0, withSubTotal = 0, usedFallback = 0;
   for (const r of all) {
