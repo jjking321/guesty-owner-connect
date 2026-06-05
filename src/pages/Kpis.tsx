@@ -39,6 +39,80 @@ export default function Kpis() {
   const [reviewMode, setReviewMode] = useState<ReviewScoreMode>('period');
 
   const [drilldown, setDrilldown] = useState<{ metric: KpiMetric; window: BucketWindow; label: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+
+  const exportPdf = async () => {
+    if (!exportRef.current) return;
+    setExporting(true);
+    try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ]);
+      const canvas = await html2canvas(exportRef.current, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
+      const img = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const headerH = 70;
+      // Header banner
+      pdf.setFillColor(15, 23, 42);
+      pdf.rect(0, 0, pageW, headerH, 'F');
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(22);
+      pdf.text('RevMan', 32, 38);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(11);
+      pdf.text('KPI Dashboard', 32, 56);
+      pdf.setFontSize(9);
+      pdf.text(`${resolved.label} · Generated ${new Date().toLocaleString()}`, pageW - 32, 56, { align: 'right' });
+      // Content image, fit width
+      const margin = 24;
+      const contentW = pageW - margin * 2;
+      const imgH = (canvas.height * contentW) / canvas.width;
+      let y = headerH + 16;
+      let remaining = imgH;
+      let srcY = 0;
+      const pageContentH = pageH - y - 24;
+      const ratio = canvas.width / contentW;
+      // Slice the canvas into pages
+      while (remaining > 0) {
+        const sliceH = Math.min(pageContentH, remaining);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceH * ratio;
+        const ctx = sliceCanvas.getContext('2d')!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, srcY, canvas.width, sliceCanvas.height, 0, 0, sliceCanvas.width, sliceCanvas.height);
+        pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', margin, y, contentW, sliceH);
+        srcY += sliceCanvas.height;
+        remaining -= sliceH;
+        if (remaining > 0) {
+          pdf.addPage();
+          // Reprint header on each page
+          pdf.setFillColor(15, 23, 42);
+          pdf.rect(0, 0, pageW, headerH, 'F');
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(22);
+          pdf.text('RevMan', 32, 38);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(11);
+          pdf.text('KPI Dashboard', 32, 56);
+          y = headerH + 16;
+        }
+      }
+      pdf.save(`revman-kpis-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (e: any) {
+      toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const resolved = useMemo(() => resolveRange(range), [range]);
   const compareResolved = useMemo(() => resolveCompare(resolved, compare), [resolved, compare]);
