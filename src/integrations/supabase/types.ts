@@ -1171,20 +1171,29 @@ export type Database = {
       }
       organizations: {
         Row: {
+          brand_primary_color: string | null
+          brand_secondary_color: string | null
           created_at: string
           id: string
+          logo_url: string | null
           name: string
           updated_at: string
         }
         Insert: {
+          brand_primary_color?: string | null
+          brand_secondary_color?: string | null
           created_at?: string
           id?: string
+          logo_url?: string | null
           name: string
           updated_at?: string
         }
         Update: {
+          brand_primary_color?: string | null
+          brand_secondary_color?: string | null
           created_at?: string
           id?: string
+          logo_url?: string | null
           name?: string
           updated_at?: string
         }
