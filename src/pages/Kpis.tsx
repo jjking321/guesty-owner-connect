@@ -55,8 +55,6 @@ export default function Kpis() {
         import('html2canvas'),
         import('jspdf'),
       ]);
-      const canvas = await html2canvas(exportRef.current, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
-      const img = canvas.toDataURL('image/png');
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
       const pageW = pdf.internal.pageSize.getWidth();
       const pageH = pdf.internal.pageSize.getHeight();
@@ -101,36 +99,51 @@ export default function Kpis() {
         pdf.text('KPI Dashboard', textX, 56);
         pdf.setFontSize(9);
         pdf.text(`${resolved.label} · Generated ${new Date().toLocaleString()}`, pageW - 32, 56, { align: 'right' });
+        pdf.setTextColor(0, 0, 0);
       };
 
       drawHeader();
-      // Content image, fit width
+
+      // Render each KPI card individually so cards never get split across pages.
       const margin = 24;
-      const contentW = pageW - margin * 2;
-      const imgH = (canvas.height * contentW) / canvas.width;
-      let y = headerH + 16;
-      let remaining = imgH;
-      let srcY = 0;
-      const pageContentH = pageH - y - 24;
-      const ratio = canvas.width / contentW;
-      while (remaining > 0) {
-        const sliceH = Math.min(pageContentH, remaining);
-        const sliceCanvas = document.createElement('canvas');
-        sliceCanvas.width = canvas.width;
-        sliceCanvas.height = sliceH * ratio;
-        const ctx = sliceCanvas.getContext('2d')!;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
-        ctx.drawImage(canvas, 0, srcY, canvas.width, sliceCanvas.height, 0, 0, sliceCanvas.width, sliceCanvas.height);
-        pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', margin, y, contentW, sliceH);
-        srcY += sliceCanvas.height;
-        remaining -= sliceH;
-        if (remaining > 0) {
+      const gap = 12;
+      const colW = (pageW - margin * 2 - gap) / 2;
+      const pageTop = headerH + 16;
+      const pageBottom = pageH - 24;
+
+      const cards = Array.from(
+        exportRef.current.querySelectorAll<HTMLElement>('[data-kpi-card]')
+      );
+
+      type Rendered = { dataUrl: string; w: number; h: number };
+      const rendered: Rendered[] = [];
+      for (const node of cards) {
+        const c = await html2canvas(node, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
+        const h = (c.height * colW) / c.width;
+        rendered.push({ dataUrl: c.toDataURL('image/png'), w: colW, h });
+      }
+
+      // Two-column packing: place cards left/right. Row height = max of the pair.
+      // If the row doesn't fit on the current page, start a new page.
+      let y = pageTop;
+      for (let i = 0; i < rendered.length; i += 2) {
+        const left = rendered[i];
+        const right = rendered[i + 1];
+        const rowH = Math.max(left.h, right?.h ?? 0);
+
+        if (y + rowH > pageBottom) {
           pdf.addPage();
           drawHeader();
-          y = headerH + 16;
+          y = pageTop;
         }
+
+        pdf.addImage(left.dataUrl, 'PNG', margin, y, left.w, left.h);
+        if (right) {
+          pdf.addImage(right.dataUrl, 'PNG', margin + colW + gap, y, right.w, right.h);
+        }
+        y += rowH + gap;
       }
+
       pdf.save(`${(branding.name || 'kpis').toLowerCase().replace(/\s+/g, '-')}-kpis-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (e: any) {
       toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
