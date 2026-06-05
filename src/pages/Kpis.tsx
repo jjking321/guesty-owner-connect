@@ -247,7 +247,7 @@ export default function Kpis() {
             title="Channel mix"
             description="Top channel's share of GBV"
             helpText="Reservations are grouped by source into Airbnb, Vrbo/HomeAway, Booking.com, Direct, and Other. The bar shows the dominant channel's GBV share per bucket; the drill-down lists each channel with reservation counts and GBV."
-            icon={PieChart}
+            icon={PieIcon}
             result={channelMixQ.data}
             isLoading={channelMixQ.isLoading}
             error={channelMixQ.error as Error | null}
