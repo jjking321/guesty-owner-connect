@@ -42,7 +42,7 @@ function formatValue(v: number, unit: KpiResult['unit']): string {
 export function KpiCard({
   title, icon: Icon, result, isLoading, error,
   primaryLabel, compareLabel, chartType = 'line', rightSlot,
-  description, helpText, onSelectBucket, onClickHeadline,
+  description, helpText, onSelectBucket, onClickHeadline, customBody,
 }: Props) {
   const delta =
     result?.compareTotal !== undefined && result.compareTotal !== 0
