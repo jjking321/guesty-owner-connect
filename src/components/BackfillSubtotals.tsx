@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery } from "@tanstack/react-query";
 import { useUserRole } from "@/hooks/useUserRole";
@@ -82,6 +82,10 @@ export function BackfillSubtotals() {
       return Object.fromEntries(counts);
     },
   });
+
+  useEffect(() => {
+    setSelectedMonths(monthOptions.map((m) => m.value));
+  }, [monthOptions]);
 
   const toggleMonth = (month: string) => {
     setSelectedMonths((prev) =>
