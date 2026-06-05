@@ -455,7 +455,7 @@ Deno.serve(async (req) => {
           'Authorization': `Bearer ${serviceRoleKey}`,
           'x-service-role': 'true',
         },
-        body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId, skipOffset: currentSkip }),
+        body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId, skipOffset: currentSkip, onlyMissing }),
       }).catch(err => console.error('Self-invoke error:', err));
 
       return new Response(JSON.stringify({
