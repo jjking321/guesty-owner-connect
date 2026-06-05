@@ -83,6 +83,10 @@ export function BackfillSubtotals() {
     },
   });
 
+  useEffect(() => {
+    setSelectedMonths(monthOptions.map((m) => m.value));
+  }, [monthOptions]);
+
   const toggleMonth = (month: string) => {
     setSelectedMonths((prev) =>
       prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
