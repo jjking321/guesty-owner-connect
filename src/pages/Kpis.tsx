@@ -6,10 +6,11 @@ import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
 import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
 import { BackfillSubtotals } from '@/components/BackfillSubtotals';
-import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal } from 'lucide-react';
+import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart, Banknote, XCircle } from 'lucide-react';
 import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
   fetchListingGrowth, fetchGbv, fetchChurn, fetchReviewScore, type ReviewScoreMode,
+  fetchNetGrowth, fetchOwnerConcentration, fetchChannelMix, fetchAdr, fetchCancellationRate,
   type BucketWindow,
 } from '@/lib/kpis/dataFetcher';
 import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis/types';
@@ -20,6 +21,11 @@ const TITLES: Record<KpiMetric, string> = {
   gbv: 'Gross Booking Value',
   churn: 'Churned units',
   reviews: 'Guest review score',
+  net_growth: 'Net unit growth',
+  owner_concentration: 'Owner concentration',
+  channel_mix: 'Channel mix',
+  adr: 'Average Daily Rate',
+  cancellation: 'Cancellation rate',
 };
 
 export default function Kpis() {
