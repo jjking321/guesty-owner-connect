@@ -868,13 +868,7 @@ export async function fetchCancellationRate(
 }
 
 async function computeCancellationSeries(range: ResolvedRange, buckets: Bucket[]) {
-  const startIso = range.start.toISOString();
-  const endIso = range.end.toISOString();
-  const all = await paginate(
-    supabase.from('reservations')
-      .select('created_at_guesty, status, source')
-      .gte('created_at_guesty', startIso).lte('created_at_guesty', endIso)
-  );
+  const all = await getReservationsByCreatedAt(range);
   const counts = buckets.map(() => ({ canc: 0, denom: 0 }));
   let totalCanc = 0, totalDenom = 0;
   for (const r of all) {
