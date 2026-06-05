@@ -262,9 +262,9 @@ export default function Kpis() {
             aggregation={aggregation}
             range={range}
             compare={compare}
-            onAggregationChange={setAggregation}
-            onRangeChange={setRange}
-            onCompareChange={setCompare}
+            onAggregationChange={handleAggregationChange}
+            onRangeChange={handleRangeChange}
+            onCompareChange={handleCompareChange}
           />
         </div>
 
