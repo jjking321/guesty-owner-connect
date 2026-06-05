@@ -1,28 +1,44 @@
-## Add "Revenue per Listing" KPI card
+## Goal
 
-Add a 10th card to the KPI dashboard showing GBV divided by average active listings for the selected period.
+Right now the KPI dashboard fires ~20 independent queries that each paginate the same big tables. We're going to share fetches so each table is pulled once per range, dramatically cutting load time.
 
-### Changes
+## What's slow today
 
-**`src/lib/kpis/types.ts`**
-- Add `'revenue_per_listing'` to the `KpiId` union.
+Each KPI card runs its own data fetcher in parallel. Several of them pull the **same data**:
 
-**`src/lib/kpis/dataFetcher.ts`**
-- Add a `computeRevenuePerListingSeries` (or extend the GBV/active-listings flow) that, for each bucket in the selected period:
-  - Reuses GBV per bucket (already computed for the GBV card).
-  - Computes average active listings in that bucket (reuse the active-listings series logic).
-  - Returns `gbv / avgActiveListings` per bucket, plus an aggregated value for the headline.
-- Honor the existing "exclude owner reservations" and "active, non-archived listings" rules already enforced elsewhere.
-- Support the existing compare-period logic so the card shows delta vs. prior period.
+- `reservations` (in the selected range) is paginated separately by: GBV, Channel mix, ADR, Cancellation rate, Revenue per listing → ~5× the work, doubled when comparing to last year (10× total).
+- `listings` (full table) is paginated separately by: Listing growth, Churn, Net growth, Owner concentration, Revenue per listing → ~5× the work.
+- `listing_churn_events` is fetched twice (Churn + Net growth).
 
-**`src/pages/Kpis.tsx`**
-- Register the new card in the KPI grid (label: "Revenue per Listing", currency formatting, same period/compare controls as the other cards).
-- Wire its detail sheet to show the underlying per-bucket table (GBV, avg active listings, revenue/listing) like the other cards.
-- Include it in the PDF export.
+With ~73k reservations and a YTD + compare range, that's the main bottleneck.
 
-**`src/components/kpis/KpiCard.tsx` / `KpiDetailSheet.tsx`**
-- No structural changes expected; just consumes the new series. Only adjust if a new formatter is needed.
+## Plan — shared in-memory cache
 
-### Notes
-- Formula: `GBV in period / average active listings in period` (bucketed monthly or per the current aggregation).
-- Excludes owner reservations; only `is_listed = true` listings count toward the denominator — consistent with project memory.
+1. **Add a shared loader module** `src/lib/kpis/sharedData.ts` with:
+   - `getReservationsForRange(start, end)` — paginates `reservations` once, caches the array keyed by the ISO range, returns the same promise to all concurrent callers.
+   - `getAllListings()` — same pattern for the full listings table.
+   - `getChurnEvents()` — same pattern for open + ignored churn events.
+   - Cache lives in module scope and is cleared when the user changes the date range / aggregation / compare (we'll expose a `clearKpiCache()` and call it from `Kpis.tsx` when those controls change).
+
+2. **Refactor the affected fetchers** in `src/lib/kpis/dataFetcher.ts` to read from the shared loaders instead of paginating themselves:
+   - `computeGbvSeries`, `computeChannelMixSeries`, `computeAdrSeries`, `computeCancellationSeries`, `computeRevenuePerListingSeries` → use `getReservationsForRange`.
+   - `fetchListingGrowth`, `computeChurnSeries`, `computeNetGrowthSeries`, `computeOwnerConcentrationSeries`, revenue-per-listing's listings call → use `getAllListings`.
+   - `computeChurnSeries` and `computeNetGrowthSeries` → use `getChurnEvents`.
+   - Drill-down detail fetchers (`fetchGbvDetail`, etc.) keep their own narrower fetches — those are user-triggered, not blocking the dashboard.
+
+3. **Result:** for a YTD + compare-last-year load, reservations get paginated **twice** instead of ten times, listings get paginated **once** instead of five times. Expected ~3–5× faster initial render.
+
+4. **No DB changes, no schema migrations.** Pure frontend refactor.
+
+## Backfill fallback (deferred)
+
+Holding on this until you check the 5 sample reservations above in Guesty. Two outcomes:
+
+- **Guesty has subTotal but our backfill missed it** → bug in the fast-path fetch; I'll fix the function.
+- **Guesty truly has no subTotal** → I'll add a small "checked, no subtotal" mark so re-runs don't keep flagging them, and surface "N reservations permanently use fare fallback" in the GBV card tooltip.
+
+## Files touched
+
+- `src/lib/kpis/sharedData.ts` (new)
+- `src/lib/kpis/dataFetcher.ts` (refactor ~10 fetcher functions to use shared loaders)
+- `src/pages/Kpis.tsx` (call `clearKpiCache()` when range/aggregation/compare changes)
