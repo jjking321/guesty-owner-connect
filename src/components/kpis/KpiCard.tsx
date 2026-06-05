@@ -22,6 +22,7 @@ interface Props {
   helpText?: string;
   onSelectBucket?: (bucketStart: Date, bucketEnd: Date | null, bucketLabel: string) => void;
   onClickHeadline?: () => void;
+  customBody?: React.ReactNode;
 }
 
 function formatValue(v: number, unit: KpiResult['unit']): string {
