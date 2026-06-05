@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { KpiControls } from '@/components/kpis/KpiControls';
@@ -6,9 +6,11 @@ import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
 import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
 import { BackfillSubtotals } from '@/components/BackfillSubtotals';
-import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart, Banknote, XCircle, Settings } from 'lucide-react';
+import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart as PieIcon, Banknote, XCircle, Settings, FileDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as RTooltip, Legend } from 'recharts';
+import { useToast } from '@/hooks/use-toast';
 import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
   fetchListingGrowth, fetchGbv, fetchChurn, fetchReviewScore, type ReviewScoreMode,
@@ -37,6 +39,80 @@ export default function Kpis() {
   const [reviewMode, setReviewMode] = useState<ReviewScoreMode>('period');
 
   const [drilldown, setDrilldown] = useState<{ metric: KpiMetric; window: BucketWindow; label: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+
+  const exportPdf = async () => {
+    if (!exportRef.current) return;
+    setExporting(true);
+    try {
+      const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ]);
+      const canvas = await html2canvas(exportRef.current, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
+      const img = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const headerH = 70;
+      // Header banner
+      pdf.setFillColor(15, 23, 42);
+      pdf.rect(0, 0, pageW, headerH, 'F');
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(22);
+      pdf.text('RevMan', 32, 38);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(11);
+      pdf.text('KPI Dashboard', 32, 56);
+      pdf.setFontSize(9);
+      pdf.text(`${resolved.label} · Generated ${new Date().toLocaleString()}`, pageW - 32, 56, { align: 'right' });
+      // Content image, fit width
+      const margin = 24;
+      const contentW = pageW - margin * 2;
+      const imgH = (canvas.height * contentW) / canvas.width;
+      let y = headerH + 16;
+      let remaining = imgH;
+      let srcY = 0;
+      const pageContentH = pageH - y - 24;
+      const ratio = canvas.width / contentW;
+      // Slice the canvas into pages
+      while (remaining > 0) {
+        const sliceH = Math.min(pageContentH, remaining);
+        const sliceCanvas = document.createElement('canvas');
+        sliceCanvas.width = canvas.width;
+        sliceCanvas.height = sliceH * ratio;
+        const ctx = sliceCanvas.getContext('2d')!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+        ctx.drawImage(canvas, 0, srcY, canvas.width, sliceCanvas.height, 0, 0, sliceCanvas.width, sliceCanvas.height);
+        pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', margin, y, contentW, sliceH);
+        srcY += sliceCanvas.height;
+        remaining -= sliceH;
+        if (remaining > 0) {
+          pdf.addPage();
+          // Reprint header on each page
+          pdf.setFillColor(15, 23, 42);
+          pdf.rect(0, 0, pageW, headerH, 'F');
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(22);
+          pdf.text('RevMan', 32, 38);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(11);
+          pdf.text('KPI Dashboard', 32, 56);
+          y = headerH + 16;
+        }
+      }
+      pdf.save(`revman-kpis-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (e: any) {
+      toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const resolved = useMemo(() => resolveRange(range), [range]);
   const compareResolved = useMemo(() => resolveCompare(resolved, compare), [resolved, compare]);
@@ -106,23 +182,30 @@ export default function Kpis() {
               Track key business metrics over time. {resolved.label}
             </p>
           </div>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="icon" aria-label="Settings">
-                <Settings className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-[420px]">
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold">Backfill Gross Booking Value</h3>
-                <p className="text-xs text-muted-foreground">
-                  GBV uses Guesty's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">money.subTotal</code> when available.
-                  Run a backfill for any months still falling back to fare-only revenue.
-                </p>
-                <BackfillSubtotals />
-              </div>
-            </PopoverContent>
-          </Popover>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={exportPdf} disabled={exporting}>
+              <FileDown className="h-4 w-4 mr-1" />
+              {exporting ? 'Exporting…' : 'Export PDF'}
+            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="Settings">
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-[420px]">
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold">Backfill Gross Booking Value</h3>
+                  <p className="text-xs text-muted-foreground">
+                    GBV uses Guesty's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">money.subTotal</code> when available.
+                    Run a backfill for any months still falling back to fare-only revenue.
+                  </p>
+                  <BackfillSubtotals />
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+
         </div>
 
 
@@ -137,7 +220,7 @@ export default function Kpis() {
           />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div ref={exportRef} className="grid grid-cols-1 lg:grid-cols-2 gap-6 bg-background p-2 rounded-lg">
           <KpiCard
             title="Active & listed units"
             description="Currently listed on a channel and enabled in Guesty"
@@ -230,7 +313,7 @@ export default function Kpis() {
           <KpiCard
             title="Owner concentration"
             description="Share of portfolio held by top owner"
-            helpText="Largest owner's share of currently active & listed units, as of the end of each bucket. The drill-down lists every owner with their unit count and portfolio share."
+            helpText="Largest owner's share of currently active & listed units. Click any owner to see all owners."
             icon={Users}
             result={ownerConcQ.data}
             isLoading={ownerConcQ.isLoading}
@@ -238,23 +321,24 @@ export default function Kpis() {
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="line"
-            onSelectBucket={openBucket('owner_concentration')}
             onClickHeadline={openHeadline('owner_concentration')}
+            customBody={<OwnerConcentrationList data={ownerConcQ.data} onOpen={openHeadline('owner_concentration')} />}
           />
           <KpiCard
             title="Channel mix"
-            description="Top channel's share of GBV"
-            helpText="Reservations are grouped by source into Airbnb, Vrbo/HomeAway, Booking.com, Direct, and Other. The bar shows the dominant channel's GBV share per bucket; the drill-down lists each channel with reservation counts and GBV."
-            icon={PieChart}
+            description="GBV share by channel"
+            helpText="Reservations grouped by source (Airbnb, Vrbo/HomeAway, Booking.com, Direct, Other). Click a slice to drill into all channels."
+            icon={PieIcon}
             result={channelMixQ.data}
             isLoading={channelMixQ.isLoading}
             error={channelMixQ.error as Error | null}
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="bar"
-            onSelectBucket={openBucket('channel_mix')}
             onClickHeadline={openHeadline('channel_mix')}
+            customBody={<ChannelMixPie data={channelMixQ.data} onOpen={openHeadline('channel_mix')} />}
           />
+
           <KpiCard
             title="Average Daily Rate"
             description="GBV per booked night"
@@ -298,3 +382,60 @@ export default function Kpis() {
     </DashboardLayout>
   );
 }
+
+const PIE_COLORS = ['hsl(var(--primary))', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#94a3b8'];
+
+function ChannelMixPie({ data, onOpen }: { data: any; onOpen: () => void }) {
+  const breakdown = (data?.meta?.breakdown ?? []) as Array<{ name: string; gbv: number; share: number }>;
+  if (!breakdown.length) return <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">No channel data</div>;
+  return (
+    <div className="h-56 cursor-pointer" onClick={onOpen} title="Click for full breakdown">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={breakdown}
+            dataKey="gbv"
+            nameKey="name"
+            cx="40%"
+            cy="50%"
+            outerRadius={75}
+            label={(d: any) => `${(d.share * 100).toFixed(0)}%`}
+            labelLine={false}
+          >
+            {breakdown.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+          </Pie>
+          <RTooltip formatter={(v: any, _n: any, p: any) => [`$${Number(v).toLocaleString()} · ${(p.payload.share * 100).toFixed(1)}%`, p.payload.name]} />
+          <Legend layout="vertical" verticalAlign="middle" align="right" iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function OwnerConcentrationList({ data, onOpen }: { data: any; onOpen: () => void }) {
+  const breakdown = (data?.meta?.breakdown ?? []) as Array<[string, number]>;
+  const total = breakdown.reduce((a, [, n]) => a + n, 0);
+  if (!breakdown.length) return <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">No owner data</div>;
+  return (
+    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 cursor-pointer" onClick={onOpen} title="Click for full list">
+      {breakdown.slice(0, 10).map(([ownerId, count]) => {
+        const pct = total > 0 ? (count / total) * 100 : 0;
+        return (
+          <div key={ownerId} className="space-y-0.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="truncate font-medium" title={ownerId}>{ownerId.slice(0, 18)}{ownerId.length > 18 ? '…' : ''}</span>
+              <span className="text-muted-foreground tabular-nums">{count} · {pct.toFixed(1)}%</span>
+            </div>
+            <div className="h-1.5 rounded bg-muted overflow-hidden">
+              <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      })}
+      {breakdown.length > 10 && (
+        <p className="text-[10px] text-muted-foreground pt-1">+ {breakdown.length - 10} more · click to see all</p>
+      )}
+    </div>
+  );
+}
+

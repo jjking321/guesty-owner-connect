@@ -22,6 +22,7 @@ interface Props {
   helpText?: string;
   onSelectBucket?: (bucketStart: Date, bucketEnd: Date | null, bucketLabel: string) => void;
   onClickHeadline?: () => void;
+  customBody?: React.ReactNode;
 }
 
 function formatValue(v: number, unit: KpiResult['unit']): string {
@@ -41,7 +42,7 @@ function formatValue(v: number, unit: KpiResult['unit']): string {
 export function KpiCard({
   title, icon: Icon, result, isLoading, error,
   primaryLabel, compareLabel, chartType = 'line', rightSlot,
-  description, helpText, onSelectBucket, onClickHeadline,
+  description, helpText, onSelectBucket, onClickHeadline, customBody,
 }: Props) {
   const delta =
     result?.compareTotal !== undefined && result.compareTotal !== 0
@@ -129,7 +130,9 @@ export function KpiCard({
           </div>
         ) : null}
 
-        {result && result.series.length > 0 && (() => {
+        {customBody}
+
+        {!customBody && result && result.series.length > 0 && (() => {
           // For rating unit, zoom Y-axis tightly to data range so MoM changes are visible.
           let yDomain: [number | string, number | string] = ['auto', 'auto'];
           let yTicks: number[] | undefined;
