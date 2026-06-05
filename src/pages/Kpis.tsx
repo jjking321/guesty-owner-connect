@@ -48,6 +48,11 @@ export default function Kpis() {
   const { toast } = useToast();
   const branding = useOrgBranding();
 
+  // Invalidate shared loader cache whenever the inputs change so we refetch fresh data.
+  const handleRangeChange = (r: KpiRange) => { clearKpiCache(); setRange(r); };
+  const handleAggregationChange = (a: Aggregation) => { clearKpiCache(); setAggregation(a); };
+  const handleCompareChange = (c: ComparePreset) => { clearKpiCache(); setCompare(c); };
+
   const exportPdf = async () => {
     if (!exportRef.current) return;
     setExporting(true);
