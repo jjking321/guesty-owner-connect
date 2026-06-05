@@ -223,8 +223,9 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { guestyAccountId, jobId: existingJobId, skipOffset } = body;
+    const { guestyAccountId, jobId: existingJobId, skipOffset, onlyMissing: onlyMissingRaw } = body;
     const checkOutMonths = body.checkOutMonths || body.checkInMonths;
+    const onlyMissing = onlyMissingRaw === true;
 
     if (!guestyAccountId) {
       return new Response(JSON.stringify({ error: 'guestyAccountId is required' }), {
@@ -275,8 +276,53 @@ Deno.serve(async (req) => {
     const overallStart = dateFilters.reduce((min, d) => d.start < min ? d.start : min, dateFilters[0].start);
     const overallEnd = dateFilters.reduce((max, d) => d.end > max ? d.end : max, dateFilters[0].end);
 
-    console.log(`Backfilling sub_total for check-out months: ${checkOutMonths.join(', ')}`);
+    console.log(`Backfilling sub_total for check-out months: ${checkOutMonths.join(', ')} (onlyMissing=${onlyMissing})`);
     console.log(`Date range: ${overallStart} to ${overallEnd}`);
+
+    // Preload missing-id set when onlyMissing is enabled, so we only touch reservations
+    // that still lack sub_total. Uses batched fetching to bypass the 1000-row limit.
+    let missingIds: Set<string> | null = null;
+    if (onlyMissing) {
+      missingIds = new Set<string>();
+      const PAGE = 1000;
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabaseAdmin
+          .from('reservations')
+          .select('id')
+          .eq('guesty_account_id', guestyAccountId)
+          .is('sub_total', null)
+          .gte('check_out', overallStart)
+          .lte('check_out', overallEnd)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        for (const r of data) missingIds.add(r.id);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      console.log(`onlyMissing: ${missingIds.size} reservations in DB need sub_total`);
+      if (missingIds.size === 0 && !existingJobId) {
+        // Nothing to do — record a completed job for visibility and exit.
+        const { data: noopJob } = await supabaseAdmin
+          .from('sync_jobs')
+          .insert({
+            guesty_account_id: guestyAccountId,
+            sync_type: 'backfill_subtotals',
+            status: 'completed',
+            progress_message: 'No reservations missing sub_total in selected months.',
+            total_items: 0,
+            items_synced: 0,
+            completed_at: new Date().toISOString(),
+          })
+          .select('id')
+          .single();
+        return new Response(JSON.stringify({
+          message: 'No reservations missing sub_total in selected months',
+          updated: 0, skipped: 0, pagesProcessed: 0, totalFromGuesty: 0, jobId: noopJob?.id,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    }
 
     // First page fetch to get total count from Guesty
     let currentSkip = skipOffset || 0;
@@ -294,7 +340,9 @@ Deno.serve(async (req) => {
           guesty_account_id: guestyAccountId,
           sync_type: 'backfill_subtotals',
           status: 'running',
-          progress_message: `Starting sub_total backfill (${totalFromGuesty} reservations from Guesty)...`,
+          progress_message: onlyMissing
+            ? `Starting sub_total backfill (only-missing mode: ${missingIds!.size} target rows; scanning ${totalFromGuesty} from Guesty)...`
+            : `Starting sub_total backfill (${totalFromGuesty} reservations from Guesty)...`,
           total_items: totalFromGuesty,
           items_synced: currentSkip,
         })
@@ -314,6 +362,11 @@ Deno.serve(async (req) => {
     const processPage = async (results: Array<{ _id: string; money?: { subTotalPrice?: number } }>) => {
       const updates: { id: string; sub_total: number }[] = [];
       for (const res of results) {
+        // In onlyMissing mode, skip reservations that already have sub_total in DB.
+        if (missingIds && !missingIds.has(res._id)) {
+          skipped++;
+          continue;
+        }
         const subTotal = res.money?.subTotalPrice;
         if (subTotal != null && subTotal !== undefined) {
           updates.push({ id: res._id, sub_total: subTotal });
@@ -336,6 +389,7 @@ Deno.serve(async (req) => {
         }
       }
     };
+
 
     if (firstPage.results.length > 0) {
       const sample = firstPage.results[0];
