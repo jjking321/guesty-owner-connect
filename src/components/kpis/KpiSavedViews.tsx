@@ -90,12 +90,14 @@ export function KpiSavedViews({ current, onApply, onDefaultLoaded }: Props) {
       }
 
       const { error } = await supabase.from('kpi_saved_views').upsert(
-        {
-          user_id: userData.user.id,
-          name: trimmed,
-          config: current as unknown as Record<string, unknown>,
-          is_default: makeDefault,
-        },
+        [
+          {
+            user_id: userData.user.id,
+            name: trimmed,
+            config: current as unknown as Record<string, unknown>,
+            is_default: makeDefault,
+          },
+        ],
         { onConflict: 'user_id,name' },
       );
       if (error) throw error;
