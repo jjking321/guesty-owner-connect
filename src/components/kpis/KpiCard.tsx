@@ -31,6 +31,8 @@ function formatValue(v: number, unit: KpiResult['unit']): string {
       return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
     case 'rating':
       return v.toFixed(2);
+    case 'percent':
+      return `${(v * 100).toFixed(1)}%`;
     default:
       return Math.round(v).toLocaleString('en-US');
   }
