@@ -182,23 +182,30 @@ export default function Kpis() {
               Track key business metrics over time. {resolved.label}
             </p>
           </div>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="icon" aria-label="Settings">
-                <Settings className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-[420px]">
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold">Backfill Gross Booking Value</h3>
-                <p className="text-xs text-muted-foreground">
-                  GBV uses Guesty's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">money.subTotal</code> when available.
-                  Run a backfill for any months still falling back to fare-only revenue.
-                </p>
-                <BackfillSubtotals />
-              </div>
-            </PopoverContent>
-          </Popover>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={exportPdf} disabled={exporting}>
+              <FileDown className="h-4 w-4 mr-1" />
+              {exporting ? 'Exporting…' : 'Export PDF'}
+            </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="icon" aria-label="Settings">
+                  <Settings className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-[420px]">
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold">Backfill Gross Booking Value</h3>
+                  <p className="text-xs text-muted-foreground">
+                    GBV uses Guesty's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">money.subTotal</code> when available.
+                    Run a backfill for any months still falling back to fare-only revenue.
+                  </p>
+                  <BackfillSubtotals />
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+
         </div>
 
 
