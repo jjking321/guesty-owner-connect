@@ -9,6 +9,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import {
   fetchListingDetail, fetchGbvDetail, fetchChurnDetail, fetchReviewDetail,
+  fetchNetGrowthDetail, fetchOwnerConcentrationDetail, fetchChannelMixDetail,
+  fetchAdrDetail, fetchCancellationDetail,
   type BucketWindow,
 } from '@/lib/kpis/dataFetcher';
 import type { KpiMetric, KpiDetailRow } from '@/lib/kpis/types';
