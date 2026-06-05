@@ -54,6 +54,14 @@ export default function Kpis() {
   const handleAggregationChange = (a: Aggregation) => { clearKpiCache(); setAggregation(a); };
   const handleCompareChange = (c: ComparePreset) => { clearKpiCache(); setCompare(c); };
 
+  const applyView = (config: KpiViewConfig) => {
+    clearKpiCache();
+    if (config.aggregation) setAggregation(config.aggregation);
+    if (config.range) setRange(config.range);
+    if (config.compare) setCompare(config.compare);
+    if (config.reviewMode) setReviewMode(config.reviewMode);
+  };
+
   const exportPdf = async () => {
     if (!exportRef.current) return;
     setExporting(true);
