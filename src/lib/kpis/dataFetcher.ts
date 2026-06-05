@@ -996,3 +996,85 @@ export async function fetchCancellationDetail(window: BucketWindow): Promise<Kpi
     date: r.created_at_guesty,
   })).sort((a, b) => new Date(b.date!).getTime() - new Date(a.date!).getTime());
 }
+
+// ---------- Revenue per Listing ----------
+export async function fetchRevenuePerListing(
+  range: ResolvedRange,
+  agg: Aggregation,
+  compare: ResolvedRange | null,
+): Promise<KpiResult> {
+  const buckets = buildBuckets(range.start, range.end, agg);
+  const primary = await computeRevenuePerListingSeries(range, buckets);
+  let compareSeries: SeriesPoint[] | null = null;
+  let compareTotal: number | undefined;
+  if (compare) {
+    const cBuckets = buildBuckets(compare.start, compare.end, agg);
+    const cmp = await computeRevenuePerListingSeries(compare, cBuckets);
+    compareSeries = cmp.series;
+    compareTotal = cmp.total;
+    for (let i = 0; i < primary.series.length; i++) {
+      if (compareSeries[i]) {
+        primary.series[i].compareValue = compareSeries[i].value;
+        primary.series[i].compareBucket = compareSeries[i].bucket;
+        primary.series[i].compareBucketStart = compareSeries[i].bucketStart;
+        primary.series[i].compareBucketEnd = compareSeries[i].bucketEnd;
+      }
+    }
+  }
+  return { total: primary.total, compareTotal, series: primary.series, unit: 'currency' };
+}
+
+async function computeRevenuePerListingSeries(range: ResolvedRange, buckets: Bucket[]) {
+  // GBV per bucket
+  const { points: gbvPoints } = await computeGbvSeries(range, buckets);
+  // Active listings as of each bucket end (currently active subset, backfilled by createdAt)
+  const listings = await fetchAllListings();
+  const currentlyActive = listings.filter((l) => l.is_listed && l.active && !l.archived);
+  const counts = buckets.map((b) =>
+    currentlyActive.filter((l) => !l.created_at_guesty || new Date(l.created_at_guesty) <= b.end).length
+  );
+  const series: SeriesPoint[] = buckets.map((b, i) => ({
+    bucket: b.label,
+    bucketStart: b.start,
+    bucketEnd: b.end,
+    value: counts[i] > 0 ? gbvPoints[i].value / counts[i] : 0,
+  }));
+  // Headline = total GBV in range / avg active listings across buckets
+  const totalGbv = gbvPoints.reduce((a, p) => a + p.value, 0);
+  const avgActive = counts.length ? counts.reduce((a, c) => a + c, 0) / counts.length : 0;
+  const total = avgActive > 0 ? totalGbv / avgActive : 0;
+  return { series, total };
+}
+
+export async function fetchRevenuePerListingDetail(window: BucketWindow): Promise<KpiDetailRow[]> {
+  const start = format(window.start, 'yyyy-MM-dd');
+  const end = format(window.end, 'yyyy-MM-dd');
+  const all = await paginate(
+    supabase.from('reservations')
+      .select('listing_id, sub_total, fare_accommodation_adjusted, source, status, check_in')
+      .gte('check_in', start).lte('check_in', end)
+  );
+  const byListing = new Map<string, { gbv: number; count: number }>();
+  for (const r of all) {
+    if (r.source === 'owner') continue;
+    if (r.status && !['confirmed', 'checked_in', 'checked_out'].includes(r.status)) continue;
+    if (!r.listing_id) continue;
+    const value = r.sub_total != null ? Number(r.sub_total) : (r.fare_accommodation_adjusted != null ? Number(r.fare_accommodation_adjusted) : 0);
+    if (!value) continue;
+    const prev = byListing.get(r.listing_id) ?? { gbv: 0, count: 0 };
+    prev.gbv += value; prev.count += 1;
+    byListing.set(r.listing_id, prev);
+  }
+  const ids = Array.from(byListing.keys());
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase.from('listings').select('id, nickname').in('id', ids.slice(i, i + 200));
+    for (const r of (data ?? []) as any[]) nameMap.set(r.id, r.nickname || r.id);
+  }
+  return Array.from(byListing.entries()).sort((a, b) => b[1].gbv - a[1].gbv).map(([id, v]) => ({
+    id,
+    primary: nameMap.get(id) || id,
+    secondary: `${v.count} reservation${v.count === 1 ? '' : 's'}`,
+    value: Math.round(v.gbv),
+  }));
+}

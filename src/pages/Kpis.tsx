@@ -6,7 +6,7 @@ import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
 import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
 import { BackfillSubtotals } from '@/components/BackfillSubtotals';
-import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart as PieIcon, Banknote, XCircle, Settings, FileDown } from 'lucide-react';
+import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart as PieIcon, Banknote, XCircle, Settings, FileDown, Home } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as RTooltip, Legend } from 'recharts';
@@ -15,6 +15,7 @@ import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
   fetchListingGrowth, fetchGbv, fetchChurn, fetchReviewScore, type ReviewScoreMode,
   fetchNetGrowth, fetchOwnerConcentration, fetchChannelMix, fetchAdr, fetchCancellationRate,
+  fetchRevenuePerListing,
   type BucketWindow,
 } from '@/lib/kpis/dataFetcher';
 import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis/types';
@@ -30,6 +31,7 @@ const TITLES: Record<KpiMetric, string> = {
   channel_mix: 'Channel mix',
   adr: 'Average Daily Rate',
   cancellation: 'Cancellation rate',
+  revenue_per_listing: 'Revenue per listing',
 };
 
 export default function Kpis() {
@@ -155,6 +157,10 @@ export default function Kpis() {
   const cancelQ = useQuery({
     queryKey: ['kpi-cancellation', ...queryKey],
     queryFn: () => fetchCancellationRate(resolved, aggregation, compareResolved),
+  });
+  const revPerListingQ = useQuery({
+    queryKey: ['kpi-revenue-per-listing', ...queryKey],
+    queryFn: () => fetchRevenuePerListing(resolved, aggregation, compareResolved),
   });
 
   const openBucket = (metric: KpiMetric) => (start: Date, end: Date | null, label: string) => {
@@ -367,8 +373,23 @@ export default function Kpis() {
             onSelectBucket={openBucket('cancellation')}
             onClickHeadline={openHeadline('cancellation')}
           />
+          <KpiCard
+            title="Revenue per listing"
+            description="GBV ÷ average active listings"
+            helpText="Total GBV in the period divided by the average number of currently active & listed units across the bucketed periods. Excludes owner reservations and cancellations."
+            icon={Home}
+            result={revPerListingQ.data}
+            isLoading={revPerListingQ.isLoading}
+            error={revPerListingQ.error as Error | null}
+            primaryLabel={resolved.label}
+            compareLabel={compareLabel}
+            chartType="bar"
+            onSelectBucket={openBucket('revenue_per_listing')}
+            onClickHeadline={openHeadline('revenue_per_listing')}
+          />
         </div>
       </div>
+
 
 
       <KpiDetailSheet
