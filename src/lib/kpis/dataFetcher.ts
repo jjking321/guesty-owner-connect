@@ -604,9 +604,7 @@ export async function fetchOwnerConcentration(
 }
 
 async function computeOwnerConcentrationSeries(buckets: Bucket[]): Promise<{ series: SeriesPoint[]; breakdown: Array<[string, number]> }> {
-  const listings = await paginate(
-    supabase.from('listings').select('id, owner_id, created_at_guesty, is_listed, active, archived')
-  );
+  const listings = await sharedGetAllListings();
   const series = buckets.map((b) => {
     const activeAsOf = listings.filter((l: any) => {
       if (l.archived) return false;
