@@ -337,6 +337,7 @@ Deno.serve(async (req) => {
           .select('id')
           .eq('guesty_account_id', guestyAccountId)
           .is('sub_total', null)
+          .in('status', ['confirmed', 'checked_in', 'checked_out'])
           .gte('check_out', overallStart)
           .lte('check_out', overallEnd)
           .range(from, from + PAGE - 1);
