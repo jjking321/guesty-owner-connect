@@ -94,7 +94,7 @@ export function KpiSavedViews({ current, onApply, onDefaultLoaded }: Props) {
           {
             user_id: userData.user.id,
             name: trimmed,
-            config: current as unknown as Record<string, unknown>,
+            config: current as any,
             is_default: makeDefault,
           },
         ],
