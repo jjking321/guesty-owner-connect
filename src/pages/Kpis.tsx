@@ -58,6 +58,26 @@ export default function Kpis() {
     queryKey: ['kpi-reviews', ...queryKey, reviewMode],
     queryFn: () => fetchReviewScore(resolved, aggregation, compareResolved, reviewMode),
   });
+  const netGrowthQ = useQuery({
+    queryKey: ['kpi-net-growth', ...queryKey],
+    queryFn: () => fetchNetGrowth(resolved, aggregation, compareResolved),
+  });
+  const ownerConcQ = useQuery({
+    queryKey: ['kpi-owner-concentration', ...queryKey],
+    queryFn: () => fetchOwnerConcentration(resolved, aggregation, compareResolved),
+  });
+  const channelMixQ = useQuery({
+    queryKey: ['kpi-channel-mix', ...queryKey],
+    queryFn: () => fetchChannelMix(resolved, aggregation, compareResolved),
+  });
+  const adrQ = useQuery({
+    queryKey: ['kpi-adr', ...queryKey],
+    queryFn: () => fetchAdr(resolved, aggregation, compareResolved),
+  });
+  const cancelQ = useQuery({
+    queryKey: ['kpi-cancellation', ...queryKey],
+    queryFn: () => fetchCancellationRate(resolved, aggregation, compareResolved),
+  });
 
   const openBucket = (metric: KpiMetric) => (start: Date, end: Date | null, label: string) => {
     setDrilldown({
