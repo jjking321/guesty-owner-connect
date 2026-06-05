@@ -183,36 +183,24 @@ function getChurnSignalDate(row: { churned_at?: string | null; last_active_at?: 
 }
 
 async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
-  const { start, end } = rangeISO(range);
-  const openEvents = await paginate(
-    supabase
-      .from('listing_churn_events')
-      .select('listing_id, churned_at, ignored')
-      .is('restored_at', null)
-      .eq('ignored', false)
-  );
-  const ignoredEvents = await paginate(
-    supabase
-      .from('listing_churn_events')
-      .select('listing_id')
-      .is('restored_at', null)
-      .eq('ignored', true)
-  );
-  const ignoredSet = new Set(ignoredEvents.map((e: any) => e.listing_id));
-  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+  const [{ openByListing: eventByListing, ignoredSet }, allListings] = await Promise.all([
+    getChurnEvents(),
+    sharedGetAllListings(),
+  ]);
+  const all = allListings.filter((l) => l.is_listed === false && l.active === false && !l.archived);
+  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
+  for (const r of all) {
+    if (ignoredSet.has(r.id)) continue;
+    const signalDate = getChurnSignalDate({ ...r, churned_at: eventByListing.get(r.id) as string | undefined });
+    if (!signalDate) continue;
+    const d = new Date(signalDate);
+    if (d < range.start || d > range.end) continue;
+    const idx = findBucketIdx(buckets, d);
+    if (idx >= 0) points[idx].value += 1;
+  }
 
-
-  // Derive churn from the current Guesty state, using explicit churn events when present.
-  // If Guesty's lastActivityAt is blank/stale, fall back to created_at_guesty so newly-added 2026 units
-  // that are now unlisted+inactive are not incorrectly pushed into an old year or dropped entirely.
-  const all = await paginate(
-    supabase
-      .from('listings')
-      .select('id, last_active_at, created_at_guesty')
-      .eq('is_listed', false)
-      .eq('active', false)
-      .eq('archived', false)
-  );
+  return points;
+}
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const r of all) {
     if (ignoredSet.has(r.id)) continue;
