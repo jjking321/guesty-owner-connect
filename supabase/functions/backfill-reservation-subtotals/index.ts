@@ -537,7 +537,7 @@ Deno.serve(async (req) => {
     let pagesProcessed = 0;
 
     // Process first page
-    const processPage = async (results: Array<{ _id: string; money?: { subTotalPrice?: number } }>) => {
+    const processPage = async (results: Array<{ _id: string; money?: { subTotalPrice?: number; fareAccommodationAdjusted?: number; fareAccommodation?: number } }>) => {
       const updates: { id: string; sub_total: number }[] = [];
       for (const res of results) {
         // In onlyMissing mode, skip reservations that already have sub_total in DB.
@@ -545,8 +545,14 @@ Deno.serve(async (req) => {
           skipped++;
           continue;
         }
-        const subTotal = res.money?.subTotalPrice;
-        if (subTotal != null && subTotal !== undefined) {
+        // Prefer Guesty's subTotalPrice; fall back to fareAccommodationAdjusted so
+        // legacy/manual reservations stop being re-skipped on every run.
+        const subTotal =
+          res.money?.subTotalPrice ??
+          res.money?.fareAccommodationAdjusted ??
+          res.money?.fareAccommodation ??
+          null;
+        if (subTotal != null) {
           updates.push({ id: res._id, sub_total: subTotal });
         } else {
           skipped++;
