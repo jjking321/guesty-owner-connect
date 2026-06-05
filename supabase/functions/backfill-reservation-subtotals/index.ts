@@ -420,7 +420,14 @@ Deno.serve(async (req) => {
 
         const returnedIds = new Set(results.map((r) => r._id));
         for (const res of results) {
-          const subTotal = res.money?.subTotalPrice;
+          // Prefer Guesty's authoritative subTotalPrice, but fall back to fareAccommodationAdjusted
+          // (or fareAccommodation) so cancelled/manual/legacy reservations stop being re-skipped
+          // on every backfill run.
+          const subTotal =
+            res.money?.subTotalPrice ??
+            res.money?.fareAccommodationAdjusted ??
+            res.money?.fareAccommodation ??
+            null;
           if (subTotal != null) {
             const { error: updateError } = await supabaseAdmin
               .from('reservations').update({ sub_total: subTotal }).eq('id', res._id);
@@ -430,8 +437,27 @@ Deno.serve(async (req) => {
             skipped++;
           }
         }
-        // Ids requested but not returned by Guesty (deleted/inaccessible) → count as skipped
-        skipped += chunk.filter((id) => !returnedIds.has(id)).length;
+        // Ids requested but not returned by Guesty (deleted/inaccessible) — backfill from
+        // the local fare_accommodation_adjusted so they're no longer flagged as missing.
+        const missingFromGuesty = chunk.filter((id) => !returnedIds.has(id));
+        if (missingFromGuesty.length > 0) {
+          const { data: localRows } = await supabaseAdmin
+            .from('reservations')
+            .select('id, fare_accommodation_adjusted')
+            .in('id', missingFromGuesty);
+          for (const row of localRows ?? []) {
+            if (row.fare_accommodation_adjusted != null) {
+              const { error: updErr } = await supabaseAdmin
+                .from('reservations')
+                .update({ sub_total: row.fare_accommodation_adjusted })
+                .eq('id', row.id);
+              if (!updErr) updated++;
+              else skipped++;
+            } else {
+              skipped++;
+            }
+          }
+        }
 
         cursor += chunk.length;
         batchesProcessed++;
