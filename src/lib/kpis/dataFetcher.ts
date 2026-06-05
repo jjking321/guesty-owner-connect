@@ -3,33 +3,20 @@ import { format, addYears, differenceInCalendarDays } from 'date-fns';
 import type { Aggregation, KpiResult, ResolvedRange, SeriesPoint, KpiDetailRow } from './types';
 import { buildBuckets, findBucketIdx, type Bucket } from './bucket';
 import { rangeISO } from './range';
+import {
+  getAllListings as sharedGetAllListings,
+  getReservationsByCheckIn,
+  getReservationsByCreatedAt,
+  getChurnEvents,
+  type SharedListing,
+} from './sharedData';
 
 const BATCH = 1000;
 
-interface ListingRow {
-  id: string;
-  created_at_guesty: string | null;
-  is_listed: boolean | null;
-  active: boolean | null;
-  archived: boolean;
-  guesty_account_id: string;
-}
+type ListingRow = SharedListing;
 
 async function fetchAllListings(): Promise<ListingRow[]> {
-  const out: ListingRow[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('listings')
-      .select('id, created_at_guesty, is_listed, active, archived, guesty_account_id')
-      .range(from, from + BATCH - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    out.push(...(data as any));
-    if (data.length < BATCH) break;
-    from += BATCH;
-  }
-  return out;
+  return sharedGetAllListings();
 }
 
 // ---------- Listing growth ----------
@@ -133,22 +120,7 @@ async function computeGbvSeries(
   range: ResolvedRange,
   buckets: Bucket[],
 ): Promise<{ points: SeriesPoint[]; meta: { totalReservations: number; withSubTotal: number; usedFallback: number } }> {
-  const { start, end } = rangeISO(range);
-  const all: any[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('reservations')
-      .select('check_in, sub_total, fare_accommodation_adjusted, source, status')
-      .gte('check_in', start)
-      .lte('check_in', end)
-      .range(from, from + BATCH - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    all.push(...data);
-    if (data.length < BATCH) break;
-    from += BATCH;
-  }
+  const all = await getReservationsByCheckIn(range);
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   let totalReservations = 0, withSubTotal = 0, usedFallback = 0;
   for (const r of all) {
@@ -211,36 +183,11 @@ function getChurnSignalDate(row: { churned_at?: string | null; last_active_at?: 
 }
 
 async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
-  const { start, end } = rangeISO(range);
-  const openEvents = await paginate(
-    supabase
-      .from('listing_churn_events')
-      .select('listing_id, churned_at, ignored')
-      .is('restored_at', null)
-      .eq('ignored', false)
-  );
-  const ignoredEvents = await paginate(
-    supabase
-      .from('listing_churn_events')
-      .select('listing_id')
-      .is('restored_at', null)
-      .eq('ignored', true)
-  );
-  const ignoredSet = new Set(ignoredEvents.map((e: any) => e.listing_id));
-  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
-
-
-  // Derive churn from the current Guesty state, using explicit churn events when present.
-  // If Guesty's lastActivityAt is blank/stale, fall back to created_at_guesty so newly-added 2026 units
-  // that are now unlisted+inactive are not incorrectly pushed into an old year or dropped entirely.
-  const all = await paginate(
-    supabase
-      .from('listings')
-      .select('id, last_active_at, created_at_guesty')
-      .eq('is_listed', false)
-      .eq('active', false)
-      .eq('archived', false)
-  );
+  const [{ openByListing: eventByListing, ignoredSet }, allListings] = await Promise.all([
+    getChurnEvents(),
+    sharedGetAllListings(),
+  ]);
+  const all = allListings.filter((l) => l.is_listed === false && l.active === false && !l.archived);
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const r of all) {
     if (ignoredSet.has(r.id)) continue;
@@ -556,18 +503,10 @@ export async function fetchNetGrowth(
 
 async function computeNetGrowthSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
   // Additions: any listing whose created_at_guesty falls in bucket
-  const allListings = await paginate(
-    supabase.from('listings').select('id, created_at_guesty, is_listed, active, archived, last_active_at')
-  );
-  // Churn signals
-  const openEvents = await paginate(
-    supabase.from('listing_churn_events').select('listing_id, churned_at, ignored').is('restored_at', null).eq('ignored', false)
-  );
-  const ignoredEvents = await paginate(
-    supabase.from('listing_churn_events').select('listing_id').is('restored_at', null).eq('ignored', true)
-  );
-  const ignoredSet = new Set(ignoredEvents.map((e: any) => e.listing_id));
-  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+  const [allListings, { openByListing: eventByListing, ignoredSet }] = await Promise.all([
+    sharedGetAllListings(),
+    getChurnEvents(),
+  ]);
 
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const l of allListings) {
@@ -665,9 +604,7 @@ export async function fetchOwnerConcentration(
 }
 
 async function computeOwnerConcentrationSeries(buckets: Bucket[]): Promise<{ series: SeriesPoint[]; breakdown: Array<[string, number]> }> {
-  const listings = await paginate(
-    supabase.from('listings').select('id, owner_id, created_at_guesty, is_listed, active, archived')
-  );
+  const listings = await sharedGetAllListings();
   const series = buckets.map((b) => {
     const activeAsOf = listings.filter((l: any) => {
       if (l.archived) return false;
@@ -760,12 +697,7 @@ export async function fetchChannelMix(
 }
 
 async function computeChannelMixSeries(range: ResolvedRange, buckets: Bucket[]) {
-  const { start, end } = rangeISO(range);
-  const all = await paginate(
-    supabase.from('reservations')
-      .select('check_in, sub_total, fare_accommodation_adjusted, source, status')
-      .gte('check_in', start).lte('check_in', end)
-  );
+  const all = await getReservationsByCheckIn(range);
   const channelTotals = new Map<string, number>();
   // series = top-channel GBV share per bucket
   const perBucket = buckets.map(() => new Map<string, number>());
@@ -854,12 +786,7 @@ export async function fetchAdr(
 }
 
 async function computeAdrSeries(range: ResolvedRange, buckets: Bucket[]) {
-  const { start, end } = rangeISO(range);
-  const all = await paginate(
-    supabase.from('reservations')
-      .select('check_in, nights_count, sub_total, fare_accommodation_adjusted, source, status')
-      .gte('check_in', start).lte('check_in', end)
-  );
+  const all = await getReservationsByCheckIn(range);
   const sums = buckets.map(() => ({ rev: 0, nights: 0 }));
   let totalRev = 0, totalNights = 0;
   for (const r of all) {
@@ -941,13 +868,7 @@ export async function fetchCancellationRate(
 }
 
 async function computeCancellationSeries(range: ResolvedRange, buckets: Bucket[]) {
-  const startIso = range.start.toISOString();
-  const endIso = range.end.toISOString();
-  const all = await paginate(
-    supabase.from('reservations')
-      .select('created_at_guesty, status, source')
-      .gte('created_at_guesty', startIso).lte('created_at_guesty', endIso)
-  );
+  const all = await getReservationsByCreatedAt(range);
   const counts = buckets.map(() => ({ canc: 0, denom: 0 }));
   let totalCanc = 0, totalDenom = 0;
   for (const r of all) {

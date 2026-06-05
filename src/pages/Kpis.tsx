@@ -21,6 +21,7 @@ import {
 import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useOrgBranding, hexToRgb } from '@/lib/branding';
+import { clearKpiCache } from '@/lib/kpis/sharedData';
 
 const TITLES: Record<KpiMetric, string> = {
   listings: 'Active & listed units',
@@ -46,6 +47,11 @@ export default function Kpis() {
   const exportRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const branding = useOrgBranding();
+
+  // Invalidate shared loader cache whenever the inputs change so we refetch fresh data.
+  const handleRangeChange = (r: KpiRange) => { clearKpiCache(); setRange(r); };
+  const handleAggregationChange = (a: Aggregation) => { clearKpiCache(); setAggregation(a); };
+  const handleCompareChange = (c: ComparePreset) => { clearKpiCache(); setCompare(c); };
 
   const exportPdf = async () => {
     if (!exportRef.current) return;
@@ -256,9 +262,9 @@ export default function Kpis() {
             aggregation={aggregation}
             range={range}
             compare={compare}
-            onAggregationChange={setAggregation}
-            onRangeChange={setRange}
-            onCompareChange={setCompare}
+            onAggregationChange={handleAggregationChange}
+            onRangeChange={handleRangeChange}
+            onCompareChange={handleCompareChange}
           />
         </div>
 
