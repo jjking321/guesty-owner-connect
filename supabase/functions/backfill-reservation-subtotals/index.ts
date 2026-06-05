@@ -369,6 +369,112 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ====== FAST PATH: onlyMissing — fetch the specific reservation ids from Guesty
+    // in 100-id chunks instead of scanning every reservation in the date range. ======
+    if (onlyMissing) {
+      const allIds = Array.from(missingIds!);
+      const startIdx = skipOffset || 0;
+      const totalTarget = allIds.length;
+
+      let jobId = existingJobId;
+      if (!jobId) {
+        const { data: newJob, error: jobError } = await supabaseAdmin
+          .from('sync_jobs')
+          .insert({
+            guesty_account_id: guestyAccountId,
+            sync_type: 'backfill_subtotals',
+            status: 'running',
+            progress_message: `Starting targeted sub_total backfill (${totalTarget} reservations)...`,
+            total_items: totalTarget,
+            items_synced: startIdx,
+          })
+          .select('id')
+          .single();
+        if (jobError) throw jobError;
+        jobId = newJob.id;
+      }
+
+      const startTime = Date.now();
+      let updated = 0;
+      let skipped = 0;
+      let batchesProcessed = 0;
+      let cursor = startIdx;
+
+      while (cursor < totalTarget) {
+        if (Date.now() - startTime > FUNCTION_TIMEOUT_BUFFER) {
+          console.log(`Approaching timeout after ${batchesProcessed} batches (${cursor}/${totalTarget}), will self-invoke`);
+          break;
+        }
+
+        const { data: jobCheck } = await supabaseAdmin
+          .from('sync_jobs').select('status').eq('id', jobId).single();
+        if (jobCheck?.status === 'failed') {
+          return new Response(JSON.stringify({ message: 'Job cancelled', updated, skipped }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        const chunk = allIds.slice(cursor, cursor + IDS_PER_REQUEST);
+        const results = await fetchReservationsByIds(apiToken, chunk);
+
+        const returnedIds = new Set(results.map((r) => r._id));
+        for (const res of results) {
+          const subTotal = res.money?.subTotalPrice;
+          if (subTotal != null) {
+            const { error: updateError } = await supabaseAdmin
+              .from('reservations').update({ sub_total: subTotal }).eq('id', res._id);
+            if (updateError) console.error(`Failed to update ${res._id}:`, updateError);
+            else updated++;
+          } else {
+            skipped++;
+          }
+        }
+        // Ids requested but not returned by Guesty (deleted/inaccessible) → count as skipped
+        skipped += chunk.filter((id) => !returnedIds.has(id)).length;
+
+        cursor += chunk.length;
+        batchesProcessed++;
+
+        await supabaseAdmin.from('sync_jobs').update({
+          items_synced: cursor,
+          progress_message: `Updated ${updated} reservations (batch ${batchesProcessed}, ${skipped} skipped)...`,
+        }).eq('id', jobId);
+
+        await sleep(PAGE_DELAY_MS);
+      }
+
+      if (cursor < totalTarget) {
+        const functionUrl = `${supabaseUrl}/functions/v1/backfill-reservation-subtotals`;
+        fetch(functionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${serviceRoleKey}`,
+            'x-service-role': 'true',
+          },
+          body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId, skipOffset: cursor, onlyMissing: true }),
+        }).catch((err) => console.error('Self-invoke error:', err));
+
+        return new Response(JSON.stringify({
+          message: 'Batch complete, continuing...',
+          updated, skipped, batchesProcessed, cursor, totalTarget,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      await supabaseAdmin.from('sync_jobs').update({
+        status: 'completed',
+        progress_message: `Completed. Updated ${updated} reservations (${skipped} skipped: no subTotalPrice or not returned by Guesty).`,
+        completed_at: new Date().toISOString(),
+      }).eq('id', jobId);
+
+      return new Response(JSON.stringify({
+        message: 'Targeted sub_total backfill complete',
+        updated, skipped, batchesProcessed, totalTarget,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+
+
     // First page fetch to get total count from Guesty
     let currentSkip = skipOffset || 0;
     const firstPage = await fetchReservationPage(apiToken, overallStart, overallEnd, currentSkip);
