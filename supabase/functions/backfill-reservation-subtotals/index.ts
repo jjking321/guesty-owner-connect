@@ -199,12 +199,12 @@ const IDS_PER_REQUEST = 100;
 async function fetchReservationsByIds(
   apiToken: string,
   ids: string[]
-): Promise<Array<{ _id: string; money?: { subTotalPrice?: number } }>> {
+): Promise<Array<{ _id: string; money?: { subTotalPrice?: number; fareAccommodationAdjusted?: number; fareAccommodation?: number } }>> {
   if (ids.length === 0) return [];
   const filters = JSON.stringify([{ field: '_id', operator: '$in', value: ids }]);
   const params = new URLSearchParams({
     filters,
-    fields: '_id money.subTotalPrice',
+    fields: '_id money.subTotalPrice money.fareAccommodationAdjusted money.fareAccommodation',
     limit: String(ids.length),
     skip: '0',
   });
