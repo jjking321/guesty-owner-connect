@@ -130,7 +130,9 @@ export function KpiCard({
           </div>
         ) : null}
 
-        {result && result.series.length > 0 && (() => {
+        {customBody}
+
+        {!customBody && result && result.series.length > 0 && (() => {
           // For rating unit, zoom Y-axis tightly to data range so MoM changes are visible.
           let yDomain: [number | string, number | string] = ['auto', 'auto'];
           let yTicks: number[] | undefined;
