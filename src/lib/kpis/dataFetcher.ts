@@ -503,18 +503,10 @@ export async function fetchNetGrowth(
 
 async function computeNetGrowthSeries(range: ResolvedRange, buckets: Bucket[]): Promise<SeriesPoint[]> {
   // Additions: any listing whose created_at_guesty falls in bucket
-  const allListings = await paginate(
-    supabase.from('listings').select('id, created_at_guesty, is_listed, active, archived, last_active_at')
-  );
-  // Churn signals
-  const openEvents = await paginate(
-    supabase.from('listing_churn_events').select('listing_id, churned_at, ignored').is('restored_at', null).eq('ignored', false)
-  );
-  const ignoredEvents = await paginate(
-    supabase.from('listing_churn_events').select('listing_id').is('restored_at', null).eq('ignored', true)
-  );
-  const ignoredSet = new Set(ignoredEvents.map((e: any) => e.listing_id));
-  const eventByListing = new Map(openEvents.map((e: any) => [e.listing_id, e.churned_at]));
+  const [allListings, { openByListing: eventByListing, ignoredSet }] = await Promise.all([
+    sharedGetAllListings(),
+    getChurnEvents(),
+  ]);
 
   const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
   for (const l of allListings) {
