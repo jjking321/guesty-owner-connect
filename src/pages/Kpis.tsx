@@ -112,7 +112,7 @@ export default function Kpis() {
       const pageBottom = pageH - 24;
 
       const cards = Array.from(
-        exportRef.current.querySelectorAll<HTMLElement>('[data-kpi-card]')
+        exportRef.current.querySelectorAll<HTMLElement>(':scope > *')
       );
 
       type Rendered = { dataUrl: string; w: number; h: number };
