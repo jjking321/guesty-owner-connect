@@ -6,7 +6,9 @@ import { KpiCard } from '@/components/kpis/KpiCard';
 import { ManageChurnDrawer } from '@/components/kpis/ManageChurnDrawer';
 import { KpiDetailSheet } from '@/components/kpis/KpiDetailSheet';
 import { BackfillSubtotals } from '@/components/BackfillSubtotals';
-import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart, Banknote, XCircle } from 'lucide-react';
+import { Building2, DollarSign, TrendingDown, Star, SlidersHorizontal, TrendingUp, Users, PieChart, Banknote, XCircle, Settings } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
 import { resolveRange, resolveCompare, COMPARE_LABELS } from '@/lib/kpis/range';
 import {
   fetchListingGrowth, fetchGbv, fetchChurn, fetchReviewScore, type ReviewScoreMode,
