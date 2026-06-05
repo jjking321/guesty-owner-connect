@@ -22,6 +22,7 @@ import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useOrgBranding, hexToRgb } from '@/lib/branding';
 import { clearKpiCache } from '@/lib/kpis/sharedData';
+import { KpiSavedViews, type KpiViewConfig } from '@/components/kpis/KpiSavedViews';
 
 const TITLES: Record<KpiMetric, string> = {
   listings: 'Active & listed units',
@@ -52,6 +53,14 @@ export default function Kpis() {
   const handleRangeChange = (r: KpiRange) => { clearKpiCache(); setRange(r); };
   const handleAggregationChange = (a: Aggregation) => { clearKpiCache(); setAggregation(a); };
   const handleCompareChange = (c: ComparePreset) => { clearKpiCache(); setCompare(c); };
+
+  const applyView = (config: KpiViewConfig) => {
+    clearKpiCache();
+    if (config.aggregation) setAggregation(config.aggregation);
+    if (config.range) setRange(config.range);
+    if (config.compare) setCompare(config.compare);
+    if (config.reviewMode) setReviewMode(config.reviewMode);
+  };
 
   const exportPdf = async () => {
     if (!exportRef.current) return;
@@ -257,7 +266,15 @@ export default function Kpis() {
         </div>
 
 
-        <div className="rounded-lg border bg-card p-4">
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-xs text-muted-foreground">Configure the dashboard, or save and recall your favorite views.</span>
+            <KpiSavedViews
+              current={{ aggregation, range, compare, reviewMode }}
+              onApply={applyView}
+              onDefaultLoaded={applyView}
+            />
+          </div>
           <KpiControls
             aggregation={aggregation}
             range={range}
