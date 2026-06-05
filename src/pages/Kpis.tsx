@@ -416,25 +416,33 @@ function OwnerConcentrationList({ data, onOpen }: { data: any; onOpen: () => voi
   const breakdown = (data?.meta?.breakdown ?? []) as Array<[string, number]>;
   const total = breakdown.reduce((a, [, n]) => a + n, 0);
   if (!breakdown.length) return <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">No owner data</div>;
+  const topName = breakdown[0]?.[0] ?? '';
   return (
-    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 cursor-pointer" onClick={onOpen} title="Click for full list">
-      {breakdown.slice(0, 10).map(([ownerId, count]) => {
-        const pct = total > 0 ? (count / total) * 100 : 0;
-        return (
-          <div key={ownerId} className="space-y-0.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="truncate font-medium" title={ownerId}>{ownerId.slice(0, 18)}{ownerId.length > 18 ? '…' : ''}</span>
-              <span className="text-muted-foreground tabular-nums">{count} · {pct.toFixed(1)}%</span>
-            </div>
-            <div className="h-1.5 rounded bg-muted overflow-hidden">
-              <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
-            </div>
-          </div>
-        );
-      })}
-      {breakdown.length > 10 && (
-        <p className="text-[10px] text-muted-foreground pt-1">+ {breakdown.length - 10} more · click to see all</p>
+    <div className="space-y-2">
+      {topName && (
+        <p className="text-xs text-muted-foreground">
+          Top owner: <span className="font-medium text-foreground">{topName}</span>
+        </p>
       )}
+      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 cursor-pointer" onClick={onOpen} title="Click for full list">
+        {breakdown.slice(0, 10).map(([ownerName, count], idx) => {
+          const pct = total > 0 ? (count / total) * 100 : 0;
+          return (
+            <div key={`${ownerName}-${idx}`} className="space-y-0.5">
+              <div className="flex items-center justify-between text-xs gap-2">
+                <span className="truncate font-medium" title={ownerName}>{ownerName}</span>
+                <span className="text-muted-foreground tabular-nums whitespace-nowrap">{count} · {pct.toFixed(1)}%</span>
+              </div>
+              <div className="h-1.5 rounded bg-muted overflow-hidden">
+                <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+        {breakdown.length > 10 && (
+          <p className="text-[10px] text-muted-foreground pt-1">+ {breakdown.length - 10} more · click to see all</p>
+        )}
+      </div>
     </div>
   );
 }
