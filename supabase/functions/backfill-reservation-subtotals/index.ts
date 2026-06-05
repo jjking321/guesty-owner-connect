@@ -194,6 +194,51 @@ async function fetchReservationPage(
   throw new Error('Failed to fetch reservation page after retries');
 }
 
+const IDS_PER_REQUEST = 100;
+
+async function fetchReservationsByIds(
+  apiToken: string,
+  ids: string[]
+): Promise<Array<{ _id: string; money?: { subTotalPrice?: number } }>> {
+  if (ids.length === 0) return [];
+  const filters = JSON.stringify([{ field: '_id', operator: '$in', value: ids }]);
+  const params = new URLSearchParams({
+    filters,
+    fields: '_id money.subTotalPrice',
+    limit: String(ids.length),
+    skip: '0',
+  });
+
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    if (attempt > 0) await sleep(Math.min(2000 * Math.pow(2, attempt - 1), 15000));
+
+    const response = await fetch(
+      `https://open-api.guesty.com/v1/reservations?${params.toString()}`,
+      { headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' } }
+    );
+
+    if (response.status === 429) {
+      if (attempt < 3) {
+        const retryAfterMs = parseRetryAfter(response.headers.get('Retry-After'));
+        const waitTime = Math.max(Math.min(2000 * Math.pow(2, attempt), 30000), retryAfterMs);
+        if (waitTime > MAX_WAIT_TIME) throw new Error('Rate limit wait too long, aborting id-batch fetch');
+        await sleep(waitTime);
+        continue;
+      }
+      throw new Error('Rate limit exceeded after retries on id-batch endpoint');
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Guesty id-batch API error ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.results || [];
+  }
+  throw new Error('Failed to fetch reservations by ids after retries');
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
