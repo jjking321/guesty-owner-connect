@@ -668,7 +668,6 @@ async function computeOwnerConcentrationSeries(buckets: Bucket[]): Promise<{ ser
   const listings = await paginate(
     supabase.from('listings').select('id, owner_id, created_at_guesty, is_listed, active, archived')
   );
-  // Current breakdown (point-in-time, end of range)
   const series = buckets.map((b) => {
     const activeAsOf = listings.filter((l: any) => {
       if (l.archived) return false;
@@ -686,14 +685,23 @@ async function computeOwnerConcentrationSeries(buckets: Bucket[]): Promise<{ ser
     return { bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: total > 0 ? top / total : 0 };
   });
 
-  // Build breakdown for the final bucket
   const last = listings.filter((l: any) => l.is_listed && l.active && !l.archived);
   const counts = new Map<string, number>();
   for (const l of last) {
     if (!l.owner_id) continue;
     counts.set(l.owner_id, (counts.get(l.owner_id) ?? 0) + 1);
   }
-  const breakdown = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const ownerIds = Array.from(counts.keys());
+  const nameMap = new Map<string, string>();
+  for (let i = 0; i < ownerIds.length; i += 200) {
+    const { data } = await supabase.from('owners').select('id, full_name, first_name, last_name, email').in('id', ownerIds.slice(i, i + 200));
+    for (const o of (data ?? []) as any[]) {
+      nameMap.set(o.id, o.full_name || [o.first_name, o.last_name].filter(Boolean).join(' ') || o.email || o.id);
+    }
+  }
+  const breakdown: Array<[string, number]> = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, n]) => [nameMap.get(id) || id, n]);
   return { series, breakdown };
 }
 
