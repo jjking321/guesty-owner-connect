@@ -48,7 +48,7 @@ export interface KpiResult {
   total: number;
   compareTotal?: number;
   series: SeriesPoint[];
-  unit: 'number' | 'currency' | 'rating';
+  unit: 'number' | 'currency' | 'rating' | 'percent';
   meta?: Record<string, any>;
 }
 
