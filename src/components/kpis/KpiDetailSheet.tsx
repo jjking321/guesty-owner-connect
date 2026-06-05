@@ -58,6 +58,11 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
         case 'gbv': return fetchGbvDetail(win);
         case 'churn': return fetchChurnDetail(win);
         case 'reviews': return fetchReviewDetail(win);
+        case 'net_growth': return fetchNetGrowthDetail(win);
+        case 'owner_concentration': return fetchOwnerConcentrationDetail(win);
+        case 'channel_mix': return fetchChannelMixDetail(win);
+        case 'adr': return fetchAdrDetail(win);
+        case 'cancellation': return fetchCancellationDetail(win);
       }
     },
     enabled,
