@@ -3,33 +3,20 @@ import { format, addYears, differenceInCalendarDays } from 'date-fns';
 import type { Aggregation, KpiResult, ResolvedRange, SeriesPoint, KpiDetailRow } from './types';
 import { buildBuckets, findBucketIdx, type Bucket } from './bucket';
 import { rangeISO } from './range';
+import {
+  getAllListings as sharedGetAllListings,
+  getReservationsByCheckIn,
+  getReservationsByCreatedAt,
+  getChurnEvents,
+  type SharedListing,
+} from './sharedData';
 
 const BATCH = 1000;
 
-interface ListingRow {
-  id: string;
-  created_at_guesty: string | null;
-  is_listed: boolean | null;
-  active: boolean | null;
-  archived: boolean;
-  guesty_account_id: string;
-}
+type ListingRow = SharedListing;
 
 async function fetchAllListings(): Promise<ListingRow[]> {
-  const out: ListingRow[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('listings')
-      .select('id, created_at_guesty, is_listed, active, archived, guesty_account_id')
-      .range(from, from + BATCH - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    out.push(...(data as any));
-    if (data.length < BATCH) break;
-    from += BATCH;
-  }
-  return out;
+  return sharedGetAllListings();
 }
 
 // ---------- Listing growth ----------
