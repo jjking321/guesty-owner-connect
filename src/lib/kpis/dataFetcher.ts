@@ -664,7 +664,7 @@ export async function fetchOwnerConcentration(
   return { total, compareTotal, series, unit: 'percent', meta: { breakdown } };
 }
 
-async function computeOwnerConcentrationSeries(buckets: Bucket[]) {
+async function computeOwnerConcentrationSeries(buckets: Bucket[]): Promise<{ series: SeriesPoint[]; breakdown: Array<[string, number]> }> {
   const listings = await paginate(
     supabase.from('listings').select('id, owner_id, created_at_guesty, is_listed, active, archived')
   );
