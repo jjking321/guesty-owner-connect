@@ -232,7 +232,7 @@ export default function Kpis() {
           <KpiCard
             title="Owner concentration"
             description="Share of portfolio held by top owner"
-            helpText="Largest owner's share of currently active & listed units, as of the end of each bucket. The drill-down lists every owner with their unit count and portfolio share."
+            helpText="Largest owner's share of currently active & listed units. Click any owner to see all owners."
             icon={Users}
             result={ownerConcQ.data}
             isLoading={ownerConcQ.isLoading}
@@ -240,13 +240,13 @@ export default function Kpis() {
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="line"
-            onSelectBucket={openBucket('owner_concentration')}
             onClickHeadline={openHeadline('owner_concentration')}
+            customBody={<OwnerConcentrationList data={ownerConcQ.data} onOpen={openHeadline('owner_concentration')} />}
           />
           <KpiCard
             title="Channel mix"
-            description="Top channel's share of GBV"
-            helpText="Reservations are grouped by source into Airbnb, Vrbo/HomeAway, Booking.com, Direct, and Other. The bar shows the dominant channel's GBV share per bucket; the drill-down lists each channel with reservation counts and GBV."
+            description="GBV share by channel"
+            helpText="Reservations grouped by source (Airbnb, Vrbo/HomeAway, Booking.com, Direct, Other). Click a slice to drill into all channels."
             icon={PieIcon}
             result={channelMixQ.data}
             isLoading={channelMixQ.isLoading}
@@ -254,9 +254,10 @@ export default function Kpis() {
             primaryLabel={resolved.label}
             compareLabel={compareLabel}
             chartType="bar"
-            onSelectBucket={openBucket('channel_mix')}
             onClickHeadline={openHeadline('channel_mix')}
+            customBody={<ChannelMixPie data={channelMixQ.data} onOpen={openHeadline('channel_mix')} />}
           />
+
           <KpiCard
             title="Average Daily Rate"
             description="GBV per booked night"
