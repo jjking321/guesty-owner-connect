@@ -22,6 +22,7 @@ import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useOrgBranding, hexToRgb } from '@/lib/branding';
 import { clearKpiCache } from '@/lib/kpis/sharedData';
+import { KpiSavedViews, type KpiViewConfig } from '@/components/kpis/KpiSavedViews';
 
 const TITLES: Record<KpiMetric, string> = {
   listings: 'Active & listed units',
