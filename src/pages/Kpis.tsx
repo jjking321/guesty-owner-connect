@@ -382,3 +382,60 @@ export default function Kpis() {
     </DashboardLayout>
   );
 }
+
+const PIE_COLORS = ['hsl(var(--primary))', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#94a3b8'];
+
+function ChannelMixPie({ data, onOpen }: { data: any; onOpen: () => void }) {
+  const breakdown = (data?.meta?.breakdown ?? []) as Array<{ name: string; gbv: number; share: number }>;
+  if (!breakdown.length) return <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">No channel data</div>;
+  return (
+    <div className="h-56 cursor-pointer" onClick={onOpen} title="Click for full breakdown">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={breakdown}
+            dataKey="gbv"
+            nameKey="name"
+            cx="40%"
+            cy="50%"
+            outerRadius={75}
+            label={(d: any) => `${(d.share * 100).toFixed(0)}%`}
+            labelLine={false}
+          >
+            {breakdown.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+          </Pie>
+          <RTooltip formatter={(v: any, _n: any, p: any) => [`$${Number(v).toLocaleString()} · ${(p.payload.share * 100).toFixed(1)}%`, p.payload.name]} />
+          <Legend layout="vertical" verticalAlign="middle" align="right" iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function OwnerConcentrationList({ data, onOpen }: { data: any; onOpen: () => void }) {
+  const breakdown = (data?.meta?.breakdown ?? []) as Array<[string, number]>;
+  const total = breakdown.reduce((a, [, n]) => a + n, 0);
+  if (!breakdown.length) return <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">No owner data</div>;
+  return (
+    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 cursor-pointer" onClick={onOpen} title="Click for full list">
+      {breakdown.slice(0, 10).map(([ownerId, count]) => {
+        const pct = total > 0 ? (count / total) * 100 : 0;
+        return (
+          <div key={ownerId} className="space-y-0.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="truncate font-medium" title={ownerId}>{ownerId.slice(0, 18)}{ownerId.length > 18 ? '…' : ''}</span>
+              <span className="text-muted-foreground tabular-nums">{count} · {pct.toFixed(1)}%</span>
+            </div>
+            <div className="h-1.5 rounded bg-muted overflow-hidden">
+              <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      })}
+      {breakdown.length > 10 && (
+        <p className="text-[10px] text-muted-foreground pt-1">+ {breakdown.length - 10} more · click to see all</p>
+      )}
+    </div>
+  );
+}
+
