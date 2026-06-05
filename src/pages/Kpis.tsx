@@ -20,6 +20,7 @@ import {
 } from '@/lib/kpis/dataFetcher';
 import type { Aggregation, ComparePreset, KpiMetric, KpiRange } from '@/lib/kpis/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useOrgBranding, hexToRgb } from '@/lib/branding';
 
 const TITLES: Record<KpiMetric, string> = {
   listings: 'Active & listed units',
@@ -44,6 +45,7 @@ export default function Kpis() {
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const branding = useOrgBranding();
 
   const exportPdf = async () => {
     if (!exportRef.current) return;
@@ -59,18 +61,49 @@ export default function Kpis() {
       const pageW = pdf.internal.pageSize.getWidth();
       const pageH = pdf.internal.pageSize.getHeight();
       const headerH = 70;
-      // Header banner
-      pdf.setFillColor(15, 23, 42);
-      pdf.rect(0, 0, pageW, headerH, 'F');
-      pdf.setTextColor(255, 255, 255);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(22);
-      pdf.text('RevMan', 32, 38);
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(11);
-      pdf.text('KPI Dashboard', 32, 56);
-      pdf.setFontSize(9);
-      pdf.text(`${resolved.label} · Generated ${new Date().toLocaleString()}`, pageW - 32, 56, { align: 'right' });
+      const [pr, pg, pb] = hexToRgb(branding.primary);
+      const [sr, sg, sb] = hexToRgb(branding.secondary);
+
+      // Try to load the logo as image element
+      let logoImg: HTMLImageElement | null = null;
+      if (branding.logoUrl) {
+        try {
+          logoImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = branding.logoUrl!;
+          });
+        } catch { logoImg = null; }
+      }
+
+      const drawHeader = () => {
+        pdf.setFillColor(pr, pg, pb);
+        pdf.rect(0, 0, pageW, headerH, 'F');
+        pdf.setFillColor(sr, sg, sb);
+        pdf.rect(0, headerH - 3, pageW, 3, 'F');
+        pdf.setTextColor(255, 255, 255);
+        let textX = 32;
+        if (logoImg) {
+          const maxH = 44;
+          const ratio = logoImg.width / logoImg.height;
+          const h = maxH;
+          const w = h * ratio;
+          try { pdf.addImage(logoImg, 'PNG', 32, (headerH - h) / 2, w, h); } catch { /* ignore */ }
+          textX = 32 + w + 16;
+        }
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(22);
+        pdf.text(branding.name || 'KPI Report', textX, 38);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(11);
+        pdf.text('KPI Dashboard', textX, 56);
+        pdf.setFontSize(9);
+        pdf.text(`${resolved.label} · Generated ${new Date().toLocaleString()}`, pageW - 32, 56, { align: 'right' });
+      };
+
+      drawHeader();
       // Content image, fit width
       const margin = 24;
       const contentW = pageW - margin * 2;
@@ -80,7 +113,6 @@ export default function Kpis() {
       let srcY = 0;
       const pageContentH = pageH - y - 24;
       const ratio = canvas.width / contentW;
-      // Slice the canvas into pages
       while (remaining > 0) {
         const sliceH = Math.min(pageContentH, remaining);
         const sliceCanvas = document.createElement('canvas');
@@ -95,20 +127,11 @@ export default function Kpis() {
         remaining -= sliceH;
         if (remaining > 0) {
           pdf.addPage();
-          // Reprint header on each page
-          pdf.setFillColor(15, 23, 42);
-          pdf.rect(0, 0, pageW, headerH, 'F');
-          pdf.setTextColor(255, 255, 255);
-          pdf.setFont('helvetica', 'bold');
-          pdf.setFontSize(22);
-          pdf.text('RevMan', 32, 38);
-          pdf.setFont('helvetica', 'normal');
-          pdf.setFontSize(11);
-          pdf.text('KPI Dashboard', 32, 56);
+          drawHeader();
           y = headerH + 16;
         }
       }
-      pdf.save(`revman-kpis-${new Date().toISOString().slice(0, 10)}.pdf`);
+      pdf.save(`${(branding.name || 'kpis').toLowerCase().replace(/\s+/g, '-')}-kpis-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (e: any) {
       toast({ title: 'Export failed', description: e.message, variant: 'destructive' });
     } finally {
