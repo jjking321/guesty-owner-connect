@@ -201,19 +201,6 @@ async function computeChurnSeries(range: ResolvedRange, buckets: Bucket[]): Prom
 
   return points;
 }
-  const points = buckets.map((b) => ({ bucket: b.label, bucketStart: b.start, bucketEnd: b.end, value: 0 }));
-  for (const r of all) {
-    if (ignoredSet.has(r.id)) continue;
-    const signalDate = getChurnSignalDate({ ...r, churned_at: eventByListing.get(r.id) as string | undefined });
-    if (!signalDate) continue;
-    const d = new Date(signalDate);
-    if (d < range.start || d > range.end) continue;
-    const idx = findBucketIdx(buckets, d);
-    if (idx >= 0) points[idx].value += 1;
-  }
-
-  return points;
-}
 
 // ---------- Review Score ----------
 export type ReviewScoreMode = 'period' | 'lifetime';
