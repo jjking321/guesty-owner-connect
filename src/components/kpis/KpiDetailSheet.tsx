@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   fetchListingDetail, fetchGbvDetail, fetchChurnDetail, fetchReviewDetail,
   fetchNetGrowthDetail, fetchOwnerConcentrationDetail, fetchChannelMixDetail,
-  fetchAdrDetail, fetchCancellationDetail,
+  fetchAdrDetail, fetchCancellationDetail, fetchRevenuePerListingDetail,
   type BucketWindow,
 } from '@/lib/kpis/dataFetcher';
 import type { KpiMetric, KpiDetailRow } from '@/lib/kpis/types';
@@ -35,6 +35,7 @@ const titles: Record<KpiMetric, string> = {
   channel_mix: 'Channel mix',
   adr: 'ADR',
   cancellation: 'Cancellations',
+  revenue_per_listing: 'Revenue per listing',
 };
 
 function formatCurrency(v: number) {
@@ -63,6 +64,7 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
         case 'channel_mix': return fetchChannelMixDetail(win);
         case 'adr': return fetchAdrDetail(win);
         case 'cancellation': return fetchCancellationDetail(win);
+        case 'revenue_per_listing': return fetchRevenuePerListingDetail(win);
       }
     },
     enabled,
@@ -202,7 +204,7 @@ export function KpiDetailSheet({ open, onOpenChange, metric, window: win, title,
                     {r.date && <div>{format(new Date(r.date), 'MMM d, yyyy')}</div>}
                     {typeof r.value === 'number' && (
                       <div className="font-medium text-foreground">
-                        {metric === 'gbv' ? formatCurrency(r.value) :
+                        {metric === 'gbv' || metric === 'revenue_per_listing' ? formatCurrency(r.value) :
                          metric === 'reviews' ? r.value.toFixed(1) :
                          r.value}
                       </div>
