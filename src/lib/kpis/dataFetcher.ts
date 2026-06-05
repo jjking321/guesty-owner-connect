@@ -697,12 +697,7 @@ export async function fetchChannelMix(
 }
 
 async function computeChannelMixSeries(range: ResolvedRange, buckets: Bucket[]) {
-  const { start, end } = rangeISO(range);
-  const all = await paginate(
-    supabase.from('reservations')
-      .select('check_in, sub_total, fare_accommodation_adjusted, source, status')
-      .gte('check_in', start).lte('check_in', end)
-  );
+  const all = await getReservationsByCheckIn(range);
   const channelTotals = new Map<string, number>();
   // series = top-channel GBV share per bucket
   const perBucket = buckets.map(() => new Map<string, number>());
