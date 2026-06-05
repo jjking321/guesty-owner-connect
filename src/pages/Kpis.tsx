@@ -266,7 +266,15 @@ export default function Kpis() {
         </div>
 
 
-        <div className="rounded-lg border bg-card p-4">
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-xs text-muted-foreground">Configure the dashboard, or save and recall your favorite views.</span>
+            <KpiSavedViews
+              current={{ aggregation, range, compare, reviewMode }}
+              onApply={applyView}
+              onDefaultLoaded={applyView}
+            />
+          </div>
           <KpiControls
             aggregation={aggregation}
             range={range}
