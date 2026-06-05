@@ -30,6 +30,11 @@ const titles: Record<KpiMetric, string> = {
   gbv: 'Reservations',
   churn: 'Churn events',
   reviews: 'Reviews',
+  net_growth: 'Net unit growth',
+  owner_concentration: 'Owner concentration',
+  channel_mix: 'Channel mix',
+  adr: 'ADR',
+  cancellation: 'Cancellations',
 };
 
 function formatCurrency(v: number) {
