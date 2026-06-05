@@ -99,12 +99,32 @@ export default function Kpis() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">KPI Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            Track key business metrics over time. {resolved.label}
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold">KPI Dashboard</h1>
+            <p className="text-sm text-muted-foreground">
+              Track key business metrics over time. {resolved.label}
+            </p>
+          </div>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="icon" aria-label="Settings">
+                <Settings className="h-4 w-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[420px]">
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold">Backfill Gross Booking Value</h3>
+                <p className="text-xs text-muted-foreground">
+                  GBV uses Guesty's <code className="text-[10px] bg-muted px-1 py-0.5 rounded">money.subTotal</code> when available.
+                  Run a backfill for any months still falling back to fare-only revenue.
+                </p>
+                <BackfillSubtotals />
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
+
 
         <div className="rounded-lg border bg-card p-4">
           <KpiControls
