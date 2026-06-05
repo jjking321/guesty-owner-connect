@@ -786,12 +786,7 @@ export async function fetchAdr(
 }
 
 async function computeAdrSeries(range: ResolvedRange, buckets: Bucket[]) {
-  const { start, end } = rangeISO(range);
-  const all = await paginate(
-    supabase.from('reservations')
-      .select('check_in, nights_count, sub_total, fare_accommodation_adjusted, source, status')
-      .gte('check_in', start).lte('check_in', end)
-  );
+  const all = await getReservationsByCheckIn(range);
   const sums = buckets.map(() => ({ rev: 0, nights: 0 }));
   let totalRev = 0, totalNights = 0;
   for (const r of all) {
