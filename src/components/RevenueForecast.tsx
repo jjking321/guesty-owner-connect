@@ -575,7 +575,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               <p className="text-xs text-muted-foreground">Method: Velocity + Probability Blend</p>
             </div>
           </>
-        )}
+          );
+        })()}
       </CardContent>
     </Card>
   );
