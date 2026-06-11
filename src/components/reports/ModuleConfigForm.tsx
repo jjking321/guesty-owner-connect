@@ -254,7 +254,27 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label>Metric</Label>
-            <Select value={module.metric} onValueChange={(v) => update({ metric: v as MetricKey })}>
+            <Select
+              value={module.metric}
+              onValueChange={(v) => {
+                const newMetric = v as MetricKey;
+                const patch: Partial<ReportModule> = { metric: newMetric };
+                // When switching to forecast, default compare to actual revenue
+                // (unless the user already picked a forecast-relevant comparison).
+                if (
+                  newMetric === 'forecast_p50' &&
+                  module.compare !== 'actual_revenue' &&
+                  module.compare !== 'goal'
+                ) {
+                  patch.compare = 'actual_revenue';
+                }
+                // When switching away from forecast, clear actual_revenue
+                if (newMetric !== 'forecast_p50' && module.compare === 'actual_revenue') {
+                  patch.compare = null;
+                }
+                update(patch);
+              }}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {Object.entries(METRIC_LABELS).map(([k, v]) => (
