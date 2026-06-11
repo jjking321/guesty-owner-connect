@@ -412,6 +412,7 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">None</SelectItem>
+              <SelectItem value="actual_revenue">{COMPARE_LABELS.actual_revenue} (forecast only)</SelectItem>
               <SelectItem value="last_year">{COMPARE_LABELS.last_year}</SelectItem>
               <SelectItem value="two_years_ago">{COMPARE_LABELS.two_years_ago}</SelectItem>
               <SelectItem value="previous_period">{COMPARE_LABELS.previous_period}</SelectItem>
@@ -424,6 +425,11 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
           {module.compare === 'goal' && module.metric !== 'revenue' && (
             <p className="text-xs text-muted-foreground">
               Goal comparison only applies to the Revenue metric.
+            </p>
+          )}
+          {module.compare === 'actual_revenue' && module.metric !== 'forecast_p50' && (
+            <p className="text-xs text-muted-foreground">
+              Actual Revenue comparison only applies to the Forecast metric.
             </p>
           )}
         </div>
