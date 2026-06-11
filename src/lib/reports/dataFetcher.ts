@@ -606,6 +606,18 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
         row.compareValue = byMonth.get(row.key) ?? 0;
       }
     }
+  } else if (module.compare === 'compset') {
+    const partial: ModuleData = {
+      rows,
+      total,
+      unit: METRIC_UNITS[module.metric],
+      metricLabel: METRIC_LABELS[module.metric],
+    };
+    const metricKey = (module.metric === 'nights' ? 'revenue' : module.metric) as
+      | 'revenue' | 'occupancy' | 'adr' | 'revpar';
+    await applyCompsetCompare(module, listings, listingIds, range, listingsById, partial, metricKey);
+    compareTotal = partial.compareTotal;
+    compareLabel = partial.compareLabel;
   }
 
   return {
