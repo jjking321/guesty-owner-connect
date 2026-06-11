@@ -269,8 +269,53 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
         }
       }
     }
-    return aggregateGenericForecast(module, rows, listingsById);
+    const forecastData = aggregateGenericForecast(module, rows, listingsById);
+
+    // Compare to actual revenue for the same range
+    if (module.compare === 'actual_revenue') {
+      const nights = await fetchReservationNights(listingIds, startStr, endStr);
+
+      // Resolve breakdown helpers if needed
+      let ownerNames: OwnerMap = {};
+      let groupsForListing = new Map<string, string[]>();
+      if (module.breakdown === 'owner') {
+        const ownerIds = Array.from(
+          new Set(listings.map((l) => l.owner_id).filter(Boolean) as string[]),
+        );
+        ownerNames = await fetchOwnerNames(ownerIds);
+      }
+      if (module.breakdown === 'group') {
+        const groups = await fetchGroupsForListings(listingIds);
+        for (const [, g] of Object.entries(groups)) {
+          for (const lid of g.listingIds) {
+            const existing = groupsForListing.get(lid) ?? [];
+            existing.push(g.name);
+            groupsForListing.set(lid, existing);
+          }
+        }
+      }
+
+      const actualByBucket = new Map<string, number>();
+      let actualTotal = 0;
+      for (const n of nights) {
+        const v = Number(n.revenue_allocation || 0);
+        actualTotal += v;
+        const d = new Date(n.night_date + 'T00:00:00');
+        const buckets = bucketKey(d, n.listing_id, module.breakdown, listingsById, ownerNames, groupsForListing);
+        for (const b of buckets) {
+          actualByBucket.set(b, (actualByBucket.get(b) ?? 0) + v);
+        }
+      }
+      for (const row of forecastData.rows) {
+        row.compareValue = actualByBucket.get(row.key) ?? 0;
+      }
+      forecastData.compareTotal = actualTotal;
+      forecastData.compareLabel = 'Actual Revenue';
+    }
+
+    return forecastData;
   }
+
 
   // Reservation-night-derived metrics: revenue, nights, occupancy, adr, revpar
   const nights = await fetchReservationNights(listingIds, startStr, endStr);
