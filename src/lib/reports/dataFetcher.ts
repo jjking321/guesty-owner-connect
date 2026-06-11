@@ -706,10 +706,12 @@ async function applyCompsetCompare(
 ): Promise<void> {
   const compsetRows = await fetchCompsetMonthly(listingIds, range);
   if (compsetRows.length === 0) {
+    for (const row of data.rows) row.compareValue = 0;
     data.compareLabel = 'Compset';
     data.compareTotal = 0;
     return;
   }
+
 
   // Resolve breakdown helpers
   let ownerNames: OwnerMap = {};
