@@ -501,8 +501,13 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                                 : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-right font-semibold">
-                            {`$${Math.round(Number(m.total_forecast_p50 || m.blended_forecast || 0)).toLocaleString()}`}
+                            {isPastMonth
+                              ? (actualForMonth > 0
+                                  ? `$${Math.round(actualForMonth).toLocaleString()}`
+                                  : <span className="text-muted-foreground">-</span>)
+                              : `$${Math.round(Number(m.total_forecast_p50 || m.blended_forecast || 0)).toLocaleString()}`}
                           </td>
+
                           <td className="py-2 text-center">
                             {(isCurrentMonth || isFutureMonth) && pace !== undefined ? (
                               <span className={`text-xs font-medium ${pace > 1.1 ? 'text-green-600' : pace < 0.9 ? 'text-red-600' : 'text-muted-foreground'}`}>
