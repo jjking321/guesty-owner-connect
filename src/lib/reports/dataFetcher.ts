@@ -694,3 +694,76 @@ function aggregateGenericForecast(
     metricLabel: METRIC_LABELS[module.metric],
   };
 }
+
+async function applyCompsetCompare(
+  module: ReportModule,
+  listings: ListingMeta[],
+  listingIds: string[],
+  range: { start: Date; end: Date },
+  listingsById: Map<string, ListingMeta>,
+  data: ModuleData,
+  metricKey: 'revenue' | 'occupancy' | 'adr' | 'revpar',
+): Promise<void> {
+  const compsetRows = await fetchCompsetMonthly(listingIds, range);
+  if (compsetRows.length === 0) {
+    data.compareLabel = 'Compset';
+    data.compareTotal = 0;
+    return;
+  }
+
+  // Resolve breakdown helpers
+  let ownerNames: OwnerMap = {};
+  let groupsForListing = new Map<string, string[]>();
+  if (module.breakdown === 'owner') {
+    const ownerIds = Array.from(
+      new Set(listings.map((l) => l.owner_id).filter(Boolean) as string[]),
+    );
+    ownerNames = await fetchOwnerNames(ownerIds);
+  }
+  if (module.breakdown === 'group') {
+    const groups = await fetchGroupsForListings(listingIds);
+    for (const [, g] of Object.entries(groups)) {
+      for (const lid of g.listingIds) {
+        const existing = groupsForListing.get(lid) ?? [];
+        existing.push(g.name);
+        groupsForListing.set(lid, existing);
+      }
+    }
+  }
+
+  // Bucket compset values. For revenue we sum across listings+months.
+  // For occupancy/adr/revpar we average across the (listing, month) cells
+  // that fall into the bucket.
+  const sumByBucket = new Map<string, number>();
+  const countByBucket = new Map<string, number>();
+  let totalSum = 0;
+  let totalCount = 0;
+
+  for (const r of compsetRows) {
+    const [y, m] = r.month.split('-').map(Number);
+    const d = new Date(y, (m || 1) - 1, 15);
+    const buckets = bucketKey(d, r.listing_id, module.breakdown, listingsById, ownerNames, groupsForListing);
+    let v = 0;
+    if (metricKey === 'revenue') v = r.revenue;
+    else if (metricKey === 'occupancy') v = r.occupancy * 100;
+    else if (metricKey === 'adr') v = r.adr;
+    else if (metricKey === 'revpar') v = r.revpar;
+    for (const b of buckets) {
+      sumByBucket.set(b, (sumByBucket.get(b) ?? 0) + v);
+      countByBucket.set(b, (countByBucket.get(b) ?? 0) + 1);
+    }
+    totalSum += v;
+    totalCount += 1;
+  }
+
+  const aggregate = (sum: number, count: number) =>
+    metricKey === 'revenue' ? sum : count > 0 ? sum / count : 0;
+
+  for (const row of data.rows) {
+    const s = sumByBucket.get(row.key) ?? 0;
+    const c = countByBucket.get(row.key) ?? 0;
+    row.compareValue = aggregate(s, c);
+  }
+  data.compareTotal = aggregate(totalSum, totalCount);
+  data.compareLabel = 'Compset';
+}
