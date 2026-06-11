@@ -344,7 +344,30 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           </div>
         )}
 
-        {forecast && !loading && (
+        {forecast && !loading && (() => {
+          // Replace past-month forecasts with realized actuals so annual totals
+          // reflect what's still possible, not overstated history.
+          const todayForTotals = new Date();
+          const currentMonthStart = new Date(todayForTotals.getFullYear(), todayForTotals.getMonth(), 1);
+          let adjP50 = 0, adjP10 = 0, adjP90 = 0;
+          for (const mf of forecast.monthlyForecasts || []) {
+            const [yStr, mStr] = (mf.month || '').split('-');
+            const monthDate = new Date(Number(yStr), Number(mStr) - 1, 1);
+            const isPast = monthDate < currentMonthStart;
+            const modelP50 = Number(mf.total_forecast_p50 || (mf as any).blended_forecast || 0);
+            const modelP10 = Number((mf as any).total_forecast_p10 ?? modelP50);
+            const modelP90 = Number((mf as any).total_forecast_p90 ?? modelP50);
+            const actual = actualRevenue.monthlyActuals[mf.month] || 0;
+            if (isPast) {
+              adjP50 += actual; adjP10 += actual; adjP90 += actual;
+            } else {
+              adjP50 += modelP50; adjP10 += modelP10; adjP90 += modelP90;
+            }
+          }
+          const origP10 = Number((forecast.totalForecast as any)?.p10);
+          const origP90 = Number((forecast.totalForecast as any)?.p90);
+          const hasBand = !isNaN(origP10) && !isNaN(origP90);
+          return (
           <>
             {/* Main Forecast Display */}
             {selectedYear === lastYear ? (
@@ -369,13 +392,14 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 </div>
                 <p className="text-sm font-medium text-muted-foreground mb-2">Projected End-of-Year Revenue</p>
                 <p className="text-4xl font-bold mb-2">
-                  ${Number(forecast.totalForecast?.p50 ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  ${Math.round(adjP50).toLocaleString('en-US')}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined)
-                    ? `80% Confidence: $${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
+                  {hasBand
+                    ? `80% Confidence: $${Math.round(adjP10).toLocaleString()} - $${Math.round(adjP90).toLocaleString()}`
                     : 'Confidence interval not available'}
                 </p>
+
                 
                 {/* Enhanced Metrics Row */}
                 <div className="mt-4 pt-4 border-t grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -477,8 +501,13 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                                 : <span className="text-muted-foreground">-</span>}
                           </td>
                           <td className="py-2 text-right font-semibold">
-                            {`$${Math.round(Number(m.total_forecast_p50 || m.blended_forecast || 0)).toLocaleString()}`}
+                            {isPastMonth
+                              ? (actualForMonth > 0
+                                  ? `$${Math.round(actualForMonth).toLocaleString()}`
+                                  : <span className="text-muted-foreground">-</span>)
+                              : `$${Math.round(Number(m.total_forecast_p50 || m.blended_forecast || 0)).toLocaleString()}`}
                           </td>
+
                           <td className="py-2 text-center">
                             {(isCurrentMonth || isFutureMonth) && pace !== undefined ? (
                               <span className={`text-xs font-medium ${pace > 1.1 ? 'text-green-600' : pace < 0.9 ? 'text-red-600' : 'text-muted-foreground'}`}>
@@ -552,7 +581,8 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
               <p className="text-xs text-muted-foreground">Method: Velocity + Probability Blend</p>
             </div>
           </>
-        )}
+          );
+        })()}
       </CardContent>
     </Card>
   );
