@@ -173,6 +173,52 @@ async function fetchGroupsForListings(listingIds: string[]): Promise<GroupMap> {
   return map;
 }
 
+interface CompsetMonthRow {
+  listing_id: string;
+  month: string; // "YYYY-MM"
+  revenue: number;
+  adr: number;
+  occupancy: number; // 0..1
+  revpar: number;
+}
+
+async function fetchCompsetMonthly(
+  listingIds: string[],
+  range: { start: Date; end: Date },
+): Promise<CompsetMonthRow[]> {
+  if (listingIds.length === 0) return [];
+  const chunkSize = 60;
+  const startKey = format(range.start, 'yyyy-MM');
+  const endKey = format(range.end, 'yyyy-MM');
+  const all: CompsetMonthRow[] = [];
+  for (let i = 0; i < listingIds.length; i += chunkSize) {
+    const chunk = listingIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('property_compset_summary')
+      .select('listing_id, monthly_averages, future_monthly_averages')
+      .in('listing_id', chunk);
+    if (error) throw error;
+    for (const row of (data ?? []) as any[]) {
+      const past = Array.isArray(row.monthly_averages) ? row.monthly_averages : [];
+      const future = Array.isArray(row.future_monthly_averages) ? row.future_monthly_averages : [];
+      for (const m of [...past, ...future]) {
+        const month: string | undefined = m?.month;
+        if (!month) continue;
+        if (month < startKey || month > endKey) continue;
+        all.push({
+          listing_id: row.listing_id,
+          month,
+          revenue: Number(m.revenue ?? 0),
+          adr: Number(m.adr ?? 0),
+          occupancy: Number(m.occupancy ?? 0),
+          revpar: Number(m.revpar ?? 0),
+        });
+      }
+    }
+  }
+  return all;
+}
+
 function bucketKey(
   date: Date,
   listingId: string,
@@ -313,8 +359,14 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
       forecastData.compareLabel = 'Actual Revenue';
     }
 
+    // Compare forecast to compset (uses compset monthly revenue averages)
+    if (module.compare === 'compset') {
+      await applyCompsetCompare(module, listings, listingIds, range, listingsById, forecastData, 'revenue');
+    }
+
     return forecastData;
   }
+
 
 
   // Reservation-night-derived metrics: revenue, nights, occupancy, adr, revpar
@@ -554,6 +606,18 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
         row.compareValue = byMonth.get(row.key) ?? 0;
       }
     }
+  } else if (module.compare === 'compset') {
+    const partial: ModuleData = {
+      rows,
+      total,
+      unit: METRIC_UNITS[module.metric],
+      metricLabel: METRIC_LABELS[module.metric],
+    };
+    const metricKey = (module.metric === 'nights' ? 'revenue' : module.metric) as
+      | 'revenue' | 'occupancy' | 'adr' | 'revpar';
+    await applyCompsetCompare(module, listings, listingIds, range, listingsById, partial, metricKey);
+    compareTotal = partial.compareTotal;
+    compareLabel = partial.compareLabel;
   }
 
   return {
@@ -629,4 +693,77 @@ function aggregateGenericForecast(
     unit: 'currency',
     metricLabel: METRIC_LABELS[module.metric],
   };
+}
+
+async function applyCompsetCompare(
+  module: ReportModule,
+  listings: ListingMeta[],
+  listingIds: string[],
+  range: { start: Date; end: Date },
+  listingsById: Map<string, ListingMeta>,
+  data: ModuleData,
+  metricKey: 'revenue' | 'occupancy' | 'adr' | 'revpar',
+): Promise<void> {
+  const compsetRows = await fetchCompsetMonthly(listingIds, range);
+  if (compsetRows.length === 0) {
+    data.compareLabel = 'Compset';
+    data.compareTotal = 0;
+    return;
+  }
+
+  // Resolve breakdown helpers
+  let ownerNames: OwnerMap = {};
+  let groupsForListing = new Map<string, string[]>();
+  if (module.breakdown === 'owner') {
+    const ownerIds = Array.from(
+      new Set(listings.map((l) => l.owner_id).filter(Boolean) as string[]),
+    );
+    ownerNames = await fetchOwnerNames(ownerIds);
+  }
+  if (module.breakdown === 'group') {
+    const groups = await fetchGroupsForListings(listingIds);
+    for (const [, g] of Object.entries(groups)) {
+      for (const lid of g.listingIds) {
+        const existing = groupsForListing.get(lid) ?? [];
+        existing.push(g.name);
+        groupsForListing.set(lid, existing);
+      }
+    }
+  }
+
+  // Bucket compset values. For revenue we sum across listings+months.
+  // For occupancy/adr/revpar we average across the (listing, month) cells
+  // that fall into the bucket.
+  const sumByBucket = new Map<string, number>();
+  const countByBucket = new Map<string, number>();
+  let totalSum = 0;
+  let totalCount = 0;
+
+  for (const r of compsetRows) {
+    const [y, m] = r.month.split('-').map(Number);
+    const d = new Date(y, (m || 1) - 1, 15);
+    const buckets = bucketKey(d, r.listing_id, module.breakdown, listingsById, ownerNames, groupsForListing);
+    let v = 0;
+    if (metricKey === 'revenue') v = r.revenue;
+    else if (metricKey === 'occupancy') v = r.occupancy * 100;
+    else if (metricKey === 'adr') v = r.adr;
+    else if (metricKey === 'revpar') v = r.revpar;
+    for (const b of buckets) {
+      sumByBucket.set(b, (sumByBucket.get(b) ?? 0) + v);
+      countByBucket.set(b, (countByBucket.get(b) ?? 0) + 1);
+    }
+    totalSum += v;
+    totalCount += 1;
+  }
+
+  const aggregate = (sum: number, count: number) =>
+    metricKey === 'revenue' ? sum : count > 0 ? sum / count : 0;
+
+  for (const row of data.rows) {
+    const s = sumByBucket.get(row.key) ?? 0;
+    const c = countByBucket.get(row.key) ?? 0;
+    row.compareValue = aggregate(s, c);
+  }
+  data.compareTotal = aggregate(totalSum, totalCount);
+  data.compareLabel = 'Compset';
 }

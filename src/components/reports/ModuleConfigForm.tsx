@@ -413,6 +413,7 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
             <SelectContent>
               <SelectItem value="none">None</SelectItem>
               <SelectItem value="actual_revenue">{COMPARE_LABELS.actual_revenue} (forecast only)</SelectItem>
+              <SelectItem value="compset">{COMPARE_LABELS.compset}</SelectItem>
               <SelectItem value="last_year">{COMPARE_LABELS.last_year}</SelectItem>
               <SelectItem value="two_years_ago">{COMPARE_LABELS.two_years_ago}</SelectItem>
               <SelectItem value="previous_period">{COMPARE_LABELS.previous_period}</SelectItem>
