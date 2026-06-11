@@ -173,6 +173,52 @@ async function fetchGroupsForListings(listingIds: string[]): Promise<GroupMap> {
   return map;
 }
 
+interface CompsetMonthRow {
+  listing_id: string;
+  month: string; // "YYYY-MM"
+  revenue: number;
+  adr: number;
+  occupancy: number; // 0..1
+  revpar: number;
+}
+
+async function fetchCompsetMonthly(
+  listingIds: string[],
+  range: { start: Date; end: Date },
+): Promise<CompsetMonthRow[]> {
+  if (listingIds.length === 0) return [];
+  const chunkSize = 60;
+  const startKey = format(range.start, 'yyyy-MM');
+  const endKey = format(range.end, 'yyyy-MM');
+  const all: CompsetMonthRow[] = [];
+  for (let i = 0; i < listingIds.length; i += chunkSize) {
+    const chunk = listingIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('property_compset_summary')
+      .select('listing_id, monthly_averages, future_monthly_averages')
+      .in('listing_id', chunk);
+    if (error) throw error;
+    for (const row of (data ?? []) as any[]) {
+      const past = Array.isArray(row.monthly_averages) ? row.monthly_averages : [];
+      const future = Array.isArray(row.future_monthly_averages) ? row.future_monthly_averages : [];
+      for (const m of [...past, ...future]) {
+        const month: string | undefined = m?.month;
+        if (!month) continue;
+        if (month < startKey || month > endKey) continue;
+        all.push({
+          listing_id: row.listing_id,
+          month,
+          revenue: Number(m.revenue ?? 0),
+          adr: Number(m.adr ?? 0),
+          occupancy: Number(m.occupancy ?? 0),
+          revpar: Number(m.revpar ?? 0),
+        });
+      }
+    }
+  }
+  return all;
+}
+
 function bucketKey(
   date: Date,
   listingId: string,
