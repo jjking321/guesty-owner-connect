@@ -1,40 +1,32 @@
 ## Goal
 
-Clear the 5,591 missing-subtotal reservations on Beachside VR, and make sure the UI can do this on its own in the future (the current 24-month window doesn't cover your 2023 history or 2027 OTB bookings).
+When a report module's metric is **Forecast (P50)**, default the "Compare to" selector to **Actual Revenue** and add that as a real comparison option. Users can still override to Goal / Last Year / etc.
 
-## Root cause
-
-We confirmed via a one-off API call that Guesty *does* return `money.subTotalPrice` for the missing reservations (e.g. `GY-ptkMWmhL` came back as `$6,582.89`, matching the folio screenshot exactly). The previous backfill simply never visited some months — the UI only offered the last 24 months, but your gaps run from **Oct 2023 → Feb 2027**.
+Today the forecast path returns early before compare logic runs, so no comparison renders for forecast modules at all.
 
 ## Changes
 
-### 1. `src/components/BackfillSubtotals.tsx` — widen month picker
+### 1. `src/lib/reports/types.ts`
+- Add `'actual_revenue'` to `CompareKey`.
+- Add `actual_revenue: 'Actual Revenue'` to `COMPARE_LABELS`.
 
-Change the month-options generator from "last 24 months" to **48 months back + 18 months forward** (66 total). This covers all historic data and future on-the-books reservations.
+### 2. `src/lib/reports/dataFetcher.ts` — forecast path (around lines 233–272)
+After computing the forecast `rows` / `total`, when `module.compare === 'actual_revenue'`:
+- Fetch `reservation_nights` for the same `listingIds` and resolved date range (reuse `fetchReservationNights`).
+- Sum `revenue_allocation` into the same bucket keys (month / listing / owner / group) the forecast already uses.
+- Set `compareTotal` to the actual revenue sum and `compareLabel` to `'Actual Revenue'`.
+- Populate `row.compareValue` per bucket.
 
-```text
-i = 0   → +18 months (future)
-...
-i = 17  → current month
-...
-i = 65  → -47 months
-```
+This makes the existing KPI / line / bar / table renderers display forecast vs actual with no further changes.
 
-The existing `missingByMonth` query already paginates from `earliest`, so it will automatically include the new months. The existing "Select months with missing data" button will then select **every** month with gaps in one click.
+### 3. `src/components/reports/ModuleConfigForm.tsx`
+- In the metric `<Select onValueChange>`: when the new metric is `forecast_p50` and current `module.compare` is `null` or one of the date-shift compares that doesn't apply to forecasts, set `compare: 'actual_revenue'` in the same `update()` call. Keep the user's choice if they already picked Goal or Actual Revenue.
+- Add `<SelectItem value="actual_revenue">Actual Revenue (forecast only)</SelectItem>` to the Compare dropdown.
+- Mirror the existing "goal" hint: if `compare === 'actual_revenue'` and `metric !== 'forecast_p50'`, show a small muted note that it only applies to forecasts.
 
-### 2. Kick off the Beachside VR backfill now
-
-Once you approve and switch to build mode, I'll invoke `backfill-reservation-subtotals` once per gap month for the Beachside VR account (`a864693d-...`) with `onlyMissing: true`. Each call self-chains via the edge function's built-in continuation pattern, so it runs unattended.
-
-Gap months to process (39 total): `2023-10` through `2027-02` (skipping `2026-06` which has zero gaps).
-
-Expected result: ~5,591 reservations updated, a handful skipped (truly deleted in Guesty).
-
-### 3. No backend changes
-
-The edge function itself is correct as-is. No migrations, no schema changes.
+### 4. New-module default (`ReportBuilder.tsx` → `newModule()`)
+Leave unchanged — the auto-select fires when the user switches the metric to forecast, which is the requested behavior.
 
 ## Out of scope
-
-- Renjoy account (different org — those 2027 placeholder bookings appear to be deleted/cancelled in Guesty; can be handled separately).
-- Removing the "fallback to fare" warning text — once the backfill finishes, the Data quality line on the GBV card will naturally drop toward ~100% coverage.
+- No database/schema changes.
+- No changes to KPI dashboard, forecast generation, or other report metrics.
