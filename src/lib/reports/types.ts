@@ -45,6 +45,7 @@ export type CompareKey =
   | 'last_month'          // previous calendar month
   | 'two_years_ago'       // same range, shifted -2 years
   | 'goal'                // monthly revenue goals
+  | 'actual_revenue'      // actual revenue for the same range (forecast only)
   | null;
 
 export const COMPARE_LABELS: Record<Exclude<CompareKey, null>, string> = {
@@ -55,6 +56,7 @@ export const COMPARE_LABELS: Record<Exclude<CompareKey, null>, string> = {
   last_month: 'Last month',
   two_years_ago: '2 years ago',
   goal: 'Goal',
+  actual_revenue: 'Actual Revenue',
 };
 
 export interface ReportModule {
