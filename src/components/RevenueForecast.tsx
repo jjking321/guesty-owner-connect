@@ -344,7 +344,30 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
           </div>
         )}
 
-        {forecast && !loading && (
+        {forecast && !loading && (() => {
+          // Replace past-month forecasts with realized actuals so annual totals
+          // reflect what's still possible, not overstated history.
+          const todayForTotals = new Date();
+          const currentMonthStart = new Date(todayForTotals.getFullYear(), todayForTotals.getMonth(), 1);
+          let adjP50 = 0, adjP10 = 0, adjP90 = 0;
+          for (const mf of forecast.monthlyForecasts || []) {
+            const [yStr, mStr] = (mf.month || '').split('-');
+            const monthDate = new Date(Number(yStr), Number(mStr) - 1, 1);
+            const isPast = monthDate < currentMonthStart;
+            const modelP50 = Number(mf.total_forecast_p50 || (mf as any).blended_forecast || 0);
+            const modelP10 = Number((mf as any).total_forecast_p10 ?? modelP50);
+            const modelP90 = Number((mf as any).total_forecast_p90 ?? modelP50);
+            const actual = actualRevenue.monthlyActuals[mf.month] || 0;
+            if (isPast) {
+              adjP50 += actual; adjP10 += actual; adjP90 += actual;
+            } else {
+              adjP50 += modelP50; adjP10 += modelP10; adjP90 += modelP90;
+            }
+          }
+          const origP10 = Number((forecast.totalForecast as any)?.p10);
+          const origP90 = Number((forecast.totalForecast as any)?.p90);
+          const hasBand = !isNaN(origP10) && !isNaN(origP90);
+          return (
           <>
             {/* Main Forecast Display */}
             {selectedYear === lastYear ? (
