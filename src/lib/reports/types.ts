@@ -46,6 +46,7 @@ export type CompareKey =
   | 'two_years_ago'       // same range, shifted -2 years
   | 'goal'                // monthly revenue goals
   | 'actual_revenue'      // actual revenue for the same range (forecast only)
+  | 'compset'             // compset monthly averages for the same range
   | null;
 
 export const COMPARE_LABELS: Record<Exclude<CompareKey, null>, string> = {
@@ -57,6 +58,7 @@ export const COMPARE_LABELS: Record<Exclude<CompareKey, null>, string> = {
   two_years_ago: '2 years ago',
   goal: 'Goal',
   actual_revenue: 'Actual Revenue',
+  compset: 'Compset',
 };
 
 export interface ReportModule {
