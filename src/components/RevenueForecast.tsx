@@ -392,13 +392,14 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
                 </div>
                 <p className="text-sm font-medium text-muted-foreground mb-2">Projected End-of-Year Revenue</p>
                 <p className="text-4xl font-bold mb-2">
-                  ${Number(forecast.totalForecast?.p50 ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  ${Math.round(adjP50).toLocaleString('en-US')}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {((forecast.totalForecast as any)?.p10 !== undefined && (forecast.totalForecast as any)?.p90 !== undefined)
-                    ? `80% Confidence: $${Number((forecast.totalForecast as any).p10).toLocaleString()} - $${Number((forecast.totalForecast as any).p90).toLocaleString()}`
+                  {hasBand
+                    ? `80% Confidence: $${Math.round(adjP10).toLocaleString()} - $${Math.round(adjP90).toLocaleString()}`
                     : 'Confidence interval not available'}
                 </p>
+
                 
                 {/* Enhanced Metrics Row */}
                 <div className="mt-4 pt-4 border-t grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
