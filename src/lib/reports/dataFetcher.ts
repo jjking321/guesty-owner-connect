@@ -582,6 +582,46 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
             break;
         }
       }
+    } else {
+      // Non-month breakdowns (listing / owner / group): aggregate prev nights by the same bucket key
+      const prevBucketRev = new Map<string, number>();
+      const prevBucketNights = new Map<string, number>();
+      const prevBucketListings = new Map<string, Set<string>>();
+      for (const n of prevNights) {
+        const d = new Date(n.night_date + 'T00:00:00');
+        const buckets = bucketKey(d, n.listing_id, module.breakdown, listingsById, ownerNames, groupsForListing);
+        for (const b of buckets) {
+          prevBucketRev.set(b, (prevBucketRev.get(b) ?? 0) + Number(n.revenue_allocation || 0));
+          prevBucketNights.set(b, (prevBucketNights.get(b) ?? 0) + 1);
+          const set = prevBucketListings.get(b) ?? new Set<string>();
+          set.add(n.listing_id);
+          prevBucketListings.set(b, set);
+        }
+      }
+      const prevTotalDays = differenceInCalendarDays(prevRange.end, prevRange.start) + 1;
+      for (const row of rows) {
+        const r = prevBucketRev.get(row.key) ?? 0;
+        const nb = prevBucketNights.get(row.key) ?? 0;
+        const setSize = prevBucketListings.get(row.key)?.size ?? 0;
+        const av = setSize * prevTotalDays;
+        switch (module.metric) {
+          case 'revenue':
+            row.compareValue = r;
+            break;
+          case 'nights':
+            row.compareValue = nb;
+            break;
+          case 'occupancy':
+            row.compareValue = av > 0 ? Math.min(100, (nb / av) * 100) : 0;
+            break;
+          case 'adr':
+            row.compareValue = nb > 0 ? r / nb : 0;
+            break;
+          case 'revpar':
+            row.compareValue = av > 0 ? r / av : 0;
+            break;
+        }
+      }
     }
   } else if (module.compare === 'goal' && (module.metric === 'revenue')) {
     const startYear = range.start.getFullYear();
