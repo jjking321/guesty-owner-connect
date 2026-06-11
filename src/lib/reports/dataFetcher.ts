@@ -359,8 +359,14 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
       forecastData.compareLabel = 'Actual Revenue';
     }
 
+    // Compare forecast to compset (uses compset monthly revenue averages)
+    if (module.compare === 'compset') {
+      await applyCompsetCompare(module, listings, listingIds, range, listingsById, forecastData, 'revenue');
+    }
+
     return forecastData;
   }
+
 
 
   // Reservation-night-derived metrics: revenue, nights, occupancy, adr, revpar
