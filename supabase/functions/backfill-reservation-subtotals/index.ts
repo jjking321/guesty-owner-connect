@@ -249,16 +249,16 @@ Deno.serve(async (req) => {
   const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
   // Auth check: allow service-role self-invocations or authenticated users
-  const serviceRoleHeader = req.headers.get('x-service-role');
-  if (!serviceRoleHeader) {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
+  const authHeader = req.headers.get('Authorization') ?? '';
+  const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const isServiceRole = bearer.length > 0 && bearer === serviceRoleKey;
+  if (!isServiceRole) {
+    if (!bearer) {
       return new Response(JSON.stringify({ error: 'Not authenticated' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(bearer);
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Invalid token' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

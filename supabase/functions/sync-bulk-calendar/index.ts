@@ -510,7 +510,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Check for service role invocation FIRST (from nightly-sync or self-invocation)
-    const isServiceRole = req.headers.get('x-service-role') === 'true';
+    const isServiceRole = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim() === supabaseServiceKey;
 
     const authHeader = req.headers.get('Authorization');
     let authToken = '';

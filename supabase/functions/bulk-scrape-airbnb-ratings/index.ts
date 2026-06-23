@@ -170,15 +170,16 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // Check for service-role bypass (for automated nightly sync)
-    const isServiceRole = req.headers.get("x-service-role") === "true";
-    const authHeader = req.headers.get("Authorization");
-
     // Initialize Supabase clients
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    
+
+    // Auth: service-role bearer (internal invocations) or a valid user JWT
+    const authHeader = req.headers.get("Authorization");
+    const bearer = (authHeader ?? "").replace(/^Bearer\s+/i, "").trim();
+    const isServiceRole = bearer.length > 0 && bearer === supabaseServiceKey;
+
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     let organizationId: string;
