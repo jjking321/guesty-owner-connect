@@ -1688,7 +1688,7 @@ async function buildPivotCompare(
   }
 
   // Date-shifted comparisons.
-  const prevRange = resolveCompareRange(range, module.compare);
+  const prevRange = resolveCompareRange({ start: range.start, end: range.end, label: '' }, module.compare);
   if (!prevRange) return undefined;
   const yearShift =
     module.compare === 'last_year' ? 1 :
