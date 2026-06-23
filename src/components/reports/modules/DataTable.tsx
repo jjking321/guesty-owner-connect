@@ -17,6 +17,92 @@ function slugify(s: string) {
 
 export function DataTable({ module, data }: Props) {
   const range = resolveDateRange(module.dateRange);
+  const pivot = data.pivot;
+
+  // ---------- PIVOT RENDER ----------
+  if (pivot) {
+    const handleCsv = () => {
+      const headers = ['Bucket', ...pivot.columns, 'Total'];
+      const rows: string[][] = [headers];
+      for (const r of pivot.rows) {
+        rows.push([
+          r.key,
+          ...pivot.columns.map((c) => formatCsvValue(r.values[c] ?? 0, data.unit)),
+          formatCsvValue(r.rowTotal, data.unit),
+        ]);
+      }
+      rows.push([
+        'Total',
+        ...pivot.columns.map((c) => formatCsvValue(pivot.columnTotals[c] ?? 0, data.unit)),
+        formatCsvValue(pivot.grandTotal, data.unit),
+      ]);
+      downloadCsv(`${slugify(module.title)}.csv`, rows);
+    };
+
+    return (
+      <Card data-report-module>
+        <CardHeader className="flex flex-row items-start justify-between space-y-0">
+          <div>
+            <CardTitle className="text-base">{module.title}</CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">{range.label}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleCsv}>
+            <Download className="h-4 w-4 mr-2" />
+            CSV
+          </Button>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Bucket</TableHead>
+                {pivot.columns.map((c) => (
+                  <TableHead key={c} className="text-right">{c}</TableHead>
+                ))}
+                <TableHead className="text-right font-semibold">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pivot.rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={pivot.columns.length + 2} className="text-center text-muted-foreground">
+                    No data
+                  </TableCell>
+                </TableRow>
+              ) : (
+                pivot.rows.map((r) => (
+                  <TableRow key={r.key}>
+                    <TableCell>{r.key}</TableCell>
+                    {pivot.columns.map((c) => (
+                      <TableCell key={c} className="text-right">
+                        {formatValue(r.values[c] ?? 0, data.unit)}
+                      </TableCell>
+                    ))}
+                    <TableCell className="text-right font-medium">
+                      {formatValue(r.rowTotal, data.unit)}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+              <TableRow className="font-medium">
+                <TableCell>Total</TableCell>
+                {pivot.columns.map((c) => (
+                  <TableCell key={c} className="text-right">
+                    {formatValue(pivot.columnTotals[c] ?? 0, data.unit)}
+                  </TableCell>
+                ))}
+                <TableCell className="text-right font-semibold">
+                  {formatValue(pivot.grandTotal, data.unit)}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ---------- LEGACY (single-column) RENDER ----------
   const showCompare = data.rows.some((r) => r.compareValue !== undefined);
 
   const handleCsv = () => {

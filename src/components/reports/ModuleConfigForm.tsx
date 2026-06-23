@@ -359,7 +359,7 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
           </div>
           {module.type !== 'kpi' && (
             <div className="space-y-1">
-              <Label>Breakdown</Label>
+              <Label>{module.type === 'table' ? 'Rows (breakdown)' : 'Breakdown'}</Label>
               <Select
                 value={module.breakdown ?? 'month'}
                 onValueChange={(v) => update({ breakdown: v as BreakdownKey })}
@@ -375,6 +375,33 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
             </div>
           )}
         </div>
+
+        {module.type === 'table' && (
+          <div className="space-y-1">
+            <Label>Columns (then by) — optional pivot</Label>
+            <Select
+              value={module.breakdown2 ?? 'none'}
+              onValueChange={(v) =>
+                update({ breakdown2: v === 'none' ? undefined : (v as BreakdownKey) })
+              }
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="month" disabled={(module.breakdown ?? 'month') === 'month'}>By month</SelectItem>
+                <SelectItem value="listing" disabled={module.breakdown === 'listing'}>By listing</SelectItem>
+                <SelectItem value="owner" disabled={module.breakdown === 'owner'}>By owner</SelectItem>
+                <SelectItem value="group" disabled={module.breakdown === 'group'}>By group</SelectItem>
+              </SelectContent>
+            </Select>
+            {module.breakdown2 && (
+              <p className="text-xs text-muted-foreground">
+                Renders as a pivot table. Comparison is disabled while a pivot is active.
+              </p>
+            )}
+          </div>
+        )}
+
 
         {dateRangePreset === 'custom' && 'start' in module.dateRange && (
           <div className="grid grid-cols-2 gap-3">
@@ -401,39 +428,42 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
           </div>
         )}
 
-        <div className="space-y-1">
-          <Label>Compare to</Label>
-          <Select
-            value={module.compare ?? 'none'}
-            onValueChange={(v) =>
-              update({ compare: v === 'none' ? null : (v as CompareKey) })
-            }
-          >
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None</SelectItem>
-              <SelectItem value="actual_revenue">{COMPARE_LABELS.actual_revenue} (forecast only)</SelectItem>
-              <SelectItem value="compset">{COMPARE_LABELS.compset}</SelectItem>
-              <SelectItem value="last_year">{COMPARE_LABELS.last_year}</SelectItem>
-              <SelectItem value="two_years_ago">{COMPARE_LABELS.two_years_ago}</SelectItem>
-              <SelectItem value="previous_period">{COMPARE_LABELS.previous_period}</SelectItem>
-              <SelectItem value="last_30_days">{COMPARE_LABELS.last_30_days}</SelectItem>
-              <SelectItem value="last_90_days">{COMPARE_LABELS.last_90_days}</SelectItem>
-              <SelectItem value="last_month">{COMPARE_LABELS.last_month}</SelectItem>
-              <SelectItem value="goal">{COMPARE_LABELS.goal} (revenue only)</SelectItem>
-            </SelectContent>
-          </Select>
-          {module.compare === 'goal' && module.metric !== 'revenue' && (
-            <p className="text-xs text-muted-foreground">
-              Goal comparison only applies to the Revenue metric.
-            </p>
-          )}
-          {module.compare === 'actual_revenue' && module.metric !== 'forecast_p50' && (
-            <p className="text-xs text-muted-foreground">
-              Actual Revenue comparison only applies to the Forecast metric.
-            </p>
-          )}
-        </div>
+        {!(module.type === 'table' && module.breakdown2) && (
+          <div className="space-y-1">
+            <Label>Compare to</Label>
+            <Select
+              value={module.compare ?? 'none'}
+              onValueChange={(v) =>
+                update({ compare: v === 'none' ? null : (v as CompareKey) })
+              }
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="actual_revenue">{COMPARE_LABELS.actual_revenue} (forecast only)</SelectItem>
+                <SelectItem value="compset">{COMPARE_LABELS.compset}</SelectItem>
+                <SelectItem value="last_year">{COMPARE_LABELS.last_year}</SelectItem>
+                <SelectItem value="two_years_ago">{COMPARE_LABELS.two_years_ago}</SelectItem>
+                <SelectItem value="previous_period">{COMPARE_LABELS.previous_period}</SelectItem>
+                <SelectItem value="last_30_days">{COMPARE_LABELS.last_30_days}</SelectItem>
+                <SelectItem value="last_90_days">{COMPARE_LABELS.last_90_days}</SelectItem>
+                <SelectItem value="last_month">{COMPARE_LABELS.last_month}</SelectItem>
+                <SelectItem value="goal">{COMPARE_LABELS.goal} (revenue only)</SelectItem>
+              </SelectContent>
+            </Select>
+            {module.compare === 'goal' && module.metric !== 'revenue' && (
+              <p className="text-xs text-muted-foreground">
+                Goal comparison only applies to the Revenue metric.
+              </p>
+            )}
+            {module.compare === 'actual_revenue' && module.metric !== 'forecast_p50' && (
+              <p className="text-xs text-muted-foreground">
+                Actual Revenue comparison only applies to the Forecast metric.
+              </p>
+            )}
+          </div>
+        )}
+
       </CardContent>
     </Card>
   );

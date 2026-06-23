@@ -263,6 +263,13 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
   const listingsById = new Map(listings.map((l) => [l.id, l]));
   const listingIds = listings.map((l) => l.id);
 
+  // Pivot path: only for table widgets with a secondary breakdown selected.
+  if (module.type === 'table' && module.breakdown2 && module.breakdown2 !== module.breakdown) {
+    return buildPivotData(module, range, startStr, endStr, listings, listingsById, listingIds);
+  }
+
+
+
   // Goals path
   if (module.metric === 'goal') {
     const startYear = range.start.getFullYear();
@@ -808,4 +815,386 @@ async function applyCompsetCompare(
   }
   data.compareTotal = aggregate(totalSum, totalCount);
   data.compareLabel = 'Compset';
+}
+
+// ============================================================
+// Pivot (Rows × Columns) data path for Table widgets
+// ============================================================
+
+function sortBucketLabels(keys: string[], breakdown: ReportModule['breakdown']): string[] {
+  const arr = keys.slice();
+  if (!breakdown || breakdown === 'month') {
+    arr.sort((a, b) => {
+      const da = Date.parse(`${a} 01`);
+      const db = Date.parse(`${b} 01`);
+      if (isNaN(da) || isNaN(db)) return a.localeCompare(b);
+      return da - db;
+    });
+  } else {
+    arr.sort((a, b) => a.localeCompare(b));
+  }
+  return arr;
+}
+
+function pivotKeyPairs(
+  date: Date,
+  listingId: string,
+  rowB: ReportModule['breakdown'],
+  colB: ReportModule['breakdown'],
+  listingsById: Map<string, ListingMeta>,
+  ownerNames: OwnerMap,
+  groupsForListing: Map<string, string[]>,
+): Array<[string, string]> {
+  const rowKeys = bucketKey(date, listingId, rowB, listingsById, ownerNames, groupsForListing);
+  const colKeys = bucketKey(date, listingId, colB, listingsById, ownerNames, groupsForListing);
+  const out: Array<[string, string]> = [];
+  for (const r of rowKeys) for (const c of colKeys) out.push([r, c]);
+  return out;
+}
+
+async function resolveBreakdownHelpers(
+  rowB: ReportModule['breakdown'],
+  colB: ReportModule['breakdown'],
+  listings: ListingMeta[],
+  listingIds: string[],
+): Promise<{ ownerNames: OwnerMap; groupsForListing: Map<string, string[]> }> {
+  const needOwner = rowB === 'owner' || colB === 'owner';
+  const needGroup = rowB === 'group' || colB === 'group';
+  let ownerNames: OwnerMap = {};
+  const groupsForListing = new Map<string, string[]>();
+  if (needOwner) {
+    const ownerIds = Array.from(new Set(listings.map((l) => l.owner_id).filter(Boolean) as string[]));
+    ownerNames = await fetchOwnerNames(ownerIds);
+  }
+  if (needGroup) {
+    const groups = await fetchGroupsForListings(listingIds);
+    for (const [, g] of Object.entries(groups)) {
+      for (const lid of g.listingIds) {
+        const existing = groupsForListing.get(lid) ?? [];
+        existing.push(g.name);
+        groupsForListing.set(lid, existing);
+      }
+    }
+  }
+  return { ownerNames, groupsForListing };
+}
+
+async function buildPivotData(
+  module: ReportModule,
+  range: { start: Date; end: Date; label: string },
+  startStr: string,
+  endStr: string,
+  listings: ListingMeta[],
+  listingsById: Map<string, ListingMeta>,
+  listingIds: string[],
+): Promise<ModuleData> {
+  const unit = METRIC_UNITS[module.metric];
+  const metricLabel = METRIC_LABELS[module.metric];
+  const rowB = module.breakdown ?? 'month';
+  const colB = module.breakdown2!;
+
+  if (listingIds.length === 0) {
+    return {
+      rows: [],
+      total: 0,
+      unit,
+      metricLabel,
+      pivot: { columns: [], rows: [], columnTotals: {}, grandTotal: 0 },
+    };
+  }
+
+  const { ownerNames, groupsForListing } = await resolveBreakdownHelpers(
+    rowB,
+    colB,
+    listings,
+    listingIds,
+  );
+
+  // Per-cell accumulators
+  const revByCell = new Map<string, number>(); // key = rowKey|||colKey
+  const nightsByCell = new Map<string, number>();
+  const listingsByCell = new Map<string, Set<string>>();
+  const rowKeysSet = new Set<string>();
+  const colKeysSet = new Set<string>();
+
+  const cellKey = (r: string, c: string) => `${r}|||${c}`;
+
+  // ---- Goal metric ----
+  if (module.metric === 'goal') {
+    const goals = await fetchGoals(
+      listingIds,
+      range.start.getFullYear(),
+      range.end.getFullYear(),
+    );
+    for (const g of goals) {
+      const d = new Date(g.year, g.month - 1, 15);
+      if (d < range.start || d > range.end) continue;
+      const pairs = pivotKeyPairs(d, g.listing_id, rowB, colB, listingsById, ownerNames, groupsForListing);
+      const v = Number(g.goal_revenue || 0);
+      for (const [r, c] of pairs) {
+        rowKeysSet.add(r); colKeysSet.add(c);
+        revByCell.set(cellKey(r, c), (revByCell.get(cellKey(r, c)) ?? 0) + v);
+      }
+    }
+    return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel);
+  }
+
+  // ---- Forecast metric ----
+  if (module.metric === 'forecast_p50') {
+    const startYear = range.start.getFullYear();
+    const endYear = range.end.getFullYear();
+    const chunkSize = 60;
+    for (let i = 0; i < listingIds.length; i += chunkSize) {
+      const chunk = listingIds.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from('revenue_forecasts')
+        .select('listing_id, year, monthly_forecasts, generated_at')
+        .in('listing_id', chunk)
+        .gte('year', startYear)
+        .lte('year', endYear)
+        .order('generated_at', { ascending: false });
+      if (error) throw error;
+      const seen = new Set<string>();
+      for (const r of (data ?? []) as any[]) {
+        const key = `${r.listing_id}-${r.year}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const monthly = Array.isArray(r.monthly_forecasts) ? r.monthly_forecasts : [];
+        for (const m of monthly) {
+          const targetMonth: string | undefined = m?.month;
+          if (!targetMonth) continue;
+          const [y, mo] = targetMonth.split('-').map(Number);
+          const d = new Date(y, (mo || 1) - 1, 15);
+          if (d < range.start || d > range.end) continue;
+          const v = Number(m?.total_forecast_p50 ?? m?.blended_forecast ?? m?.probability_forecast ?? 0);
+          const pairs = pivotKeyPairs(d, r.listing_id, rowB, colB, listingsById, ownerNames, groupsForListing);
+          for (const [rk, ck] of pairs) {
+            rowKeysSet.add(rk); colKeysSet.add(ck);
+            revByCell.set(cellKey(rk, ck), (revByCell.get(cellKey(rk, ck)) ?? 0) + v);
+          }
+        }
+      }
+    }
+    return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel);
+  }
+
+  // ---- Reservation-night metrics: revenue / nights / occupancy / adr / revpar ----
+  const nights = await fetchReservationNights(listingIds, startStr, endStr);
+  for (const n of nights) {
+    const d = new Date(n.night_date + 'T00:00:00');
+    const pairs = pivotKeyPairs(d, n.listing_id, rowB, colB, listingsById, ownerNames, groupsForListing);
+    const rev = Number(n.revenue_allocation || 0);
+    for (const [rk, ck] of pairs) {
+      rowKeysSet.add(rk); colKeysSet.add(ck);
+      const ck2 = cellKey(rk, ck);
+      revByCell.set(ck2, (revByCell.get(ck2) ?? 0) + rev);
+      nightsByCell.set(ck2, (nightsByCell.get(ck2) ?? 0) + 1);
+      const set = listingsByCell.get(ck2) ?? new Set<string>();
+      set.add(n.listing_id);
+      listingsByCell.set(ck2, set);
+    }
+  }
+
+  return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, module.metric, unit, metricLabel);
+}
+
+function availableNightsForPivotCell(
+  rowB: ReportModule['breakdown'],
+  colB: ReportModule['breakdown'],
+  rowKey: string,
+  colKey: string,
+  listingsInCell: number,
+  range: { start: Date; end: Date },
+  totalListings: number,
+): number {
+  // Determine which axis (if any) is "month"
+  const monthLabel =
+    rowB === 'month' ? rowKey : colB === 'month' ? colKey : null;
+  let days: number;
+  if (monthLabel) {
+    const parsed = new Date(`${monthLabel} 01`);
+    if (isNaN(parsed.getTime())) {
+      days = differenceInCalendarDays(range.end, range.start) + 1;
+    } else {
+      const ms = startOfMonth(parsed);
+      const me = endOfMonth(parsed);
+      const effS = ms < range.start ? range.start : ms;
+      const effE = me > range.end ? range.end : me;
+      days = Math.max(0, differenceInCalendarDays(effE, effS) + 1);
+    }
+  } else {
+    days = differenceInCalendarDays(range.end, range.start) + 1;
+  }
+  // If neither axis is month, we still use unique-listings-in-cell as the property count.
+  // If one axis is month and the other is an entity axis, listingsInCell is correct.
+  // If one axis is month and the other axis is also based on entity that's unbooked, listingsInCell underestimates;
+  // but that matches the legacy single-axis behavior for non-month breakdowns.
+  const props = listingsInCell > 0 ? listingsInCell : 0;
+  return days * props;
+}
+
+function assemblePivot(
+  rowB: ReportModule['breakdown'],
+  colB: ReportModule['breakdown'],
+  rowKeysSet: Set<string>,
+  colKeysSet: Set<string>,
+  revByCell: Map<string, number>,
+  nightsByCell: Map<string, number>,
+  listingsByCell: Map<string, Set<string>>,
+  range: { start: Date; end: Date },
+  listings: ListingMeta[],
+  metric: 'revenue' | 'nights' | 'occupancy' | 'adr' | 'revpar' | 'goal' | 'forecast_p50',
+  unit: ModuleData['unit'],
+  metricLabel: string,
+): ModuleData {
+  const cellKey = (r: string, c: string) => `${r}|||${c}`;
+
+  // If month is on either axis, ensure all months in range are present even if empty.
+  if (rowB === 'month') {
+    const months = eachMonthOfInterval({ start: startOfMonth(range.start), end: endOfMonth(range.end) });
+    for (const m of months) rowKeysSet.add(format(m, 'MMM yyyy'));
+  }
+  if (colB === 'month') {
+    const months = eachMonthOfInterval({ start: startOfMonth(range.start), end: endOfMonth(range.end) });
+    for (const m of months) colKeysSet.add(format(m, 'MMM yyyy'));
+  }
+
+  const rowKeys = sortBucketLabels(Array.from(rowKeysSet), rowB);
+  const colKeys = sortBucketLabels(Array.from(colKeysSet), colB);
+
+  const computeCellValue = (rk: string, ck: string): number => {
+    const k = cellKey(rk, ck);
+    const rev = revByCell.get(k) ?? 0;
+    const nb = nightsByCell.get(k) ?? 0;
+    const setSize = listingsByCell.get(k)?.size ?? 0;
+    switch (metric) {
+      case 'revenue':
+      case 'goal':
+      case 'forecast_p50':
+        return rev;
+      case 'nights':
+        return nb;
+      case 'occupancy': {
+        const av = availableNightsForPivotCell(rowB, colB, rk, ck, setSize, range, listings.length);
+        return av > 0 ? Math.min(100, (nb / av) * 100) : 0;
+      }
+      case 'adr':
+        return nb > 0 ? rev / nb : 0;
+      case 'revpar': {
+        const av = availableNightsForPivotCell(rowB, colB, rk, ck, setSize, range, listings.length);
+        return av > 0 ? rev / av : 0;
+      }
+    }
+  };
+
+  // Build pivot rows and totals
+  const pivotRows = rowKeys.map((rk) => {
+    const values: Record<string, number> = {};
+    let rowTotalRev = 0, rowTotalNights = 0, rowTotalListings = new Set<string>();
+    for (const ck of colKeys) {
+      values[ck] = computeCellValue(rk, ck);
+      const k = cellKey(rk, ck);
+      rowTotalRev += revByCell.get(k) ?? 0;
+      rowTotalNights += nightsByCell.get(k) ?? 0;
+      for (const l of (listingsByCell.get(k) ?? new Set<string>())) rowTotalListings.add(l);
+    }
+    // Recompute row total using same per-row aggregation rules
+    let rowTotal = 0;
+    switch (metric) {
+      case 'revenue':
+      case 'goal':
+      case 'forecast_p50':
+        rowTotal = rowTotalRev; break;
+      case 'nights':
+        rowTotal = rowTotalNights; break;
+      case 'occupancy': {
+        // available across this row = sum of cell avail across columns
+        let av = 0;
+        for (const ck of colKeys) {
+          const k = cellKey(rk, ck);
+          av += availableNightsForPivotCell(rowB, colB, rk, ck, listingsByCell.get(k)?.size ?? 0, range, listings.length);
+        }
+        rowTotal = av > 0 ? Math.min(100, (rowTotalNights / av) * 100) : 0;
+        break;
+      }
+      case 'adr':
+        rowTotal = rowTotalNights > 0 ? rowTotalRev / rowTotalNights : 0; break;
+      case 'revpar': {
+        let av = 0;
+        for (const ck of colKeys) {
+          const k = cellKey(rk, ck);
+          av += availableNightsForPivotCell(rowB, colB, rk, ck, listingsByCell.get(k)?.size ?? 0, range, listings.length);
+        }
+        rowTotal = av > 0 ? rowTotalRev / av : 0;
+        break;
+      }
+    }
+    return { key: rk, values, rowTotal };
+  });
+
+  // Column totals
+  const columnTotals: Record<string, number> = {};
+  for (const ck of colKeys) {
+    let colRev = 0, colNights = 0, colAv = 0;
+    for (const rk of rowKeys) {
+      const k = cellKey(rk, ck);
+      colRev += revByCell.get(k) ?? 0;
+      colNights += nightsByCell.get(k) ?? 0;
+      colAv += availableNightsForPivotCell(rowB, colB, rk, ck, listingsByCell.get(k)?.size ?? 0, range, listings.length);
+    }
+    switch (metric) {
+      case 'revenue':
+      case 'goal':
+      case 'forecast_p50':
+        columnTotals[ck] = colRev; break;
+      case 'nights':
+        columnTotals[ck] = colNights; break;
+      case 'occupancy':
+        columnTotals[ck] = colAv > 0 ? Math.min(100, (colNights / colAv) * 100) : 0; break;
+      case 'adr':
+        columnTotals[ck] = colNights > 0 ? colRev / colNights : 0; break;
+      case 'revpar':
+        columnTotals[ck] = colAv > 0 ? colRev / colAv : 0; break;
+    }
+  }
+
+  // Grand total
+  let grandRev = 0, grandNights = 0, grandAv = 0;
+  for (const rk of rowKeys) for (const ck of colKeys) {
+    const k = cellKey(rk, ck);
+    grandRev += revByCell.get(k) ?? 0;
+    grandNights += nightsByCell.get(k) ?? 0;
+    grandAv += availableNightsForPivotCell(rowB, colB, rk, ck, listingsByCell.get(k)?.size ?? 0, range, listings.length);
+  }
+  let grandTotal = 0;
+  switch (metric) {
+    case 'revenue':
+    case 'goal':
+    case 'forecast_p50':
+      grandTotal = grandRev; break;
+    case 'nights':
+      grandTotal = grandNights; break;
+    case 'occupancy':
+      grandTotal = grandAv > 0 ? Math.min(100, (grandNights / grandAv) * 100) : 0; break;
+    case 'adr':
+      grandTotal = grandNights > 0 ? grandRev / grandNights : 0; break;
+    case 'revpar':
+      grandTotal = grandAv > 0 ? grandRev / grandAv : 0; break;
+  }
+
+  // Keep backward-compat rows[] populated with the row totals so non-pivot consumers don't crash.
+  const flatRows: ModuleDataRow[] = pivotRows.map((r) => ({ key: r.key, value: r.rowTotal }));
+
+  return {
+    rows: flatRows,
+    total: grandTotal,
+    unit,
+    metricLabel,
+    pivot: {
+      columns: colKeys,
+      rows: pivotRows,
+      columnTotals,
+      grandTotal,
+    },
+  };
 }
