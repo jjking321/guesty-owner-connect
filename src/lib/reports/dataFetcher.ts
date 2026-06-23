@@ -255,6 +255,38 @@ function aggregateAvailableNights(
   return Math.max(0, days) * listingIds.length;
 }
 
+/**
+ * For the `forecast_p50` metric, the Portfolio view replaces past-month
+ * forecast values with realized actuals (reservation_nights revenue) so totals
+ * reflect "what actually happened + what's still projected". This helper
+ * returns a map keyed by `${listing_id}::YYYY-MM` -> actual revenue for every
+ * past month that overlaps the given range. Returns empty map if the range
+ * has no past months.
+ */
+async function fetchPastMonthActuals(
+  listingIds: string[],
+  range: { start: Date; end: Date },
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (listingIds.length === 0) return out;
+  const currentMonthStart = startOfMonth(new Date());
+  // Past-month window inside range: from range.start up to min(range.end, currentMonthStart - 1)
+  if (range.start >= currentMonthStart) return out;
+  const pastEnd = new Date(currentMonthStart.getTime() - 1);
+  const effEnd = pastEnd < range.end ? pastEnd : range.end;
+  const s = format(range.start, 'yyyy-MM-dd');
+  const e = format(effEnd, 'yyyy-MM-dd');
+  const nights = await fetchReservationNights(listingIds, s, e);
+  for (const n of nights) {
+    // night_date is YYYY-MM-DD; bucket by YYYY-MM
+    const ym = (n.night_date || '').slice(0, 7);
+    if (!ym) continue;
+    const key = `${n.listing_id}::${ym}`;
+    out.set(key, (out.get(key) ?? 0) + Number(n.revenue_allocation || 0));
+  }
+  return out;
+}
+
 export async function fetchModuleData(module: ReportModule): Promise<ModuleData> {
   const range = resolveDateRange(module.dateRange);
   const { start: startStr, end: endStr } = rangeToISO(range);
