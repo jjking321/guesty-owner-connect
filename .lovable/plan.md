@@ -1,62 +1,62 @@
 ## Goal
 
-Let a Table module in the Report Builder break data down by two dimensions at once (e.g. Listing × Month, Owner × Month, Group × Listing) so reports — especially the ones shared with group owners — can show a true matrix instead of a single column of buckets.
+Make the Forecast (P50) metric in the Report Builder display correctly and support the same comparison options as the Revenue metric — so a forecast can be lined up against last year's actuals, the previous period, current on-the-books revenue, goals, or compset averages.
 
-KPI, Line, and Bar widgets are unchanged in this pass.
-
-## UX
-
-In the Table module config:
-
-- Rename the existing "Breakdown" field to **Rows (breakdown)**.
-- Add a new optional **Columns (then by)** select, shown only when widget type is `table`. Options: `None`, `By month`, `By listing`, `By owner`, `By group`. The option matching the primary breakdown is disabled so you can't pick the same dimension twice.
-- When Columns = `None`, the table renders exactly like today (single-value column).
-- When Columns is set, the table becomes a pivot:
-
-```text
-                  Jan 2026   Feb 2026   Mar 2026   Total
-  Cozy Cabin       $4,200     $5,100     $6,300    $15,600
-  Beach House      $3,000     $3,800     $4,500    $11,300
-  ...
-  Total            $7,200     $8,900    $10,800    $26,900
-```
-
-- Each cell uses the module's metric and unit (currency / number / percent), formatted the same way as today.
-- Column order: months are chronological; listings/owners/groups are alphabetical by label (matches existing behavior).
-- The Compare-to selector is hidden when Columns is set (compare + pivot in the same widget is out of scope for this pass; we can add it later).
-- CSV export from the table mirrors the on-screen pivot: first column is the row bucket, then one column per pivot column, plus a Total row and Total column.
-
-## Data layer
-
-`ReportModule` gains an optional `breakdown2?: BreakdownKey` field (back-compat: missing = today's behavior).
-
-`ModuleData` gains an optional pivot shape used only when `breakdown2` is set:
-
-- `columns: string[]` — pivot column labels in display order
-- `pivotRows: Array<{ key: string; values: Record<string, number>; rowTotal: number }>`
-- `columnTotals: Record<string, number>`
-- `grandTotal: number`
-
-When `breakdown2` is not set, `ModuleData` stays exactly as today (`rows`, `total`, optional compare fields). The Table component picks the render path based on whether `pivotRows` is present.
+## What's broken today
 
 In `src/lib/reports/dataFetcher.ts`:
 
-- Add a helper that, given a night/reservation row, returns both bucket keys (`bucketKey` already exists for one dimension — extend or call it twice).
-- For the metrics that already support breakdowns (revenue, nights, occupancy, adr, revpar, forecast_p50, goal), aggregate into a `Map<rowKey, Map<colKey, number>>` instead of a single map when `breakdown2` is set.
-- Derive `columns`, `pivotRows`, `columnTotals`, `grandTotal` from that map, sorted with the existing ordering rules (chronological for month, alphabetical for entity).
-- Skip the compare branch entirely when `breakdown2` is set.
-- Derived metrics (occupancy, ADR, RevPAR) must be computed per cell from the same numerator/denominator pairs already used today — not as an average of averages.
+1. **Month order is alphabetical.** `aggregateGenericForecast` sorts bucket keys with `localeCompare`, so "Apr 2026" comes before "Jan 2026" in tables and charts.
+2. **Most "Compare to" options are silently ignored** for `forecast_p50`. Only `actual_revenue` and `compset` attach compare values; `last_year`, `two_years_ago`, `previous_period`, `last_30_days`, `last_90_days`, `last_month`, and `goal` are dropped on the floor — the user picks them but nothing shows up in the chart/table.
+3. **Owner / Group breakdowns are wrong** for the forecast metric. `aggregateGenericForecast` only branches on `listing` vs everything-else-treated-as-month, so picking "By owner" or "By group" silently buckets by month and the compare values never line up.
+
+## Fix
+
+All changes are in `src/lib/reports/dataFetcher.ts`. No schema or UI changes.
+
+### 1. Chronological month sort
+
+Replace `localeCompare` in `aggregateGenericForecast` with a parse-then-compare sort that orders by actual date when the breakdown is month, and alphabetically otherwise.
+
+### 2. Real owner / group breakdown support for forecast rows
+
+`aggregateGenericForecast` becomes async (or takes pre-resolved helpers) so it can use the existing `fetchOwnerNames` + `fetchGroupsForListings` + `bucketKey` helpers — same pattern revenue already uses. For each forecast row we synthesize a date from `target_month` (mid-month) and call `bucketKey(date, listing_id, breakdown, listingsById, ownerNames, groupsForListing)`, expanding to multiple buckets when a listing belongs to multiple groups. Sort:
+- month: chronological
+- listing / owner / group: alphabetical
+
+### 3. Wire up all the missing compare modes for forecast
+
+Inside the `if (module.metric === 'forecast_p50')` block, after the forecast data is aggregated:
+
+- **`last_year` / `two_years_ago` / `previous_period` / `last_30_days` / `last_90_days` / `last_month`** — resolve the shifted range via the existing `resolveCompareRange`, fetch `reservation_nights` for that shifted range, then attach per-bucket and total compare values:
+  - month breakdown with a yearly shift (`last_year`, `two_years_ago`): shift each prev night's date forward N years and re-bucket so "Jan 2026" lines up with Jan 2025/2024 nights.
+  - month breakdown with non-yearly shifts (`previous_period`, `last_30_days`, etc.): bucket prev nights by their own months, then align by ordinal position to the current bucket list (same approach revenue already uses).
+  - listing / owner / group breakdowns: bucket prev nights with the same `bucketKey(...)` helper so labels match.
+  - `compareTotal` = sum of prev revenue across the shifted range. `compareLabel` = `COMPARE_LABELS[module.compare]`.
+- **`goal`** — reuse `fetchGoals` for the current range, bucket goal_revenue by month (or by listing/owner/group via the same helper), attach per-bucket `compareValue` and a `compareTotal`. Label "Goal". Same restriction the UI already shows (Goal only meaningful when buckets align — match revenue's behavior for non-month breakdowns).
+- **`actual_revenue`** (already works) — keep, but route it through the same shared helper so owner/group buckets line up correctly with the fixed bucket keys above.
+- **`compset`** — keep using `applyCompsetCompare`, unchanged.
+
+### 4. Refactor a small shared helper
+
+Extract the existing "bucket reservation nights into a Map<bucketKey, number> with owner/group helpers" loop into a single private helper used by both the revenue path and the new forecast-compare path. Keeps the new code from duplicating ~40 lines.
 
 ## Files touched
 
-- `src/lib/reports/types.ts` — add `breakdown2` to `ReportModule`; add optional pivot fields to `ModuleData`.
-- `src/components/reports/ModuleConfigForm.tsx` — rename label, add the "Columns (then by)" select for tables, disable matching option, hide Compare-to when pivot is active.
-- `src/lib/reports/dataFetcher.ts` — two-dimensional aggregation path for each metric.
-- `src/components/reports/modules/DataTable.tsx` — render pivot table when `pivotRows` is present; update CSV export to match.
-- `src/pages/ReportBuilder.tsx` — default `breakdown2: undefined` on new modules (no other changes).
+- `src/lib/reports/dataFetcher.ts` — only file changed.
 
-## Out of scope (call out explicitly)
+## Verification
 
-- Line/Bar/KPI keep their current single-breakdown behavior.
-- Compare-to is not combined with pivot in this pass.
-- No DB/migration changes; `report.config` is JSON, so the new field stores transparently in existing rows.
+- Pick a listing/group with a forecast, set metric = Forecast (P50), range = "Rest of year" or "Next 12 months", breakdown = By month:
+  - Months render in calendar order (Jan, Feb, …) instead of alphabetical.
+  - Compare = Last year → each future month shows prior-year actual for the same month, and a compare total appears.
+  - Compare = Previous period → ordinal-aligned prior values appear per bucket.
+  - Compare = Actual Revenue → on-the-books values appear per bucket.
+  - Compare = Goal → monthly goal appears per bucket.
+- Switch breakdown to Owner and Group: rows are labeled by owner/group name, and the compare column lines up by the same label.
+- KPI / Line / Bar widgets still render forecast totals correctly (the `rows[]`/`total` shape is unchanged; only sort order and added compare fields differ).
+
+## Out of scope
+
+- The pivot (Rows × Columns) path for forecast already exists and works; no change there.
+- No changes to how forecasts are *generated* — only how they're displayed and compared in reports.
