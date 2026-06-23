@@ -1638,7 +1638,8 @@ async function buildPivotCompare(
   // actual_revenue: forecast metric, compare against this-range booked revenue.
   if (module.compare === 'actual_revenue') {
     if (module.metric !== 'forecast_p50') return undefined;
-    const { start: ps, end: pe } = rangeToISO(range);
+    const ps = format(range.start, 'yyyy-MM-dd');
+    const pe = format(range.end, 'yyyy-MM-dd');
     const nights = await fetchReservationNights(listingIds, ps, pe);
     const rev = new Map<string, number>();
     for (const n of nights) {
