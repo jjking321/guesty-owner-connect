@@ -322,57 +322,168 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
         }
       }
     }
-    const forecastData = aggregateGenericForecast(module, rows, listingsById);
 
-    // Compare to actual revenue for the same range
+    // Resolve owner/group helpers for the chosen breakdown (shared between
+    // the forecast aggregation and any reservation-night based comparison).
+    let ownerNames: OwnerMap = {};
+    const groupsForListing = new Map<string, string[]>();
+    if (module.breakdown === 'owner') {
+      const ownerIds = Array.from(
+        new Set(listings.map((l) => l.owner_id).filter(Boolean) as string[]),
+      );
+      ownerNames = await fetchOwnerNames(ownerIds);
+    }
+    if (module.breakdown === 'group') {
+      const groups = await fetchGroupsForListings(listingIds);
+      for (const [, g] of Object.entries(groups)) {
+        for (const lid of g.listingIds) {
+          const existing = groupsForListing.get(lid) ?? [];
+          existing.push(g.name);
+          groupsForListing.set(lid, existing);
+        }
+      }
+    }
+
+    const forecastData = aggregateGenericForecast(
+      module,
+      rows,
+      listingsById,
+      ownerNames,
+      groupsForListing,
+    );
+
+    // ---- Comparisons ----
+
+    // Compare to actual revenue for the same range (current OTB / booked).
     if (module.compare === 'actual_revenue') {
       const nights = await fetchReservationNights(listingIds, startStr, endStr);
-
-      // Resolve breakdown helpers if needed
-      let ownerNames: OwnerMap = {};
-      let groupsForListing = new Map<string, string[]>();
-      if (module.breakdown === 'owner') {
-        const ownerIds = Array.from(
-          new Set(listings.map((l) => l.owner_id).filter(Boolean) as string[]),
-        );
-        ownerNames = await fetchOwnerNames(ownerIds);
-      }
-      if (module.breakdown === 'group') {
-        const groups = await fetchGroupsForListings(listingIds);
-        for (const [, g] of Object.entries(groups)) {
-          for (const lid of g.listingIds) {
-            const existing = groupsForListing.get(lid) ?? [];
-            existing.push(g.name);
-            groupsForListing.set(lid, existing);
-          }
-        }
-      }
-
-      const actualByBucket = new Map<string, number>();
-      let actualTotal = 0;
-      for (const n of nights) {
-        const v = Number(n.revenue_allocation || 0);
-        actualTotal += v;
-        const d = new Date(n.night_date + 'T00:00:00');
-        const buckets = bucketKey(d, n.listing_id, module.breakdown, listingsById, ownerNames, groupsForListing);
-        for (const b of buckets) {
-          actualByBucket.set(b, (actualByBucket.get(b) ?? 0) + v);
-        }
-      }
+      const { byBucket, total } = bucketNightsRevenue(
+        nights,
+        module.breakdown,
+        listingsById,
+        ownerNames,
+        groupsForListing,
+      );
       for (const row of forecastData.rows) {
-        row.compareValue = actualByBucket.get(row.key) ?? 0;
+        row.compareValue = byBucket.get(row.key) ?? 0;
       }
-      forecastData.compareTotal = actualTotal;
+      forecastData.compareTotal = total;
       forecastData.compareLabel = 'Actual Revenue';
     }
 
     // Compare forecast to compset (uses compset monthly revenue averages)
-    if (module.compare === 'compset') {
+    else if (module.compare === 'compset') {
       await applyCompsetCompare(module, listings, listingIds, range, listingsById, forecastData, 'revenue');
+    }
+
+    // Compare forecast to a monthly revenue Goal for the same range.
+    else if (module.compare === 'goal') {
+      const goals = await fetchGoals(
+        listingIds,
+        range.start.getFullYear(),
+        range.end.getFullYear(),
+      );
+      const filtered = goals.filter((g) => {
+        const d = new Date(g.year, g.month - 1, 15);
+        return d >= range.start && d <= range.end;
+      });
+      const byBucket = new Map<string, number>();
+      let total = 0;
+      for (const g of filtered) {
+        const d = new Date(g.year, g.month - 1, 15);
+        const v = Number(g.goal_revenue || 0);
+        total += v;
+        const keys = bucketKey(d, g.listing_id, module.breakdown, listingsById, ownerNames, groupsForListing);
+        for (const k of keys) {
+          byBucket.set(k, (byBucket.get(k) ?? 0) + v);
+        }
+      }
+      for (const row of forecastData.rows) {
+        row.compareValue = byBucket.get(row.key) ?? 0;
+      }
+      forecastData.compareTotal = total;
+      forecastData.compareLabel = 'Goal';
+    }
+
+    // Date-shifted comparisons: last_year, two_years_ago, previous_period,
+    // last_30_days, last_90_days, last_month.
+    else if (module.compare) {
+      const prevRange = resolveCompareRange(range, module.compare);
+      if (prevRange) {
+        const { start: ps, end: pe } = rangeToISO(prevRange);
+        const prevNights = await fetchReservationNights(listingIds, ps, pe);
+        const compareLabel = COMPARE_LABELS[module.compare];
+        const isMonth = !module.breakdown || module.breakdown === 'month';
+
+        // Total compare value across the whole shifted range.
+        const prevTotal = prevNights.reduce(
+          (a, n) => a + Number(n.revenue_allocation || 0),
+          0,
+        );
+
+        const yearShift =
+          module.compare === 'last_year' ? 1 :
+          module.compare === 'two_years_ago' ? 2 : 0;
+
+        if (isMonth && yearShift > 0) {
+          // Year-shifted: re-bucket each prev night under the matching forward year.
+          const prevByBucket = new Map<string, number>();
+          for (const n of prevNights) {
+            const d = new Date(n.night_date + 'T00:00:00');
+            const shifted = new Date(d);
+            shifted.setFullYear(shifted.getFullYear() + yearShift);
+            const k = format(shifted, 'MMM yyyy');
+            prevByBucket.set(k, (prevByBucket.get(k) ?? 0) + Number(n.revenue_allocation || 0));
+          }
+          for (const row of forecastData.rows) {
+            row.compareValue = prevByBucket.get(row.key) ?? 0;
+          }
+        } else if (isMonth) {
+          // Ordinal-aligned: bucket prev nights by their own months, then
+          // map index-by-index onto the current forecast bucket list.
+          const prevMonthRev = new Map<string, number>();
+          for (const n of prevNights) {
+            const d = new Date(n.night_date + 'T00:00:00');
+            const k = format(d, 'MMM yyyy');
+            prevMonthRev.set(k, (prevMonthRev.get(k) ?? 0) + Number(n.revenue_allocation || 0));
+          }
+          const prevMonths = eachMonthOfInterval({
+            start: startOfMonth(prevRange.start),
+            end: endOfMonth(prevRange.end),
+          }).map((m) => format(m, 'MMM yyyy'));
+          const currMonths = forecastData.rows.map((r) => r.key);
+          const len = Math.min(prevMonths.length, currMonths.length);
+          const pairing = new Map<string, number>();
+          for (let i = 0; i < len; i++) {
+            pairing.set(currMonths[i], prevMonthRev.get(prevMonths[i]) ?? 0);
+          }
+          for (const row of forecastData.rows) {
+            row.compareValue = pairing.get(row.key) ?? 0;
+          }
+        } else {
+          // Listing / owner / group breakdowns: bucket prev nights with the
+          // same bucketKey helper so labels line up.
+          const { byBucket } = bucketNightsRevenue(
+            prevNights,
+            module.breakdown,
+            listingsById,
+            ownerNames,
+            groupsForListing,
+          );
+          for (const row of forecastData.rows) {
+            row.compareValue = byBucket.get(row.key) ?? 0;
+          }
+        }
+
+        forecastData.compareTotal = prevTotal;
+        forecastData.compareLabel = compareLabel;
+      }
     }
 
     return forecastData;
   }
+
+
 
 
 
