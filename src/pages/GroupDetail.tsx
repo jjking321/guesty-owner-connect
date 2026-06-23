@@ -363,7 +363,63 @@ export default function GroupDetail() {
     enabled: listingIds.length > 0,
   });
 
-  // Fetch capacity calendar data for occupancy calculation
+  // Section-scoped reservation nights for the Properties table (used when a non-page preset is active)
+  const { data: sectionReservationNights } = useQuery({
+    queryKey: ["group-section-nights", listingIds, propertiesEffectiveRange.from, propertiesEffectiveRange.to],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(propertiesEffectiveRange.from, "yyyy-MM-dd"))
+          .lte("night_date", format(propertiesEffectiveRange.to, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return results;
+    },
+    enabled: listingIds.length > 0 && usingSectionRange,
+  });
+
+  const { data: sectionFutureNights } = useQuery({
+    queryKey: ["group-section-future-nights", listingIds, propertiesEffectiveRange.from],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+      const today = new Date();
+      const endOfYear = new Date(propertiesEffectiveRange.from.getFullYear(), 11, 31);
+      if (endOfYear < today) return [];
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(today, "yyyy-MM-dd"))
+          .lte("night_date", format(endOfYear, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return results;
+    },
+    enabled: listingIds.length > 0 && usingSectionRange,
+  });
   const { data: capacityData } = useQuery({
     queryKey: ["group-capacity", listingIds, effectiveDateRange.from, effectiveDateRange.to],
     queryFn: async () => {
