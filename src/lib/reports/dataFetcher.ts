@@ -1136,6 +1136,10 @@ async function buildPivotData(
     const startYear = range.start.getFullYear();
     const endYear = range.end.getFullYear();
     const chunkSize = 60;
+    // Past-month actuals override raw forecast for months that already ended,
+    // matching the Portfolio Revenue Forecast view.
+    const pastActuals = await fetchPastMonthActuals(listingIds, range);
+    const currentMonthStart = startOfMonth(new Date());
     for (let i = 0; i < listingIds.length; i += chunkSize) {
       const chunk = listingIds.slice(i, i + chunkSize);
       const { data, error } = await supabase
@@ -1158,7 +1162,11 @@ async function buildPivotData(
           const [y, mo] = targetMonth.split('-').map(Number);
           const d = new Date(y, (mo || 1) - 1, 15);
           if (d < range.start || d > range.end) continue;
-          const v = Number(m?.total_forecast_p50 ?? m?.blended_forecast ?? m?.probability_forecast ?? 0);
+          let v = Number(m?.total_forecast_p50 ?? m?.blended_forecast ?? m?.probability_forecast ?? 0);
+          const monthDate = new Date(y, (mo || 1) - 1, 1);
+          if (monthDate < currentMonthStart) {
+            v = pastActuals.get(`${r.listing_id}::${targetMonth}`) ?? 0;
+          }
           const pairs = pivotKeyPairs(d, r.listing_id, rowB, colB, listingsById, ownerNames, groupsForListing);
           for (const [rk, ck] of pairs) {
             rowKeysSet.add(rk); colKeysSet.add(ck);
@@ -1170,6 +1178,7 @@ async function buildPivotData(
     const compare = await buildPivotCompare(module, range, listings, listingIds, listingsById, rowB, colB, ownerNames, groupsForListing);
     return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel, compare);
   }
+
 
   // ---- Reservation-night metrics: revenue / nights / occupancy / adr / revpar ----
   const nights = await fetchReservationNights(listingIds, startStr, endStr);
