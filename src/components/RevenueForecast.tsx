@@ -3,7 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw, BarChart3, Target } from "lucide-react";
+import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw, BarChart3, Target, Download } from "lucide-react";
+import { downloadCsv } from "@/lib/reports/format";
 import { parseLocalDate } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
