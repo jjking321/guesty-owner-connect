@@ -71,6 +71,34 @@ export default function GroupDetail() {
     to: dateRange.to || new Date(),
   }), [dateRange.from, dateRange.to]);
 
+  // Section-scoped date range for the "Properties in Group" table
+  type PropertiesPreset = 'page' | 'mtd' | 'qtd' | 'ytd' | 'last30' | 'last90' | 'custom';
+  const [propertiesPreset, setPropertiesPreset] = useState<PropertiesPreset>('page');
+  const [propertiesCustomRange, setPropertiesCustomRange] = useState<DateRange>({
+    from: startOfMonth(new Date()),
+    to: new Date(),
+  });
+
+  const propertiesEffectiveRange = useMemo(() => {
+    const today = new Date();
+    switch (propertiesPreset) {
+      case 'mtd': return { from: startOfMonth(today), to: today };
+      case 'qtd': return { from: startOfQuarter(today), to: today };
+      case 'ytd': return { from: startOfYear(today), to: today };
+      case 'last30': return { from: subDays(today, 29), to: today };
+      case 'last90': return { from: subDays(today, 89), to: today };
+      case 'custom': return {
+        from: propertiesCustomRange.from || startOfMonth(today),
+        to: propertiesCustomRange.to || today,
+      };
+      case 'page':
+      default:
+        return effectiveDateRange;
+    }
+  }, [propertiesPreset, propertiesCustomRange, effectiveDateRange]);
+
+  const usingSectionRange = propertiesPreset !== 'page';
+
   const { data: group, isLoading: isGroupLoading, refetch: refetchGroup } = useQuery({
     queryKey: ["property-group", id],
     queryFn: async () => {
