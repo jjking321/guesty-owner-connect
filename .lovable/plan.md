@@ -1,27 +1,47 @@
-## Goal
-For the Monthly Forecast Breakdown on the property detail page, replace the model's forecast with the realized actual for past months, so the annual forecast reflects what's still possible (not overstated history).
+## Plan
 
-## Changes
+Update the revenue forecast calculation so each future month is anchored to the most reliable monthly baseline instead of being dragged down by probability/capacity adjustments.
 
-**File: `src/components/RevenueForecast.tsx`**
+### What will change
 
-1. **Forecast column (line 479-481)** — for past months, render the `actualForMonth` value instead of `m.total_forecast_p50`. Current and future months unchanged.
-   ```text
-   isPastMonth → show actualForMonth (or "-" if 0)
-   else        → show m.total_forecast_p50 / blended_forecast
-   ```
+1. **Monthly baseline selection**
+   - For each forecast month, use that same month from the prior year as the primary baseline.
+   - If that prior-year month has no usable revenue, fall back to compset monthly data for that month.
+   - If neither exists, keep the existing annual-average fallback.
 
-2. **Annual total forecast (line 372 — the big "$X" P50 number)** — recompute on the client as:
-   ```text
-   sum(actualForMonth for past months) + sum(m.total_forecast_p50 for current + future months)
-   ```
-   Apply the same logic to the P10/P90 confidence band (line 375-376) by replacing past-month P10/P90 with actuals.
+2. **Pacing adjustment**
+   - Keep the current same-store pacing/velocity factor, but apply it to the monthly baseline as the core forecast signal.
+   - This means September with strong prior-year September revenue will forecast around prior-year September revenue adjusted by this year’s actual pace, instead of collapsing to a few hundred dollars.
 
-3. **Probability of Hitting Goal donut** — leave as-is for this change (it's driven by `forecast.goalProbabilities` from the backend). Note: the donut may slightly disagree with the new client-recomputed total; out of scope unless you want it updated too.
+3. **Probability and compset data become modifiers, not hard caps**
+   - Booking probability, compset occupancy, lead-time decay, and gap quality should adjust expected remaining revenue, but should not override the prior-year/pacing baseline unless capacity truly makes the number impossible.
+   - Keep the capacity ceiling as a real maximum, but avoid using low probability-adjusted values as a hard cap against the historical baseline.
 
-## Out of scope
-- No edge-function / `revenue_forecasts` table changes. This is a presentation-only fix; stored monthly_forecasts remain untouched.
-- "On Books", "Pace", "Prob %", "Demand" columns unchanged.
+4. **Past and current month handling**
+   - Past months continue to show actual realized revenue.
+   - Current month keeps actual-to-date plus on-books/remaining-month projection.
+   - Future months show the improved estimate.
 
-## Open question
-Should the Probability of Hitting Goal % also be recomputed from the new past-actual-anchored total, or stay tied to the backend model output?
+5. **Monthly output transparency**
+   - Add stored fields to monthly forecast rows such as baseline source, pacing-adjusted forecast, compset fallback flag, and whether capacity constrained the result.
+   - Keep the existing UI table compatible while allowing future debugging of why a month got its forecast.
+
+### Technical details
+
+- Main change is in `supabase/functions/forecast-revenue/index.ts` inside `forecastEnhanced()`.
+- Replace the current behavior where `probabilityAdjustedForecast` can cap `blendedForecast` below the historical monthly baseline.
+- Compute a future-month forecast roughly as:
+
+```text
+monthly baseline = prior-year same month actual
+if missing: compset same month estimate
+if missing: annual average
+
+pacing forecast = monthly baseline × clipped current-year velocity
+probability forecast = revenue on books + expected remaining revenue
+final forecast = max(on books, weighted blend biased toward pacing forecast)
+final forecast = min(final forecast, true capacity ceiling when available)
+```
+
+- No schema migration is required because monthly forecast data is stored as JSON.
+- After code changes, deploy the updated forecast edge function so Refresh / regeneration uses the new logic.
