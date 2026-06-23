@@ -1,50 +1,53 @@
-## Problem
+Here are the open security findings, grouped by severity, with a proposed fix plan. Approve and I'll implement.
 
-The Reports forecast metric (`forecast_p50`) shows raw model output for every month in the range, including months that have already ended. The Portfolio view's Revenue Forecast component swaps past-month forecasts with realized actuals (from `reservation_nights`) so the displayed numbers reflect "what actually happened + what's still projected." This is why a report covering YTD or full-year ranges doesn't match Portfolio.
+## Critical (errors)
 
-Reference: `src/components/RevenueForecast.tsx` lines 348–367 and 481–483 — for any month whose start is before the current month, the displayed value is the actual revenue, not `total_forecast_p50`.
+### 1. Open RLS policies leaking cross-org data
+Three tables currently allow any authenticated (or even anonymous) user to read/write all rows.
 
-## Fix
+- `dispute_analysis_progress` — `USING (true)` SELECT exposes guest names and errors across orgs.
+- `forecast_settings` — `USING/WITH CHECK (true)` for SELECT/INSERT/UPDATE; `organization_id` column exists but unused.
+- `nightly_sync_runs` — `USING (true)` exposes internal sync state, account IDs, errors.
 
-Apply the same past-month substitution inside `src/lib/reports/dataFetcher.ts` for the `forecast_p50` metric, in both code paths:
+**Fix (migration):** drop permissive policies, replace with org-scoped policies using `is_organization_member(organization_id, auth.uid())`. For `dispute_analysis_progress`, scope via its `guesty_account_id` join. For `nightly_sync_runs`, restrict reads to admins/super_admins of the org and writes to service role only.
 
-### 1. Flat path (`fetchModuleData`, ~line 285)
+### 2. Sensitive backend edge functions reachable without auth
+9 functions use the service role internally with zero caller identity check:
+`nightly-sync`, `batch-analyze-disputes`, `analyze-review-dispute`, `generate-actionables`, `generate-revenue-actions`, `generate-call-prep`, `sync-owners`, `fetch-dispute-conversation`, `apply-compset-template`.
 
-After reading `monthly_forecasts` rows and before `aggregateGenericForecast`:
+**Fix:** At the top of each handler, validate `Authorization: Bearer <jwt>` via `supabase.auth.getClaims(token)`; 401 on failure. For scheduler-only functions (`nightly-sync`, `batch-analyze-disputes`, `generate-actionables`), additionally require `admin`/`super_admin` org role. For per-resource functions (`generate-revenue-actions`, `generate-call-prep`, `fetch-dispute-conversation`, `analyze-review-dispute`, `apply-compset-template`, `sync-owners`), additionally verify the caller's active org owns the targeted listing/review/account.
 
-- Determine `currentMonthStart = startOfMonth(new Date())`.
-- Collect the set of past months (months whose date < currentMonthStart) that fall inside `range`.
-- Fetch `reservation_nights` for `listingIds` between the start of the earliest past month and the end of the latest past month (clamped to `range`).
-- Aggregate actual revenue per (listing_id, YYYY-MM) bucket.
-- For every `(listing_id, target_month)` pair where the month is in the past, replace `forecast_p50` with the matching actual revenue (0 if no nights).
+## High (warnings)
 
-This way KPI / table / chart aggregations downstream see actuals for past months and forecasts for current+future months, identical to Portfolio.
+### 3. Client-controlled `x-service-role: true` header bypass
+7 functions skip auth when this header is present: `calculate-all-probabilities`, `generate-all-forecasts`, `bulk-scrape-airbnb-ratings`, `sync-bulk-calendar`, `sync-new-reviews`, `backfill-reservation-subtotals`, `backfill-reservation-taxes`. Two of them (`calculate-all-probabilities`, `generate-all-forecasts`) also fall through without any auth, running across all orgs with `userId = undefined`.
 
-### 2. Pivot path (`buildPivotData`, ~line 1089)
+**Fix:** Replace the boolean header check with a server-validated bearer check against `SUPABASE_SERVICE_ROLE_KEY` (compare `Authorization` header to the env secret). If neither service-role nor a valid user JWT is present → 401. Update internal `.invoke()` callers (e.g. `nightly-sync` orchestrator) to pass the service-role bearer instead of the boolean header. Memory note: this changes the documented "`x-service-role: true`" pattern — I'll update the memory entry accordingly.
 
-Same logic, but operate on the per-month JSONB iteration before `revByCell.set(...)`:
+### 4. Tables with overly-narrow `user_id = auth.uid()` RLS (org members locked out)
+- `booking_curves`, `capacity_calendar`, `forecast_accuracy` — only the Guesty account creator can read; no INSERT/UPDATE/DELETE policies.
 
-- Precompute the past-month actuals map keyed by `(listing_id, YYYY-MM)` using one `fetchReservationNights` call covering the past-month sub-range.
-- When processing each monthly forecast entry, if its month is before `currentMonthStart`, replace `v` with the actual revenue for that listing+month.
+**Fix:** Add org-scoped SELECT (and write where relevant) policies via `is_organization_member` joined through `guesty_accounts.organization_id`.
 
-### 3. Comparisons stay correct
+### 5. Leaked password protection disabled
+**Fix:** Enable HIBP check via `configure_auth { password_hibp_enabled: true }`.
 
-- `actual_revenue` compare: unchanged — it already aggregates `reservation_nights` for the same range. After the swap, the primary equals the compare for past months (delta = 0 there), and only future months drive the delta, which is the correct behavior.
-- `goal`, `compset`, time-shifted compares: unchanged.
+### 6. SECURITY DEFINER functions executable by anon/authenticated
+Supabase linter flags definer functions exposed on the API schema.
 
-### 4. No UI changes
+**Fix:** Run linter, then `REVOKE EXECUTE ... FROM anon, authenticated` on functions that should only be called server-side (e.g. internal helpers like `sync_super_admin_to_all_orgs`, `seed_super_admins_to_new_org`, `handle_*` triggers if exposed). Keep grants on functions intentionally callable by the client (e.g. `accept_organization_invitation`, `get_accessible_organizations`, `get_review_summary_stats`, `get_monthly_rating_trend`, `get_portfolio_night_metrics`).
 
-`DataTable`, `KpiCard`, `LineChartModule`, `BarChartModule` already render whatever values come back. No type changes.
+### 7. RLS policy `USING (true)` for write ops
+Re-audited as part of #1; no other tables flagged after that fix.
+
+## Execution order
+1. Migration: fix RLS on the 6 tables (#1, #4) + REVOKE on definer functions (#6).
+2. Edge functions: add JWT/role checks (#2) and replace header bypass (#3) — single pass across all listed functions, then deploy.
+3. `configure_auth` for HIBP (#5).
+4. Update memory entry about the old `x-service-role` invocation pattern.
+5. Re-run security scan; mark fixed findings.
 
 ## Out of scope
-
-- Forecast band (P10/P90) — not surfaced in reports today.
-- Non-`forecast_p50` metrics.
-- Any change to `revenue_forecasts` generation.
-
-## Verification
-
-- Report KPI with metric = Forecast (P50), date range = YTD or full current year → total matches Portfolio "Projected End-of-Year Revenue" for the same scope.
-- Report Table broken down by Month → past months show actuals, future months show model P50.
-- Report Pivot (Listing × Month) → same per-cell substitution.
-- Compare = Actual Revenue → past-month deltas are 0; future months show forecast vs OTB.
+- Refactoring beyond auth/RLS (no business-logic changes).
+- Rate limiting (not flagged).
+- Connector or storage findings (none reported).
