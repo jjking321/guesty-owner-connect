@@ -33,7 +33,9 @@ import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { StripeDateRangePicker, type DateRange } from "@/components/StripeDateRangePicker";
 import { PropertiesTable } from "@/components/PropertiesTable";
-import { format, startOfYear, differenceInDays } from "date-fns";
+import { format, startOfYear, startOfMonth, startOfQuarter, subDays, differenceInDays } from "date-fns";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
@@ -68,6 +70,34 @@ export default function GroupDetail() {
     from: dateRange.from || new Date(2020, 0, 1),
     to: dateRange.to || new Date(),
   }), [dateRange.from, dateRange.to]);
+
+  // Section-scoped date range for the "Properties in Group" table
+  type PropertiesPreset = 'page' | 'mtd' | 'qtd' | 'ytd' | 'last30' | 'last90' | 'custom';
+  const [propertiesPreset, setPropertiesPreset] = useState<PropertiesPreset>('page');
+  const [propertiesCustomRange, setPropertiesCustomRange] = useState<DateRange>({
+    from: startOfMonth(new Date()),
+    to: new Date(),
+  });
+
+  const propertiesEffectiveRange = useMemo(() => {
+    const today = new Date();
+    switch (propertiesPreset) {
+      case 'mtd': return { from: startOfMonth(today), to: today };
+      case 'qtd': return { from: startOfQuarter(today), to: today };
+      case 'ytd': return { from: startOfYear(today), to: today };
+      case 'last30': return { from: subDays(today, 29), to: today };
+      case 'last90': return { from: subDays(today, 89), to: today };
+      case 'custom': return {
+        from: propertiesCustomRange.from || startOfMonth(today),
+        to: propertiesCustomRange.to || today,
+      };
+      case 'page':
+      default:
+        return effectiveDateRange;
+    }
+  }, [propertiesPreset, propertiesCustomRange, effectiveDateRange]);
+
+  const usingSectionRange = propertiesPreset !== 'page';
 
   const { data: group, isLoading: isGroupLoading, refetch: refetchGroup } = useQuery({
     queryKey: ["property-group", id],
@@ -333,7 +363,63 @@ export default function GroupDetail() {
     enabled: listingIds.length > 0,
   });
 
-  // Fetch capacity calendar data for occupancy calculation
+  // Section-scoped reservation nights for the Properties table (used when a non-page preset is active)
+  const { data: sectionReservationNights } = useQuery({
+    queryKey: ["group-section-nights", listingIds, propertiesEffectiveRange.from, propertiesEffectiveRange.to],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(propertiesEffectiveRange.from, "yyyy-MM-dd"))
+          .lte("night_date", format(propertiesEffectiveRange.to, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return results;
+    },
+    enabled: listingIds.length > 0 && usingSectionRange,
+  });
+
+  const { data: sectionFutureNights } = useQuery({
+    queryKey: ["group-section-future-nights", listingIds, propertiesEffectiveRange.from],
+    queryFn: async () => {
+      if (listingIds.length === 0) return [];
+      const today = new Date();
+      const endOfYear = new Date(propertiesEffectiveRange.from.getFullYear(), 11, 31);
+      if (endOfYear < today) return [];
+      const pageSize = 1000;
+      let from = 0;
+      const results: any[] = [];
+      while (true) {
+        const { data, error } = await supabase
+          .from("reservation_nights")
+          .select("listing_id, night_date, revenue_allocation")
+          .in("listing_id", listingIds)
+          .gte("night_date", format(today, "yyyy-MM-dd"))
+          .lte("night_date", format(endOfYear, "yyyy-MM-dd"))
+          .order("night_date", { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        results.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+      }
+      return results;
+    },
+    enabled: listingIds.length > 0 && usingSectionRange,
+  });
   const { data: capacityData } = useQuery({
     queryKey: ["group-capacity", listingIds, effectiveDateRange.from, effectiveDateRange.to],
     queryFn: async () => {
