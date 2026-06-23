@@ -1121,7 +1121,8 @@ async function buildPivotData(
         }
       }
     }
-    return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel);
+    const compare = await buildPivotCompare(module, range, listings, listingIds, listingsById, rowB, colB, ownerNames, groupsForListing);
+    return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel, compare);
   }
 
   // ---- Reservation-night metrics: revenue / nights / occupancy / adr / revpar ----
