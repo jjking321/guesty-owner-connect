@@ -1,62 +1,52 @@
 ## Goal
 
-Make the Forecast (P50) metric in the Report Builder display correctly and support the same comparison options as the Revenue metric — so a forecast can be lined up against last year's actuals, the previous period, current on-the-books revenue, goals, or compset averages.
+Enable the "Compare to" feature for Table widgets that use both Rows × Columns breakdowns (pivot mode). Each pivot cell will show the metric value with the comparison value (and delta %) stacked underneath.
 
-## What's broken today
+## What changes
 
-In `src/lib/reports/dataFetcher.ts`:
+### 1. `src/components/reports/ModuleConfigForm.tsx`
+- Remove the rule that hides "Compare to" when `breakdown2` is set. Compare is allowed in pivot mode for all existing compare keys.
 
-1. **Month order is alphabetical.** `aggregateGenericForecast` sorts bucket keys with `localeCompare`, so "Apr 2026" comes before "Jan 2026" in tables and charts.
-2. **Most "Compare to" options are silently ignored** for `forecast_p50`. Only `actual_revenue` and `compset` attach compare values; `last_year`, `two_years_ago`, `previous_period`, `last_30_days`, `last_90_days`, `last_month`, and `goal` are dropped on the floor — the user picks them but nothing shows up in the chart/table.
-3. **Owner / Group breakdowns are wrong** for the forecast metric. `aggregateGenericForecast` only branches on `listing` vs everything-else-treated-as-month, so picking "By owner" or "By group" silently buckets by month and the compare values never line up.
+### 2. `src/lib/reports/types.ts`
+- Extend `ModuleData.pivot.rows[i].values` to also carry a compare value per cell:
+  - Change row shape to `{ key, values: Record<string, { value: number; compareValue?: number }>, rowTotal, rowCompareTotal? }`
+  - Add `pivot.columnCompareTotals?: Record<string, number>` and `pivot.grandCompareTotal?: number`
+  - Add `pivot.compareLabel?: string`
 
-## Fix
+### 3. `src/lib/reports/dataFetcher.ts` — `buildPivotData` + `assemblePivot`
+Add a compare pass for all valid compare keys, mirroring the per-cell aggregation:
 
-All changes are in `src/lib/reports/dataFetcher.ts`. No schema or UI changes.
+- **`last_year` / `two_years_ago` / `previous_period` / `last_30_days` / `last_90_days` / `last_month`** — call `resolveCompareRange`, fetch reservation nights for the shifted range, bucket via `pivotKeyPairs`. For yearly month-axis shifts, shift each prev night's date forward N years so labels align. For non-yearly shifts on a month axis, align by ordinal position to the current month list.
+- **`actual_revenue`** (forecast only) — fetch reservation nights for the same range, bucket per cell.
+- **`goal`** — fetch goals for the range, bucket per cell.
+- **`compset`** — reuse existing `applyCompsetCompare` style: pull pre-calculated compset averages, bucket by cell (only meaningful when month is on one axis — fall back to per-row total otherwise, matching legacy behavior).
 
-### 1. Chronological month sort
+Compute per-cell compare values using the same derivation rules as the primary (rev/nights/listings → revenue/nights/occupancy/adr/revpar). Compute row, column, and grand compare totals using the same aggregation logic already in `assemblePivot` (just on the compare maps).
 
-Replace `localeCompare` in `aggregateGenericForecast` with a parse-then-compare sort that orders by actual date when the breakdown is month, and alphabetically otherwise.
+Pass the compare maps + `compareLabel` into `assemblePivot`, which threads them onto each cell and onto the totals.
 
-### 2. Real owner / group breakdown support for forecast rows
+### 4. `src/components/reports/modules/DataTable.tsx`
+Update the pivot render branch:
 
-`aggregateGenericForecast` becomes async (or takes pre-resolved helpers) so it can use the existing `fetchOwnerNames` + `fetchGroupsForListings` + `bucketKey` helpers — same pattern revenue already uses. For each forecast row we synthesize a date from `target_month` (mid-month) and call `bucketKey(date, listing_id, breakdown, listingsById, ownerNames, groupsForListing)`, expanding to multiple buckets when a listing belongs to multiple groups. Sort:
-- month: chronological
-- listing / owner / group: alphabetical
+- Each data cell renders: main value on top line, and beneath it muted small text: `compareValue` and `(±X.X%)` colored green/red.
+- Row Total cell: same stacked treatment using `rowCompareTotal`.
+- Column Totals row: same stacked treatment using `columnCompareTotals[c]` and `grandCompareTotal`.
+- Header label for compare uses `pivot.compareLabel` (shown once in a small subheader caption, e.g. "vs Last year" under the title).
+- CSV export: when compare is present, double the column count — for each column emit `<col>` and `<col> (vs <compareLabel>)`. Add matching paired totals.
 
-### 3. Wire up all the missing compare modes for forecast
-
-Inside the `if (module.metric === 'forecast_p50')` block, after the forecast data is aggregated:
-
-- **`last_year` / `two_years_ago` / `previous_period` / `last_30_days` / `last_90_days` / `last_month`** — resolve the shifted range via the existing `resolveCompareRange`, fetch `reservation_nights` for that shifted range, then attach per-bucket and total compare values:
-  - month breakdown with a yearly shift (`last_year`, `two_years_ago`): shift each prev night's date forward N years and re-bucket so "Jan 2026" lines up with Jan 2025/2024 nights.
-  - month breakdown with non-yearly shifts (`previous_period`, `last_30_days`, etc.): bucket prev nights by their own months, then align by ordinal position to the current bucket list (same approach revenue already uses).
-  - listing / owner / group breakdowns: bucket prev nights with the same `bucketKey(...)` helper so labels match.
-  - `compareTotal` = sum of prev revenue across the shifted range. `compareLabel` = `COMPARE_LABELS[module.compare]`.
-- **`goal`** — reuse `fetchGoals` for the current range, bucket goal_revenue by month (or by listing/owner/group via the same helper), attach per-bucket `compareValue` and a `compareTotal`. Label "Goal". Same restriction the UI already shows (Goal only meaningful when buckets align — match revenue's behavior for non-month breakdowns).
-- **`actual_revenue`** (already works) — keep, but route it through the same shared helper so owner/group buckets line up correctly with the fixed bucket keys above.
-- **`compset`** — keep using `applyCompsetCompare`, unchanged.
-
-### 4. Refactor a small shared helper
-
-Extract the existing "bucket reservation nights into a Map<bucketKey, number> with owner/group helpers" loop into a single private helper used by both the revenue path and the new forecast-compare path. Keeps the new code from duplicating ~40 lines.
-
-## Files touched
-
-- `src/lib/reports/dataFetcher.ts` — only file changed.
-
-## Verification
-
-- Pick a listing/group with a forecast, set metric = Forecast (P50), range = "Rest of year" or "Next 12 months", breakdown = By month:
-  - Months render in calendar order (Jan, Feb, …) instead of alphabetical.
-  - Compare = Last year → each future month shows prior-year actual for the same month, and a compare total appears.
-  - Compare = Previous period → ordinal-aligned prior values appear per bucket.
-  - Compare = Actual Revenue → on-the-books values appear per bucket.
-  - Compare = Goal → monthly goal appears per bucket.
-- Switch breakdown to Owner and Group: rows are labeled by owner/group name, and the compare column lines up by the same label.
-- KPI / Line / Bar widgets still render forecast totals correctly (the `rows[]`/`total` shape is unchanged; only sort order and added compare fields differ).
+No changes to KpiCard / LineChart / BarChart (they already use the flat rows[] which `assemblePivot` continues to populate with row totals).
 
 ## Out of scope
 
-- The pivot (Rows × Columns) path for forecast already exists and works; no change there.
-- No changes to how forecasts are *generated* — only how they're displayed and compared in reports.
+- Date-range pickers, scope picker, breakdown selectors — unchanged.
+- Non-pivot legacy table render — unchanged.
+- Compare in line/bar charts in pivot mode — N/A; only Table uses pivot today.
+
+## Verification
+
+- Table widget, metric = Revenue, Rows = Listing, Columns = Month, Compare = Last year:
+  - Each cell shows current revenue with prior-year revenue + delta % below.
+  - Row Total column and Total row both show stacked comparisons.
+- Same with metric = Forecast (P50), Compare = Actual Revenue / Goal / Last year — all populate per-cell compare.
+- Metric = Occupancy/ADR/RevPAR — compare cell uses correctly-derived rate, not raw revenue.
+- CSV export contains paired columns when compare is active.
