@@ -717,22 +717,29 @@ function aggregateGenericForecast(
   module: ReportModule,
   rowsRaw: Array<{ listing_id: string; target_month: string; forecast_p50: number }>,
   listingsById: Map<string, ListingMeta>,
+  ownerNames: OwnerMap,
+  groupsForListing: Map<string, string[]>,
 ): ModuleData {
   const buckets = new Map<string, number>();
   for (const r of rowsRaw) {
-    let key: string;
-    if (module.breakdown === 'listing') {
-      key = listingsById.get(r.listing_id)?.nickname || r.listing_id;
-    } else {
-      // target_month is "YYYY-MM"
-      const [y, m] = r.target_month.split('-').map(Number);
-      key = format(new Date(y, (m || 1) - 1, 1), 'MMM yyyy');
+    const [y, m] = r.target_month.split('-').map(Number);
+    const d = new Date(y, (m || 1) - 1, 15);
+    const keys = bucketKey(d, r.listing_id, module.breakdown, listingsById, ownerNames, groupsForListing);
+    const v = Number(r.forecast_p50 || 0);
+    for (const k of keys) {
+      buckets.set(k, (buckets.get(k) ?? 0) + v);
     }
-    buckets.set(key, (buckets.get(key) ?? 0) + Number(r.forecast_p50 || 0));
   }
-  const rows: ModuleDataRow[] = Array.from(buckets.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => ({ key, value }));
+  const isMonth = !module.breakdown || module.breakdown === 'month';
+  const entries = Array.from(buckets.entries()).sort(([a], [b]) => {
+    if (isMonth) {
+      const da = Date.parse(`${a} 01`);
+      const db = Date.parse(`${b} 01`);
+      if (!isNaN(da) && !isNaN(db)) return da - db;
+    }
+    return a.localeCompare(b);
+  });
+  const rows: ModuleDataRow[] = entries.map(([key, value]) => ({ key, value }));
   const total = rows.reduce((a, r) => a + r.value, 0);
   return {
     rows,
@@ -741,6 +748,33 @@ function aggregateGenericForecast(
     metricLabel: METRIC_LABELS[module.metric],
   };
 }
+
+/**
+ * Bucket reservation nights into a Map<bucketKey, revenue> using the same
+ * bucketKey helper as the rest of the file. Returns both the per-bucket map
+ * and the running total.
+ */
+function bucketNightsRevenue(
+  nights: Array<{ listing_id: string; night_date: string; revenue_allocation: number }>,
+  breakdown: ReportModule['breakdown'],
+  listingsById: Map<string, ListingMeta>,
+  ownerNames: OwnerMap,
+  groupsForListing: Map<string, string[]>,
+): { byBucket: Map<string, number>; total: number } {
+  const byBucket = new Map<string, number>();
+  let total = 0;
+  for (const n of nights) {
+    const v = Number(n.revenue_allocation || 0);
+    total += v;
+    const d = new Date(n.night_date + 'T00:00:00');
+    const buckets = bucketKey(d, n.listing_id, breakdown, listingsById, ownerNames, groupsForListing);
+    for (const b of buckets) {
+      byBucket.set(b, (byBucket.get(b) ?? 0) + v);
+    }
+  }
+  return { byBucket, total };
+}
+
 
 async function applyCompsetCompare(
   module: ReportModule,
