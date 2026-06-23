@@ -355,6 +355,20 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
       }
     }
 
+    // Past-month substitution: replace forecast with realized actuals for any
+    // month that has already ended, matching the Portfolio Revenue Forecast view.
+    const pastActuals = await fetchPastMonthActuals(listingIds, range);
+    if (pastActuals.size > 0 || range.start < startOfMonth(new Date())) {
+      const currentMonthStart = startOfMonth(new Date());
+      for (const r of rows) {
+        const [yy, mm] = r.target_month.split('-').map(Number);
+        const monthDate = new Date(yy, (mm || 1) - 1, 1);
+        if (monthDate < currentMonthStart) {
+          r.forecast_p50 = pastActuals.get(`${r.listing_id}::${r.target_month}`) ?? 0;
+        }
+      }
+    }
+
     // Resolve owner/group helpers for the chosen breakdown (shared between
     // the forecast aggregation and any reservation-night based comparison).
     let ownerNames: OwnerMap = {};
