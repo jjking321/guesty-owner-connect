@@ -1,52 +1,50 @@
-## Goal
+## Problem
 
-Enable the "Compare to" feature for Table widgets that use both Rows × Columns breakdowns (pivot mode). Each pivot cell will show the metric value with the comparison value (and delta %) stacked underneath.
+The Reports forecast metric (`forecast_p50`) shows raw model output for every month in the range, including months that have already ended. The Portfolio view's Revenue Forecast component swaps past-month forecasts with realized actuals (from `reservation_nights`) so the displayed numbers reflect "what actually happened + what's still projected." This is why a report covering YTD or full-year ranges doesn't match Portfolio.
 
-## What changes
+Reference: `src/components/RevenueForecast.tsx` lines 348–367 and 481–483 — for any month whose start is before the current month, the displayed value is the actual revenue, not `total_forecast_p50`.
 
-### 1. `src/components/reports/ModuleConfigForm.tsx`
-- Remove the rule that hides "Compare to" when `breakdown2` is set. Compare is allowed in pivot mode for all existing compare keys.
+## Fix
 
-### 2. `src/lib/reports/types.ts`
-- Extend `ModuleData.pivot.rows[i].values` to also carry a compare value per cell:
-  - Change row shape to `{ key, values: Record<string, { value: number; compareValue?: number }>, rowTotal, rowCompareTotal? }`
-  - Add `pivot.columnCompareTotals?: Record<string, number>` and `pivot.grandCompareTotal?: number`
-  - Add `pivot.compareLabel?: string`
+Apply the same past-month substitution inside `src/lib/reports/dataFetcher.ts` for the `forecast_p50` metric, in both code paths:
 
-### 3. `src/lib/reports/dataFetcher.ts` — `buildPivotData` + `assemblePivot`
-Add a compare pass for all valid compare keys, mirroring the per-cell aggregation:
+### 1. Flat path (`fetchModuleData`, ~line 285)
 
-- **`last_year` / `two_years_ago` / `previous_period` / `last_30_days` / `last_90_days` / `last_month`** — call `resolveCompareRange`, fetch reservation nights for the shifted range, bucket via `pivotKeyPairs`. For yearly month-axis shifts, shift each prev night's date forward N years so labels align. For non-yearly shifts on a month axis, align by ordinal position to the current month list.
-- **`actual_revenue`** (forecast only) — fetch reservation nights for the same range, bucket per cell.
-- **`goal`** — fetch goals for the range, bucket per cell.
-- **`compset`** — reuse existing `applyCompsetCompare` style: pull pre-calculated compset averages, bucket by cell (only meaningful when month is on one axis — fall back to per-row total otherwise, matching legacy behavior).
+After reading `monthly_forecasts` rows and before `aggregateGenericForecast`:
 
-Compute per-cell compare values using the same derivation rules as the primary (rev/nights/listings → revenue/nights/occupancy/adr/revpar). Compute row, column, and grand compare totals using the same aggregation logic already in `assemblePivot` (just on the compare maps).
+- Determine `currentMonthStart = startOfMonth(new Date())`.
+- Collect the set of past months (months whose date < currentMonthStart) that fall inside `range`.
+- Fetch `reservation_nights` for `listingIds` between the start of the earliest past month and the end of the latest past month (clamped to `range`).
+- Aggregate actual revenue per (listing_id, YYYY-MM) bucket.
+- For every `(listing_id, target_month)` pair where the month is in the past, replace `forecast_p50` with the matching actual revenue (0 if no nights).
 
-Pass the compare maps + `compareLabel` into `assemblePivot`, which threads them onto each cell and onto the totals.
+This way KPI / table / chart aggregations downstream see actuals for past months and forecasts for current+future months, identical to Portfolio.
 
-### 4. `src/components/reports/modules/DataTable.tsx`
-Update the pivot render branch:
+### 2. Pivot path (`buildPivotData`, ~line 1089)
 
-- Each data cell renders: main value on top line, and beneath it muted small text: `compareValue` and `(±X.X%)` colored green/red.
-- Row Total cell: same stacked treatment using `rowCompareTotal`.
-- Column Totals row: same stacked treatment using `columnCompareTotals[c]` and `grandCompareTotal`.
-- Header label for compare uses `pivot.compareLabel` (shown once in a small subheader caption, e.g. "vs Last year" under the title).
-- CSV export: when compare is present, double the column count — for each column emit `<col>` and `<col> (vs <compareLabel>)`. Add matching paired totals.
+Same logic, but operate on the per-month JSONB iteration before `revByCell.set(...)`:
 
-No changes to KpiCard / LineChart / BarChart (they already use the flat rows[] which `assemblePivot` continues to populate with row totals).
+- Precompute the past-month actuals map keyed by `(listing_id, YYYY-MM)` using one `fetchReservationNights` call covering the past-month sub-range.
+- When processing each monthly forecast entry, if its month is before `currentMonthStart`, replace `v` with the actual revenue for that listing+month.
+
+### 3. Comparisons stay correct
+
+- `actual_revenue` compare: unchanged — it already aggregates `reservation_nights` for the same range. After the swap, the primary equals the compare for past months (delta = 0 there), and only future months drive the delta, which is the correct behavior.
+- `goal`, `compset`, time-shifted compares: unchanged.
+
+### 4. No UI changes
+
+`DataTable`, `KpiCard`, `LineChartModule`, `BarChartModule` already render whatever values come back. No type changes.
 
 ## Out of scope
 
-- Date-range pickers, scope picker, breakdown selectors — unchanged.
-- Non-pivot legacy table render — unchanged.
-- Compare in line/bar charts in pivot mode — N/A; only Table uses pivot today.
+- Forecast band (P10/P90) — not surfaced in reports today.
+- Non-`forecast_p50` metrics.
+- Any change to `revenue_forecasts` generation.
 
 ## Verification
 
-- Table widget, metric = Revenue, Rows = Listing, Columns = Month, Compare = Last year:
-  - Each cell shows current revenue with prior-year revenue + delta % below.
-  - Row Total column and Total row both show stacked comparisons.
-- Same with metric = Forecast (P50), Compare = Actual Revenue / Goal / Last year — all populate per-cell compare.
-- Metric = Occupancy/ADR/RevPAR — compare cell uses correctly-derived rate, not raw revenue.
-- CSV export contains paired columns when compare is active.
+- Report KPI with metric = Forecast (P50), date range = YTD or full current year → total matches Portfolio "Projected End-of-Year Revenue" for the same scope.
+- Report Table broken down by Month → past months show actuals, future months show model P50.
+- Report Pivot (Listing × Month) → same per-cell substitution.
+- Compare = Actual Revenue → past-month deltas are 0; future months show forecast vs OTB.

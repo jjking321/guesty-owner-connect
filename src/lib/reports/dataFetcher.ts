@@ -255,6 +255,38 @@ function aggregateAvailableNights(
   return Math.max(0, days) * listingIds.length;
 }
 
+/**
+ * For the `forecast_p50` metric, the Portfolio view replaces past-month
+ * forecast values with realized actuals (reservation_nights revenue) so totals
+ * reflect "what actually happened + what's still projected". This helper
+ * returns a map keyed by `${listing_id}::YYYY-MM` -> actual revenue for every
+ * past month that overlaps the given range. Returns empty map if the range
+ * has no past months.
+ */
+async function fetchPastMonthActuals(
+  listingIds: string[],
+  range: { start: Date; end: Date },
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (listingIds.length === 0) return out;
+  const currentMonthStart = startOfMonth(new Date());
+  // Past-month window inside range: from range.start up to min(range.end, currentMonthStart - 1)
+  if (range.start >= currentMonthStart) return out;
+  const pastEnd = new Date(currentMonthStart.getTime() - 1);
+  const effEnd = pastEnd < range.end ? pastEnd : range.end;
+  const s = format(range.start, 'yyyy-MM-dd');
+  const e = format(effEnd, 'yyyy-MM-dd');
+  const nights = await fetchReservationNights(listingIds, s, e);
+  for (const n of nights) {
+    // night_date is YYYY-MM-DD; bucket by YYYY-MM
+    const ym = (n.night_date || '').slice(0, 7);
+    if (!ym) continue;
+    const key = `${n.listing_id}::${ym}`;
+    out.set(key, (out.get(key) ?? 0) + Number(n.revenue_allocation || 0));
+  }
+  return out;
+}
+
 export async function fetchModuleData(module: ReportModule): Promise<ModuleData> {
   const range = resolveDateRange(module.dateRange);
   const { start: startStr, end: endStr } = rangeToISO(range);
@@ -319,6 +351,20 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
           const d = new Date(y, (mo || 1) - 1, 15);
           if (d < range.start || d > range.end) continue;
           rows.push({ listing_id: r.listing_id, target_month: targetMonth, forecast_p50: p50 });
+        }
+      }
+    }
+
+    // Past-month substitution: replace forecast with realized actuals for any
+    // month that has already ended, matching the Portfolio Revenue Forecast view.
+    const pastActuals = await fetchPastMonthActuals(listingIds, range);
+    if (pastActuals.size > 0 || range.start < startOfMonth(new Date())) {
+      const currentMonthStart = startOfMonth(new Date());
+      for (const r of rows) {
+        const [yy, mm] = r.target_month.split('-').map(Number);
+        const monthDate = new Date(yy, (mm || 1) - 1, 1);
+        if (monthDate < currentMonthStart) {
+          r.forecast_p50 = pastActuals.get(`${r.listing_id}::${r.target_month}`) ?? 0;
         }
       }
     }
@@ -1090,6 +1136,10 @@ async function buildPivotData(
     const startYear = range.start.getFullYear();
     const endYear = range.end.getFullYear();
     const chunkSize = 60;
+    // Past-month actuals override raw forecast for months that already ended,
+    // matching the Portfolio Revenue Forecast view.
+    const pastActuals = await fetchPastMonthActuals(listingIds, range);
+    const currentMonthStart = startOfMonth(new Date());
     for (let i = 0; i < listingIds.length; i += chunkSize) {
       const chunk = listingIds.slice(i, i + chunkSize);
       const { data, error } = await supabase
@@ -1112,7 +1162,11 @@ async function buildPivotData(
           const [y, mo] = targetMonth.split('-').map(Number);
           const d = new Date(y, (mo || 1) - 1, 15);
           if (d < range.start || d > range.end) continue;
-          const v = Number(m?.total_forecast_p50 ?? m?.blended_forecast ?? m?.probability_forecast ?? 0);
+          let v = Number(m?.total_forecast_p50 ?? m?.blended_forecast ?? m?.probability_forecast ?? 0);
+          const monthDate = new Date(y, (mo || 1) - 1, 1);
+          if (monthDate < currentMonthStart) {
+            v = pastActuals.get(`${r.listing_id}::${targetMonth}`) ?? 0;
+          }
           const pairs = pivotKeyPairs(d, r.listing_id, rowB, colB, listingsById, ownerNames, groupsForListing);
           for (const [rk, ck] of pairs) {
             rowKeysSet.add(rk); colKeysSet.add(ck);
@@ -1124,6 +1178,7 @@ async function buildPivotData(
     const compare = await buildPivotCompare(module, range, listings, listingIds, listingsById, rowB, colB, ownerNames, groupsForListing);
     return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel, compare);
   }
+
 
   // ---- Reservation-night metrics: revenue / nights / occupancy / adr / revpar ----
   const nights = await fetchReservationNights(listingIds, startStr, endStr);
