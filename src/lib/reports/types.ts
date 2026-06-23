@@ -69,8 +69,11 @@ export interface ReportModule {
   scope: ReportScope;
   dateRange: DateRangeConfig;
   breakdown?: BreakdownKey;
+  /** Optional secondary breakdown used by Table widgets to render a pivot (rows x columns). */
+  breakdown2?: BreakdownKey;
   compare?: CompareKey;
 }
+
 
 export interface ReportConfig {
   modules: ReportModule[];
