@@ -3,7 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw, BarChart3, Target } from "lucide-react";
+import { TrendingUp, AlertCircle, CheckCircle, Clock, DollarSign, RefreshCw, BarChart3, Target, Download } from "lucide-react";
+import { downloadCsv } from "@/lib/reports/format";
 import { parseLocalDate } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDistanceToNow } from "date-fns";
@@ -451,7 +452,58 @@ export function RevenueForecast({ listingId }: RevenueForecastProps) {
 
             {/* Monthly Breakdown */}
             <div>
-              <h4 className="text-sm font-medium mb-4">Monthly Forecast Breakdown</h4>
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-sm font-medium">Monthly Forecast Breakdown</h4>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const today = new Date();
+                    const monthStartThisRender = new Date(today.getFullYear(), today.getMonth(), 1);
+                    const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+                    const header = ['Month', 'Period', 'Actual', 'On Books', 'Forecast', 'Pace %', 'Probability %', 'Compset Demand'];
+                    const rows: string[][] = [header];
+                    let totalActual = 0, totalOnBooks = 0, totalForecast = 0;
+                    for (const m of forecast.monthlyForecasts || []) {
+                      const [yStr, mStr] = (m.month || '').split('-');
+                      const y = Number(yStr); const mo = Number(mStr) - 1;
+                      const monthDate = isNaN(y) || isNaN(mo) ? new Date() : new Date(y, mo, 1);
+                      const isPastMonth = monthDate < monthStartThisRender;
+                      const isCurrentMonth = monthDate >= monthStartThisRender && monthDate < nextMonthStart && y === today.getFullYear();
+                      const isFutureMonth = monthDate >= nextMonthStart || y > today.getFullYear();
+                      const period = isPastMonth ? 'Past' : isCurrentMonth ? 'Current' : 'Future';
+                      const actualForMonth = actualRevenue.monthlyActuals[m.month] || 0;
+                      const onBooksForMonth = actualRevenue.monthlyOnBooks[m.month] || 0;
+                      const actualVal = (isPastMonth || isCurrentMonth) && actualForMonth > 0 ? Math.round(actualForMonth) : '';
+                      const onBooksVal = isCurrentMonth && onBooksForMonth > 0
+                        ? Math.round(onBooksForMonth)
+                        : isFutureMonth ? Math.round(Number(m.revenue_on_books || 0)) : '';
+                      const forecastVal = isPastMonth
+                        ? (actualForMonth > 0 ? Math.round(actualForMonth) : '')
+                        : Math.round(Number(m.total_forecast_p50 || m.blended_forecast || 0));
+                      const pace = (isCurrentMonth || isFutureMonth) && m.velocity_factor !== undefined ? m.velocity_factor : '';
+                      const prob = (isCurrentMonth || isFutureMonth) && m.avg_open_probability !== undefined && m.avg_open_probability > 0 ? (m.avg_open_probability / 100) : '';
+                      const demand = (isCurrentMonth || isFutureMonth) ? (m.compset_demand || '') : '';
+                      if (typeof actualVal === 'number') totalActual += actualVal;
+                      if (typeof onBooksVal === 'number') totalOnBooks += onBooksVal;
+                      if (typeof forecastVal === 'number') totalForecast += forecastVal;
+                      rows.push([
+                        m.month, period,
+                        String(actualVal), String(onBooksVal), String(forecastVal),
+                        typeof pace === 'number' ? pace.toFixed(4) : '',
+                        typeof prob === 'number' ? prob.toFixed(4) : '',
+                        String(demand),
+                      ]);
+                    }
+                    rows.push(['Total', '', String(totalActual), String(totalOnBooks), String(totalForecast), '', '', '']);
+                    const stamp = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+                    downloadCsv(`forecast-${listingId}-${stamp}.csv`, rows);
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  CSV
+                </Button>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="border-b">
