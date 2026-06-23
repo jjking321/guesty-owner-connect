@@ -396,7 +396,7 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
             </Select>
             {module.breakdown2 && (
               <p className="text-xs text-muted-foreground">
-                Renders as a pivot table. Comparison is disabled while a pivot is active.
+                Renders as a pivot table. Comparison values appear stacked under each cell.
               </p>
             )}
           </div>
