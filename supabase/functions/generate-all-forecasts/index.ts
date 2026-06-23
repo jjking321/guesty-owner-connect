@@ -16,18 +16,24 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Check for service-role bypass (for automated nightly sync)
-    const isServiceRole = req.headers.get("x-service-role") === "true";
+    // Auth: accept service-role bearer (internal invocations) or a valid user JWT
+    const authHeader = req.headers.get('Authorization') ?? '';
+    const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
+    const isServiceRole = bearer.length > 0 && bearer === supabaseKey;
 
     let userId: string | undefined;
-
     if (!isServiceRole) {
-      const authHeader = req.headers.get('Authorization');
-      const token = authHeader?.replace('Bearer ', '');
-      const { data: userData } = await supabase.auth.getUser(token || '');
-      userId = userData?.user?.id;
+      if (!bearer) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const { data: userData, error: userError } = await supabase.auth.getUser(bearer);
+      if (userError || !userData?.user?.id) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      userId = userData.user.id;
     }
-    // For service-role, userId remains undefined but that's fine for automated runs
 
     console.log('Starting background forecast generation for all properties...');
 

@@ -411,16 +411,42 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    serviceRoleKey
   );
 
-  // Invoker client with service-role marker for self-invocation
+  // Auth: only service-role (cron / self-invoke) or super_admin users may trigger nightly-sync.
+  const authBearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const isServiceRole = authBearer.length > 0 && authBearer === serviceRoleKey;
+  if (!isServiceRole) {
+    if (!authBearer) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { data: userData, error: userError } = await supabase.auth.getUser(authBearer);
+    if (userError || !userData?.user?.id) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { data: superRow } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('user_id', userData.user.id)
+      .eq('role', 'super_admin')
+      .limit(1)
+      .maybeSingle();
+    if (!superRow) {
+      return new Response(JSON.stringify({ error: 'Forbidden: super admin required' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Invoker client for self-invocation (Authorization bearer = service role key, used as auth marker by callees)
   const supabaseInvoke = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    { global: { headers: { 'x-service-role': 'true' } } }
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   );
 
   try {

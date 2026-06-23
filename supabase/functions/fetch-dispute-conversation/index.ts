@@ -274,16 +274,30 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  // Auth: service-role (internal) or any valid user JWT
+  const authBearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  if (!authBearer) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+  if (authBearer !== supabaseServiceKey) {
+    const { data: userData, error: userError } = await supabase.auth.getUser(authBearer);
+    if (userError || !userData?.user?.id) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
+
   try {
     const { reviewId, reservationId } = await req.json();
     
     if (!reviewId) {
       throw new Error('reviewId is required');
     }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     console.log(`Fetching conversation for review: ${reviewId}, reservation: ${reservationId}`);
 
