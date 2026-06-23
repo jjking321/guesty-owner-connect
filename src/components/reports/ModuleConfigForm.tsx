@@ -359,7 +359,7 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
           </div>
           {module.type !== 'kpi' && (
             <div className="space-y-1">
-              <Label>Breakdown</Label>
+              <Label>{module.type === 'table' ? 'Rows (breakdown)' : 'Breakdown'}</Label>
               <Select
                 value={module.breakdown ?? 'month'}
                 onValueChange={(v) => update({ breakdown: v as BreakdownKey })}
@@ -375,6 +375,33 @@ export function ModuleConfigForm({ module, onChange, onRemove, onMoveUp, onMoveD
             </div>
           )}
         </div>
+
+        {module.type === 'table' && (
+          <div className="space-y-1">
+            <Label>Columns (then by) — optional pivot</Label>
+            <Select
+              value={module.breakdown2 ?? 'none'}
+              onValueChange={(v) =>
+                update({ breakdown2: v === 'none' ? undefined : (v as BreakdownKey) })
+              }
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="month" disabled={(module.breakdown ?? 'month') === 'month'}>By month</SelectItem>
+                <SelectItem value="listing" disabled={module.breakdown === 'listing'}>By listing</SelectItem>
+                <SelectItem value="owner" disabled={module.breakdown === 'owner'}>By owner</SelectItem>
+                <SelectItem value="group" disabled={module.breakdown === 'group'}>By group</SelectItem>
+              </SelectContent>
+            </Select>
+            {module.breakdown2 && (
+              <p className="text-xs text-muted-foreground">
+                Renders as a pivot table. Comparison is disabled while a pivot is active.
+              </p>
+            )}
+          </div>
+        )}
+
 
         {dateRangePreset === 'custom' && 'start' in module.dateRange && (
           <div className="grid grid-cols-2 gap-3">
