@@ -113,9 +113,18 @@ export interface ModuleData {
   /** Present only when the module is rendered as a pivot (table widgets with breakdown2). */
   pivot?: {
     columns: string[];
-    rows: Array<{ key: string; values: Record<string, number>; rowTotal: number }>;
+    rows: Array<{
+      key: string;
+      values: Record<string, number>;
+      rowTotal: number;
+      compareValues?: Record<string, number>;
+      rowCompareTotal?: number;
+    }>;
     columnTotals: Record<string, number>;
     grandTotal: number;
+    columnCompareTotals?: Record<string, number>;
+    grandCompareTotal?: number;
+    compareLabel?: string;
   };
 }
 
