@@ -953,15 +953,16 @@ serve(async (req) => {
       let effectiveNights: number | null = null;
       
       // ============================================================
-      // STEP 7 (NEW): Apply probability adjustment FIRST
-      // This uses compset occupancy + lead time decay for realistic estimates
+      // STEP 7: Compute probability-adjusted expected revenue
+      // (uses compset occupancy + lead time decay + gap quality)
+      // This is now treated as an additional SIGNAL blended with the
+      // baseline×pacing forecast, NOT a hard cap that overrides history.
       // ============================================================
+      let probabilityAdjustedForecast: number | null = null;
       if (capacity && capacity.availableNights > 0 && capacity.avgAskingRate > 0) {
-        // Get occupancy rate: prefer future compset data, fall back to historical
         let monthOccupancy = compsetDemand?.occupancyRate;
         
         if (!monthOccupancy || monthOccupancy === 0) {
-          // Look up historical occupancy for same month from compset
           const historicalOcc = getHistoricalCompsetOccupancy(compsetSummaryData, targetMonth);
           if (historicalOcc !== null) {
             monthOccupancy = historicalOcc;
@@ -969,11 +970,9 @@ serve(async (req) => {
           }
         }
         
-        // Default to 65% if still no occupancy data
         monthOccupancy = monthOccupancy || 0.65;
         appliedOccupancy = monthOccupancy;
         
-        // Step A: Apply lead time decay to available nights
         const leadTimeResult = applyLeadTimeDecay(
           capacityData,
           targetYear,
@@ -982,13 +981,10 @@ serve(async (req) => {
           medianBookingWindow
         );
         
-        // Step B: Apply gap quality penalty to lead-time-adjusted nights
-        // This penalizes orphan nights (1-night gaps) and large gaps that are unlikely to fill completely
         const gapAnalysis = analyzeGapQuality(
           leadTimeResult.details.map(d => ({ date: d.date, price: d.price, factor: d.factor }))
         );
         
-        // Log gap analysis for debugging
         if (gapAnalysis.gaps.length > 0) {
           console.log(`  → Gap analysis for month ${targetMonth + 1}:`);
           for (const gap of gapAnalysis.gaps) {
@@ -999,28 +995,71 @@ serve(async (req) => {
           }
         }
         
-        // Use gap-adjusted effective nights
         effectiveNights = gapAnalysis.effectiveNights;
-        
-        // Calculate probability-adjusted expected additional revenue
-        // = gap-weighted available revenue × compset occupancy rate
         const expectedAdditional = gapAnalysis.weightedRevenue * monthOccupancy;
-        const probabilityAdjustedForecast = onBooks + expectedAdditional;
+        probabilityAdjustedForecast = onBooks + expectedAdditional;
+      }
+      
+      // ============================================================
+      // STEP 7b (NEW): Anchor future months to prior-year same-month
+      // baseline adjusted by this year's pacing (velocity factor).
+      // Prevents probability/gap math from collapsing a month that
+      // historically earned $2k+ down to a few hundred dollars.
+      // ============================================================
+      let baselineFloor = 0;
+      let baselineSource: 'prior_year' | 'compset' | 'annual_avg' | 'none' = 'none';
+      
+      if (daysUntilMonth > 0) {
+        // Use the SAME monthly baseline already resolved at Step 1, which
+        // follows: prior-year actual → compset fallback → annual average.
+        const monthlyBaseline = baseline;
+        if ((baselineByMonth[targetMonth] || 0) > 0) {
+          baselineSource = 'prior_year';
+        } else if ((compsetMonthlyRevenue[targetMonth] || 0) > 0) {
+          baselineSource = 'compset';
+        } else if (monthlyBaseline > 0) {
+          baselineSource = 'annual_avg';
+        }
         
-        // If the blended forecast exceeds the probability-adjusted forecast, cap it
-        if (blendedForecast > probabilityAdjustedForecast) {
-          console.log(
-            `  → Probability adjusted: $${blendedForecast.toFixed(0)} → $${probabilityAdjustedForecast.toFixed(0)} ` +
-            `(${gapAnalysis.effectiveNights.toFixed(1)} gap-adj nights × ${(monthOccupancy * 100).toFixed(0)}% occ = $${expectedAdditional.toFixed(0)} expected additional)`
-          );
-          blendedForecast = probabilityAdjustedForecast;
+        // Apply this year's pacing, but clipped tighter than the raw
+        // velocity bounds so a sparse month doesn't crater the floor.
+        const pacingForFloor = Math.max(0.75, Math.min(velocity.factor, 1.25));
+        baselineFloor = monthlyBaseline * pacingForFloor;
+        
+        // Blend baseline+pacing with the probability-adjusted signal
+        // (when we have one) instead of letting either dominate.
+        if (probabilityAdjustedForecast !== null && baselineFloor > 0) {
+          // Weight pacing baseline more for far-out months, probability
+          // signal more for close-in months — mirrors existing horizon logic.
+          let baselineWeight: number;
+          if (daysUntilMonth <= 30) baselineWeight = 0.40;
+          else if (daysUntilMonth <= 90) baselineWeight = 0.60;
+          else baselineWeight = 0.75;
+          const probWeight = 1 - baselineWeight;
+          const signalBlend = (baselineFloor * baselineWeight) + (probabilityAdjustedForecast * probWeight);
+          // The final candidate is the stronger of the two anchors so we
+          // don't understate months with proven historical demand.
+          const candidate = Math.max(signalBlend, baselineFloor, probabilityAdjustedForecast);
+          if (Math.abs(candidate - blendedForecast) > 1) {
+            console.log(
+              `  → Baseline-anchored (${baselineSource}): blended $${blendedForecast.toFixed(0)} → $${candidate.toFixed(0)} ` +
+              `[floor $${baselineFloor.toFixed(0)} (pace ${(pacingForFloor * 100).toFixed(0)}%), prob $${probabilityAdjustedForecast.toFixed(0)}, weights ${(baselineWeight*100).toFixed(0)}/${(probWeight*100).toFixed(0)}]`
+            );
+          }
+          blendedForecast = candidate;
           probabilityAdjusted = true;
+        } else if (baselineFloor > 0 && blendedForecast < baselineFloor) {
+          console.log(
+            `  → Baseline floor (${baselineSource}) lifted: $${blendedForecast.toFixed(0)} → $${baselineFloor.toFixed(0)} ` +
+            `(prior-year×pace ${(pacingForFloor * 100).toFixed(0)}%)`
+          );
+          blendedForecast = baselineFloor;
         }
       }
       
       // ============================================================
       // STEP 8: Apply capacity ceiling as ABSOLUTE maximum (100% booking)
-      // This is now a safety cap, not the primary constraint
+      // Capacity is the only true hard cap.
       // ============================================================
       if (capacity && capacity.availableNights > 0 && capacity.avgAskingRate > 0) {
         const maxAdditional = capacity.availableNights * capacity.avgAskingRate;
@@ -1043,6 +1082,19 @@ serve(async (req) => {
           );
           blendedForecast = onBooks;
           capacityConstrained = true;
+        }
+      }
+      
+      // Always re-floor: never let a future month forecast fall below
+      // the lesser of (baseline floor, capacity ceiling). This guarantees
+      // a fully-available month with strong prior history isn't reported
+      // as near-zero just because gap/probability math was pessimistic.
+      if (daysUntilMonth > 0 && baselineFloor > 0) {
+        const effectiveFloor = capacityCeiling !== null
+          ? Math.min(baselineFloor, capacityCeiling)
+          : baselineFloor;
+        if (blendedForecast < effectiveFloor) {
+          blendedForecast = effectiveFloor;
         }
       }
       
