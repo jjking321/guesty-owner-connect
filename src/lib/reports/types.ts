@@ -110,7 +110,15 @@ export interface ModuleData {
   unit: 'currency' | 'percent' | 'number';
   metricLabel: string;
   compareLabel?: string;
+  /** Present only when the module is rendered as a pivot (table widgets with breakdown2). */
+  pivot?: {
+    columns: string[];
+    rows: Array<{ key: string; values: Record<string, number>; rowTotal: number }>;
+    columnTotals: Record<string, number>;
+    grandTotal: number;
+  };
 }
+
 
 export const METRIC_LABELS: Record<MetricKey, string> = {
   revenue: 'Revenue',
