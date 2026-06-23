@@ -410,7 +410,7 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
     else if (module.compare) {
       const prevRange = resolveCompareRange(range, module.compare);
       if (prevRange) {
-        const { start: ps, end: pe } = rangeToISO(prevRange);
+        const ps = format(prevRange.start, 'yyyy-MM-dd'); const pe = format(prevRange.end, 'yyyy-MM-dd');
         const prevNights = await fetchReservationNights(listingIds, ps, pe);
         const compareLabel = COMPARE_LABELS[module.compare];
         const isMonth = !module.breakdown || module.breakdown === 'month';
@@ -609,7 +609,7 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
   // Date-range based comparisons (last_year, previous_period, last_30_days, last_90_days, last_month, two_years_ago)
   const prevRange = resolveCompareRange(range, module.compare ?? null);
   if (prevRange && module.compare && module.compare !== 'goal') {
-    const { start: ps, end: pe } = rangeToISO(prevRange);
+    const ps = format(prevRange.start, 'yyyy-MM-dd'); const pe = format(prevRange.end, 'yyyy-MM-dd');
     const prevNights = await fetchReservationNights(listingIds, ps, pe);
     const prevRev = prevNights.reduce((a, n) => a + Number(n.revenue_allocation || 0), 0);
     const prevNightsCount = prevNights.length;
@@ -1503,7 +1503,7 @@ async function buildShiftedNightCellMaps(
   const rev = new Map<string, number>();
   const nights = new Map<string, number>();
   const listings = new Map<string, Set<string>>();
-  const { start: ps, end: pe } = rangeToISO(prevRange);
+  const ps = format(prevRange.start, 'yyyy-MM-dd'); const pe = format(prevRange.end, 'yyyy-MM-dd');
   const prevNights = await fetchReservationNights(listingIds, ps, pe);
   for (const n of prevNights) {
     const d = new Date(n.night_date + 'T00:00:00');
