@@ -456,9 +456,7 @@ async function performSync(
         const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
         const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-        const invokeClient = createClient(supabaseUrl, supabaseServiceKey, {
-          global: { headers: { 'x-service-role': 'true' } },
-        });
+        const invokeClient = createClient(supabaseUrl, supabaseServiceKey);
 
         const { error: invokeError } = await invokeClient.functions.invoke('sync-bulk-calendar', {
           body: { guestyAccountId, guestyToken: accessToken },

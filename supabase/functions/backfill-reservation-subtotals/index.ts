@@ -477,7 +477,6 @@ Deno.serve(async (req) => {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${serviceRoleKey}`,
-            'x-service-role': 'true',
           },
           body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId, skipOffset: cursor, onlyMissing: true }),
         }).catch((err) => console.error('Self-invoke error:', err));
@@ -637,7 +636,6 @@ Deno.serve(async (req) => {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${serviceRoleKey}`,
-          'x-service-role': 'true',
         },
         body: JSON.stringify({ guestyAccountId, checkOutMonths, jobId, skipOffset: currentSkip, onlyMissing }),
       }).catch(err => console.error('Self-invoke error:', err));

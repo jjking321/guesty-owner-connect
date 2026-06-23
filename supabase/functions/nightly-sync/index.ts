@@ -416,11 +416,10 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   );
 
-  // Invoker client with service-role marker for self-invocation
+  // Invoker client for self-invocation (Authorization bearer = service role key, used as auth marker by callees)
   const supabaseInvoke = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-    { global: { headers: { 'x-service-role': 'true' } } }
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   );
 
   try {
