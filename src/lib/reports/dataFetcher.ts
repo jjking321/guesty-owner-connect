@@ -1081,7 +1081,8 @@ async function buildPivotData(
         revByCell.set(cellKey(r, c), (revByCell.get(cellKey(r, c)) ?? 0) + v);
       }
     }
-    return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel);
+    const compare = await buildPivotCompare(module, range, listings, listingIds, listingsById, rowB, colB, ownerNames, groupsForListing);
+    return assemblePivot(rowB, colB, rowKeysSet, colKeysSet, revByCell, nightsByCell, listingsByCell, range, listings, 'revenue', unit, metricLabel, compare);
   }
 
   // ---- Forecast metric ----
