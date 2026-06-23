@@ -480,7 +480,7 @@ Deno.serve(async (req) => {
         };
         
         if (isServiceRole) {
-          selfInvokeHeaders["x-service-role"] = "true";
+          selfInvokeHeaders["Authorization"] = `Bearer ${supabaseServiceKey}`;
         } else if (authHeader) {
           selfInvokeHeaders["Authorization"] = authHeader;
         }
