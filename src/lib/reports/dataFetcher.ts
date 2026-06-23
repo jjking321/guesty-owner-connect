@@ -263,6 +263,13 @@ export async function fetchModuleData(module: ReportModule): Promise<ModuleData>
   const listingsById = new Map(listings.map((l) => [l.id, l]));
   const listingIds = listings.map((l) => l.id);
 
+  // Pivot path: only for table widgets with a secondary breakdown selected.
+  if (module.type === 'table' && module.breakdown2 && module.breakdown2 !== module.breakdown) {
+    return buildPivotData(module, range, startStr, endStr, listings, listingsById, listingIds);
+  }
+
+
+
   // Goals path
   if (module.metric === 'goal') {
     const startYear = range.start.getFullYear();
