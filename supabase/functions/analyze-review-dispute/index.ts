@@ -94,6 +94,25 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  // Auth: service-role (internal batch) or any valid user JWT
+  const authBearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const isServiceRole = authBearer.length > 0 && authBearer === supabaseServiceKey;
+  if (!isServiceRole) {
+    if (!authBearer) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { data: userData, error: userError } = await supabase.auth.getUser(authBearer);
+    if (userError || !userData?.user?.id) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
+
   try {
     const { reviewId, includeConversation = true } = await req.json();
     
@@ -105,10 +124,6 @@ Deno.serve(async (req) => {
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     console.log(`Analyzing dispute for review: ${reviewId}`);
 

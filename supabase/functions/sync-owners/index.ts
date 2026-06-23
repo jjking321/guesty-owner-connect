@@ -256,12 +256,39 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    );
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    serviceRoleKey
+  );
 
+  // Auth: service-role (nightly-sync) or admin/super_admin user
+  const authBearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const isServiceRole = authBearer.length > 0 && authBearer === serviceRoleKey;
+  if (!isServiceRole) {
+    if (!authBearer) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { data: userData, error: userError } = await supabase.auth.getUser(authBearer);
+    if (userError || !userData?.user?.id) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { data: roleRow } = await supabase
+      .from('organization_members')
+      .select('role')
+      .eq('user_id', userData.user.id)
+      .in('role', ['admin', 'super_admin'])
+      .limit(1)
+      .maybeSingle();
+    if (!roleRow) {
+      return new Response(JSON.stringify({ error: 'Forbidden: admin required' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
+
+  try {
     const { accountId } = await req.json();
     console.log(`Starting owner sync for account ${accountId}`);
 
