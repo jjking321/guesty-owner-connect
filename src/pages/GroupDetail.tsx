@@ -33,7 +33,9 @@ import { PacingReport } from "@/components/PacingReport";
 import { GoalsComparison } from "@/components/GoalsComparison";
 import { StripeDateRangePicker, type DateRange } from "@/components/StripeDateRangePicker";
 import { PropertiesTable } from "@/components/PropertiesTable";
-import { format, startOfYear, differenceInDays } from "date-fns";
+import { format, startOfYear, startOfMonth, startOfQuarter, subDays, differenceInDays } from "date-fns";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useToast } from "@/hooks/use-toast";
 import { type NavigationReferrer } from "@/hooks/useSmartNavigation";
 
