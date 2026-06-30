@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Loader2, Plug } from "lucide-react";
+import { Plus, Trash2, Loader2, Plug, AlertCircle } from "lucide-react";
+import { z } from "zod";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,6 +36,8 @@ export function TrackHsAccounts() {
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -54,30 +57,84 @@ export function TrackHsAccounts() {
     load();
   }, []);
 
+  const baseSchema = z.object({
+    username: z
+      .string()
+      .trim()
+      .min(1, { message: "API username is required" })
+      .max(255, { message: "Username must be less than 255 characters" }),
+    password: z
+      .string()
+      .min(1, { message: "API password is required" })
+      .max(1024, { message: "Password must be less than 1024 characters" }),
+  });
+  const newAccountSchema = baseSchema.extend({
+    account_name: z
+      .string()
+      .trim()
+      .min(1, { message: "Account name is required" })
+      .max(100, { message: "Account name must be less than 100 characters" }),
+    api_base_url: z
+      .string()
+      .trim()
+      .url({ message: "Enter a valid URL (e.g. https://yourtenant.trackhs.com/api)" })
+      .max(500, { message: "URL must be less than 500 characters" })
+      .refine((v) => /^https:\/\//i.test(v), { message: "URL must start with https://" }),
+  });
+
+  const friendlyError = (msg: string): string => {
+    const m = msg.toLowerCase();
+    if (m.includes("401") || m.includes("invalid token") || m.includes("not authenticated"))
+      return "Your session expired. Please sign in again and retry.";
+    if (m.includes("403") || m.includes("permission") || m.includes("admin"))
+      return "You need admin permissions on this organization to manage TrackHS accounts.";
+    if (m.includes("duplicate") || m.includes("unique"))
+      return "An account with these details already exists.";
+    if (m.includes("network") || m.includes("failed to fetch"))
+      return "Network error — check your connection and try again.";
+    return msg || "Something went wrong. Please try again.";
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setFormError(null);
+    setFieldErrors({});
     const fd = new FormData(e.currentTarget);
-    const payload = {
-      account_id: editingId,
+    const raw = {
       account_name: String(fd.get("account_name") ?? "").trim(),
       api_base_url: String(fd.get("api_base_url") ?? "").trim(),
       username: String(fd.get("username") ?? "").trim(),
       password: String(fd.get("password") ?? ""),
     };
-    if (!payload.username || !payload.password || (!editingId && (!payload.account_name || !payload.api_base_url))) {
-      toast({ title: "Missing fields", description: "All fields are required.", variant: "destructive" });
+
+    const schema = editingId ? baseSchema : newAccountSchema;
+    const result = schema.safeParse(raw);
+    if (!result.success) {
+      const errs: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        if (!errs[key]) errs[key] = issue.message;
+      }
+      setFieldErrors(errs);
+      setFormError("Please fix the highlighted fields and try again.");
       return;
     }
+
+    const payload = { account_id: editingId, ...result.data } as Record<string, unknown>;
     setSaving(true);
     const { error } = await supabase.functions.invoke("save-track-credentials", { body: payload });
     setSaving(false);
     if (error) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+      const friendly = friendlyError(error.message ?? "");
+      setFormError(friendly);
+      toast({ title: "Save failed", description: friendly, variant: "destructive" });
       return;
     }
     toast({ title: editingId ? "Credentials updated" : "TrackHS account connected" });
     setShowForm(false);
     setEditingId(null);
+    setFieldErrors({});
+    setFormError(null);
     load();
   };
 
@@ -118,12 +175,30 @@ export function TrackHsAccounts() {
       </CardHeader>
       <CardContent className="space-y-4">
         {showForm && (
-          <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border p-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-3 rounded-lg border p-4">
+            {formError && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+              >
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
             {!editingId && (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="account_name">Account name</Label>
-                  <Input id="account_name" name="account_name" placeholder="e.g. Main TrackHS Tenant" required />
+                  <Input
+                    id="account_name"
+                    name="account_name"
+                    placeholder="e.g. Main TrackHS Tenant"
+                    maxLength={100}
+                    aria-invalid={!!fieldErrors.account_name}
+                  />
+                  {fieldErrors.account_name && (
+                    <p className="text-xs text-destructive">{fieldErrors.account_name}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="api_base_url">API base URL</Label>
@@ -131,19 +206,45 @@ export function TrackHsAccounts() {
                     id="api_base_url"
                     name="api_base_url"
                     type="url"
+                    inputMode="url"
                     placeholder="https://yourtenant.trackhs.com/api"
-                    required
+                    maxLength={500}
+                    aria-invalid={!!fieldErrors.api_base_url}
                   />
+                  {fieldErrors.api_base_url ? (
+                    <p className="text-xs text-destructive">{fieldErrors.api_base_url}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Must start with https://</p>
+                  )}
                 </div>
               </>
             )}
             <div className="space-y-2">
               <Label htmlFor="username">API username</Label>
-              <Input id="username" name="username" autoComplete="off" required />
+              <Input
+                id="username"
+                name="username"
+                autoComplete="off"
+                maxLength={255}
+                aria-invalid={!!fieldErrors.username}
+              />
+              {fieldErrors.username && (
+                <p className="text-xs text-destructive">{fieldErrors.username}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">API password / key</Label>
-              <Input id="password" name="password" type="password" autoComplete="new-password" required />
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                maxLength={1024}
+                aria-invalid={!!fieldErrors.password}
+              />
+              {fieldErrors.password && (
+                <p className="text-xs text-destructive">{fieldErrors.password}</p>
+              )}
             </div>
             <div className="flex gap-2">
               <Button type="submit" disabled={saving}>
@@ -156,6 +257,8 @@ export function TrackHsAccounts() {
                 onClick={() => {
                   setShowForm(false);
                   setEditingId(null);
+                  setFieldErrors({});
+                  setFormError(null);
                 }}
               >
                 Cancel
