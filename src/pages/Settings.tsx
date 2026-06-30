@@ -13,6 +13,7 @@ import { GuestyIcon } from "@/components/icons/GuestyIcon";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
+import { TrackHsAccounts } from "@/components/TrackHsAccounts";
 import { TeamManagement } from "@/components/TeamManagement";
 import { AIPromptsSettings } from "@/components/AIPromptsSettings";
 import { OrganizationSettings } from "@/components/OrganizationSettings";
