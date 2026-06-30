@@ -2204,9 +2204,491 @@ export type Database = {
           },
         ]
       }
+      track_account_credentials: {
+        Row: {
+          created_at: string
+          password: string
+          track_account_id: string
+          updated_at: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          password: string
+          track_account_id: string
+          updated_at?: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          password?: string
+          track_account_id?: string
+          updated_at?: string
+          username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_account_credentials_track_account_id_fkey"
+            columns: ["track_account_id"]
+            isOneToOne: true
+            referencedRelation: "track_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_accounts: {
+        Row: {
+          account_name: string
+          api_base_url: string
+          created_at: string
+          id: string
+          is_active: boolean
+          last_calendar_sync_at: string | null
+          last_listings_sync_at: string | null
+          last_reservations_sync_at: string | null
+          last_reviews_sync_at: string | null
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          account_name: string
+          api_base_url: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_calendar_sync_at?: string | null
+          last_listings_sync_at?: string | null
+          last_reservations_sync_at?: string | null
+          last_reviews_sync_at?: string | null
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          account_name?: string
+          api_base_url?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_calendar_sync_at?: string | null
+          last_listings_sync_at?: string | null
+          last_reservations_sync_at?: string | null
+          last_reviews_sync_at?: string | null
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_accounts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_capacity_calendar: {
+        Row: {
+          block_reason: string | null
+          currency: string | null
+          date: string
+          is_available: boolean
+          min_nights: number | null
+          price: number | null
+          raw_payload: Json | null
+          status: string | null
+          synced_at: string
+          track_listing_id: string
+          updated_at: string
+        }
+        Insert: {
+          block_reason?: string | null
+          currency?: string | null
+          date: string
+          is_available?: boolean
+          min_nights?: number | null
+          price?: number | null
+          raw_payload?: Json | null
+          status?: string | null
+          synced_at?: string
+          track_listing_id: string
+          updated_at?: string
+        }
+        Update: {
+          block_reason?: string | null
+          currency?: string | null
+          date?: string
+          is_available?: boolean
+          min_nights?: number | null
+          price?: number | null
+          raw_payload?: Json | null
+          status?: string | null
+          synced_at?: string
+          track_listing_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_capacity_calendar_track_listing_id_fkey"
+            columns: ["track_listing_id"]
+            isOneToOne: false
+            referencedRelation: "track_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_listings: {
+        Row: {
+          accommodates: number | null
+          address: string | null
+          bathrooms: number | null
+          bedrooms: number | null
+          city: string | null
+          country: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          last_synced_at: string | null
+          nickname: string | null
+          property_type: string | null
+          raw_payload: Json | null
+          state: string | null
+          thumbnail: string | null
+          track_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          accommodates?: number | null
+          address?: string | null
+          bathrooms?: number | null
+          bedrooms?: number | null
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          id: string
+          is_active?: boolean
+          last_synced_at?: string | null
+          nickname?: string | null
+          property_type?: string | null
+          raw_payload?: Json | null
+          state?: string | null
+          thumbnail?: string | null
+          track_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          accommodates?: number | null
+          address?: string | null
+          bathrooms?: number | null
+          bedrooms?: number | null
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_synced_at?: string | null
+          nickname?: string | null
+          property_type?: string | null
+          raw_payload?: Json | null
+          state?: string | null
+          thumbnail?: string | null
+          track_account_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_listings_track_account_id_fkey"
+            columns: ["track_account_id"]
+            isOneToOne: false
+            referencedRelation: "track_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_reservation_nights: {
+        Row: {
+          created_at: string
+          listing_id: string | null
+          night_date: string
+          reservation_id: string
+          revenue_allocation: number
+        }
+        Insert: {
+          created_at?: string
+          listing_id?: string | null
+          night_date: string
+          reservation_id: string
+          revenue_allocation?: number
+        }
+        Update: {
+          created_at?: string
+          listing_id?: string | null
+          night_date?: string
+          reservation_id?: string
+          revenue_allocation?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_reservation_nights_reservation_id_fkey"
+            columns: ["reservation_id"]
+            isOneToOne: false
+            referencedRelation: "track_reservations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_reservations: {
+        Row: {
+          booked_at: string | null
+          channel: string | null
+          check_in: string | null
+          check_out: string | null
+          confirmation_code: string | null
+          created_at: string
+          currency: string | null
+          fare_accommodation_adjusted: number | null
+          fees_amount: number | null
+          guest_email: string | null
+          guest_name: string | null
+          guests_count: number | null
+          id: string
+          imported_at: string
+          last_updated_at_track: string | null
+          nights_count: number | null
+          raw_payload: Json | null
+          source: string | null
+          status: string | null
+          sub_total: number | null
+          tax_amount: number | null
+          total_amount: number | null
+          track_account_id: string
+          track_listing_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          booked_at?: string | null
+          channel?: string | null
+          check_in?: string | null
+          check_out?: string | null
+          confirmation_code?: string | null
+          created_at?: string
+          currency?: string | null
+          fare_accommodation_adjusted?: number | null
+          fees_amount?: number | null
+          guest_email?: string | null
+          guest_name?: string | null
+          guests_count?: number | null
+          id: string
+          imported_at?: string
+          last_updated_at_track?: string | null
+          nights_count?: number | null
+          raw_payload?: Json | null
+          source?: string | null
+          status?: string | null
+          sub_total?: number | null
+          tax_amount?: number | null
+          total_amount?: number | null
+          track_account_id: string
+          track_listing_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          booked_at?: string | null
+          channel?: string | null
+          check_in?: string | null
+          check_out?: string | null
+          confirmation_code?: string | null
+          created_at?: string
+          currency?: string | null
+          fare_accommodation_adjusted?: number | null
+          fees_amount?: number | null
+          guest_email?: string | null
+          guest_name?: string | null
+          guests_count?: number | null
+          id?: string
+          imported_at?: string
+          last_updated_at_track?: string | null
+          nights_count?: number | null
+          raw_payload?: Json | null
+          source?: string | null
+          status?: string | null
+          sub_total?: number | null
+          tax_amount?: number | null
+          total_amount?: number | null
+          track_account_id?: string
+          track_listing_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_reservations_track_account_id_fkey"
+            columns: ["track_account_id"]
+            isOneToOne: false
+            referencedRelation: "track_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "track_reservations_track_listing_id_fkey"
+            columns: ["track_listing_id"]
+            isOneToOne: false
+            referencedRelation: "track_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_reviews: {
+        Row: {
+          category_ratings: Json | null
+          created_at: string
+          guest_name: string | null
+          id: string
+          imported_at: string
+          is_removed: boolean
+          rating: number | null
+          raw_payload: Json | null
+          reservation_id: string | null
+          response_text: string | null
+          review_date: string | null
+          review_text: string | null
+          source: string | null
+          track_account_id: string
+          track_listing_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          category_ratings?: Json | null
+          created_at?: string
+          guest_name?: string | null
+          id: string
+          imported_at?: string
+          is_removed?: boolean
+          rating?: number | null
+          raw_payload?: Json | null
+          reservation_id?: string | null
+          response_text?: string | null
+          review_date?: string | null
+          review_text?: string | null
+          source?: string | null
+          track_account_id: string
+          track_listing_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          category_ratings?: Json | null
+          created_at?: string
+          guest_name?: string | null
+          id?: string
+          imported_at?: string
+          is_removed?: boolean
+          rating?: number | null
+          raw_payload?: Json | null
+          reservation_id?: string | null
+          response_text?: string | null
+          review_date?: string | null
+          review_text?: string | null
+          source?: string | null
+          track_account_id?: string
+          track_listing_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_reviews_track_account_id_fkey"
+            columns: ["track_account_id"]
+            isOneToOne: false
+            referencedRelation: "track_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "track_reviews_track_listing_id_fkey"
+            columns: ["track_listing_id"]
+            isOneToOne: false
+            referencedRelation: "track_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      v_unified_calendar: {
+        Row: {
+          block_reason: string | null
+          currency: string | null
+          date: string | null
+          is_available: boolean | null
+          min_nights: number | null
+          price: number | null
+          provider: string | null
+          provider_listing_id: string | null
+          status: string | null
+        }
+        Relationships: []
+      }
+      v_unified_listings: {
+        Row: {
+          accommodates: number | null
+          address: string | null
+          bathrooms: number | null
+          bedrooms: number | null
+          is_active: boolean | null
+          listing_uid: string | null
+          name: string | null
+          organization_id: string | null
+          property_type: string | null
+          provider: string | null
+          provider_listing_id: string | null
+          thumbnail: string | null
+        }
+        Relationships: []
+      }
+      v_unified_reservation_nights: {
+        Row: {
+          night_date: string | null
+          provider: string | null
+          provider_listing_id: string | null
+          reservation_uid: string | null
+          revenue_allocation: number | null
+        }
+        Relationships: []
+      }
+      v_unified_reservations: {
+        Row: {
+          check_in: string | null
+          check_out: string | null
+          confirmation_code: string | null
+          fare_accommodation_adjusted: number | null
+          guest_name: string | null
+          guests_count: number | null
+          nights_count: number | null
+          organization_id: string | null
+          provider: string | null
+          provider_listing_id: string | null
+          provider_reservation_id: string | null
+          reservation_uid: string | null
+          source: string | null
+          status: string | null
+          subtotal: number | null
+          tax_amount: number | null
+          total_amount: number | null
+        }
+        Relationships: []
+      }
+      v_unified_reviews: {
+        Row: {
+          category_ratings: Json | null
+          guest_name: string | null
+          is_removed: boolean | null
+          provider: string | null
+          provider_listing_id: string | null
+          rating: number | null
+          reservation_uid: string | null
+          response_text: string | null
+          review_date: string | null
+          review_text: string | null
+          review_uid: string | null
+          source: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       accept_organization_invitation: {
