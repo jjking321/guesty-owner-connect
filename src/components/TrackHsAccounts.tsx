@@ -223,31 +223,69 @@ export function TrackHsAccounts() {
             )}
             <div className="space-y-2">
               <Label htmlFor="username">API username</Label>
-              <Input
-                id="username"
-                name="username"
-                autoComplete="off"
-                maxLength={255}
-                aria-invalid={!!fieldErrors.username}
-              />
+              <div className="relative">
+                <Input
+                  id="username"
+                  name="username"
+                  type={showUsername ? "text" : "password"}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  maxLength={255}
+                  className="pr-10"
+                  aria-invalid={!!fieldErrors.username}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowUsername((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+                  aria-label={showUsername ? "Hide username" : "Show username"}
+                  tabIndex={-1}
+                >
+                  {showUsername ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {fieldErrors.username && (
                 <p className="text-xs text-destructive">{fieldErrors.username}</p>
               )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">API password / key</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                maxLength={1024}
-                aria-invalid={!!fieldErrors.password}
-              />
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  maxLength={1024}
+                  className="pr-10"
+                  aria-invalid={!!fieldErrors.password}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {fieldErrors.password && (
                 <p className="text-xs text-destructive">{fieldErrors.password}</p>
               )}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Credentials are hidden by default and stored securely on the server. We never display saved values back to you — use “Update credentials” to rotate them.
+            </p>
             <div className="flex gap-2">
               <Button type="submit" disabled={saving}>
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
