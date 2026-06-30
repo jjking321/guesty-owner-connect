@@ -175,12 +175,30 @@ export function TrackHsAccounts() {
       </CardHeader>
       <CardContent className="space-y-4">
         {showForm && (
-          <form onSubmit={handleSubmit} className="space-y-3 rounded-lg border p-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-3 rounded-lg border p-4">
+            {formError && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+              >
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
             {!editingId && (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="account_name">Account name</Label>
-                  <Input id="account_name" name="account_name" placeholder="e.g. Main TrackHS Tenant" required />
+                  <Input
+                    id="account_name"
+                    name="account_name"
+                    placeholder="e.g. Main TrackHS Tenant"
+                    maxLength={100}
+                    aria-invalid={!!fieldErrors.account_name}
+                  />
+                  {fieldErrors.account_name && (
+                    <p className="text-xs text-destructive">{fieldErrors.account_name}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="api_base_url">API base URL</Label>
@@ -188,19 +206,45 @@ export function TrackHsAccounts() {
                     id="api_base_url"
                     name="api_base_url"
                     type="url"
+                    inputMode="url"
                     placeholder="https://yourtenant.trackhs.com/api"
-                    required
+                    maxLength={500}
+                    aria-invalid={!!fieldErrors.api_base_url}
                   />
+                  {fieldErrors.api_base_url ? (
+                    <p className="text-xs text-destructive">{fieldErrors.api_base_url}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Must start with https://</p>
+                  )}
                 </div>
               </>
             )}
             <div className="space-y-2">
               <Label htmlFor="username">API username</Label>
-              <Input id="username" name="username" autoComplete="off" required />
+              <Input
+                id="username"
+                name="username"
+                autoComplete="off"
+                maxLength={255}
+                aria-invalid={!!fieldErrors.username}
+              />
+              {fieldErrors.username && (
+                <p className="text-xs text-destructive">{fieldErrors.username}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">API password / key</Label>
-              <Input id="password" name="password" type="password" autoComplete="new-password" required />
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                maxLength={1024}
+                aria-invalid={!!fieldErrors.password}
+              />
+              {fieldErrors.password && (
+                <p className="text-xs text-destructive">{fieldErrors.password}</p>
+              )}
             </div>
             <div className="flex gap-2">
               <Button type="submit" disabled={saving}>
@@ -213,6 +257,8 @@ export function TrackHsAccounts() {
                 onClick={() => {
                   setShowForm(false);
                   setEditingId(null);
+                  setFieldErrors({});
+                  setFormError(null);
                 }}
               >
                 Cancel
