@@ -57,30 +57,84 @@ export function TrackHsAccounts() {
     load();
   }, []);
 
+  const baseSchema = z.object({
+    username: z
+      .string()
+      .trim()
+      .min(1, { message: "API username is required" })
+      .max(255, { message: "Username must be less than 255 characters" }),
+    password: z
+      .string()
+      .min(1, { message: "API password is required" })
+      .max(1024, { message: "Password must be less than 1024 characters" }),
+  });
+  const newAccountSchema = baseSchema.extend({
+    account_name: z
+      .string()
+      .trim()
+      .min(1, { message: "Account name is required" })
+      .max(100, { message: "Account name must be less than 100 characters" }),
+    api_base_url: z
+      .string()
+      .trim()
+      .url({ message: "Enter a valid URL (e.g. https://yourtenant.trackhs.com/api)" })
+      .max(500, { message: "URL must be less than 500 characters" })
+      .refine((v) => /^https:\/\//i.test(v), { message: "URL must start with https://" }),
+  });
+
+  const friendlyError = (msg: string): string => {
+    const m = msg.toLowerCase();
+    if (m.includes("401") || m.includes("invalid token") || m.includes("not authenticated"))
+      return "Your session expired. Please sign in again and retry.";
+    if (m.includes("403") || m.includes("permission") || m.includes("admin"))
+      return "You need admin permissions on this organization to manage TrackHS accounts.";
+    if (m.includes("duplicate") || m.includes("unique"))
+      return "An account with these details already exists.";
+    if (m.includes("network") || m.includes("failed to fetch"))
+      return "Network error — check your connection and try again.";
+    return msg || "Something went wrong. Please try again.";
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setFormError(null);
+    setFieldErrors({});
     const fd = new FormData(e.currentTarget);
-    const payload = {
-      account_id: editingId,
+    const raw = {
       account_name: String(fd.get("account_name") ?? "").trim(),
       api_base_url: String(fd.get("api_base_url") ?? "").trim(),
       username: String(fd.get("username") ?? "").trim(),
       password: String(fd.get("password") ?? ""),
     };
-    if (!payload.username || !payload.password || (!editingId && (!payload.account_name || !payload.api_base_url))) {
-      toast({ title: "Missing fields", description: "All fields are required.", variant: "destructive" });
+
+    const schema = editingId ? baseSchema : newAccountSchema;
+    const result = schema.safeParse(raw);
+    if (!result.success) {
+      const errs: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "form");
+        if (!errs[key]) errs[key] = issue.message;
+      }
+      setFieldErrors(errs);
+      setFormError("Please fix the highlighted fields and try again.");
       return;
     }
+
+    const payload = { account_id: editingId, ...result.data } as Record<string, unknown>;
     setSaving(true);
     const { error } = await supabase.functions.invoke("save-track-credentials", { body: payload });
     setSaving(false);
     if (error) {
-      toast({ title: "Save failed", description: error.message, variant: "destructive" });
+      const friendly = friendlyError(error.message ?? "");
+      setFormError(friendly);
+      toast({ title: "Save failed", description: friendly, variant: "destructive" });
       return;
     }
     toast({ title: editingId ? "Credentials updated" : "TrackHS account connected" });
     setShowForm(false);
     setEditingId(null);
+    setFieldErrors({});
+    setFormError(null);
     load();
   };
 
