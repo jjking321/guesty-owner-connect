@@ -137,6 +137,8 @@ export function TrackHsAccounts() {
     setEditingId(null);
     setFieldErrors({});
     setFormError(null);
+    setShowUsername(false);
+    setShowPassword(false);
     load();
   };
 
