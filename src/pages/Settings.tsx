@@ -949,6 +949,10 @@ export default function Settings() {
           </CardContent>
         </Card>
 
+        <TrackHsAccounts />
+
+
+
         {/* Airbnb Ratings */}
         {firstAccountId && (
           <Card>
