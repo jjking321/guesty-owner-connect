@@ -1204,6 +1204,16 @@ export function ComparablesModule({
                         Save as Template
                       </Button>
                     )}
+                    <Button
+                      onClick={handleExportCsv}
+                      disabled={selectedComparables.length === 0}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Export CSV
+                    </Button>
+
                   </div>
                 </div>
 
