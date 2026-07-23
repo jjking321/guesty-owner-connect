@@ -669,6 +669,87 @@ export function ComparablesModule({
   const selectedComparables = comparables.filter(c => pendingSelections.has(c.id));
   const unselectedComparables = comparables.filter(c => !pendingSelections.has(c.id));
 
+  const handleExportCsv = () => {
+    const rows = selectedComparables;
+    if (rows.length === 0) {
+      toast({ title: "No comparables to export", variant: "destructive" });
+      return;
+    }
+
+    // Aggregate future_rates per comparable into monthly ADR/Occ/RevPAR
+    const aggregateMonthly = (comp: Comparable) => {
+      const map = new Map<string, { totalRate: number; rateCount: number; booked: number; total: number }>();
+      const days = comp.future_rates?.rates ?? [];
+      for (const d of days) {
+        if (!d?.date) continue;
+        const key = d.date.substring(0, 7);
+        const cur = map.get(key) ?? { totalRate: 0, rateCount: 0, booked: 0, total: 0 };
+        cur.total++;
+        if (d.rate && d.rate > 0) { cur.totalRate += d.rate; cur.rateCount++; }
+        if (!d.available) cur.booked++;
+        map.set(key, cur);
+      }
+      return map;
+    };
+
+    // Union of all months across comps
+    const allMonths = new Set<string>();
+    const perComp = rows.map(c => {
+      const m = aggregateMonthly(c);
+      for (const k of m.keys()) allMonths.add(k);
+      return m;
+    });
+    const months = Array.from(allMonths).sort();
+
+    const header = [
+      "Selected", "Listing Name", "Host", "Superhost", "City", "Distance (mi)",
+      "Bedrooms", "Baths", "Beds", "Guests", "Rating", "Reviews",
+      "TTM Revenue", "TTM ADR", "TTM Occupancy", "TTM RevPAR",
+      ...months.flatMap(m => [`ADR ${m}`, `Occ ${m}`, `RevPAR ${m}`]),
+    ];
+
+    const num = (v: number | null | undefined, d = 2) =>
+      v == null || !isFinite(v) ? "" : v.toFixed(d);
+
+    const body = rows.map((c, i) => {
+      const dist = latitude && longitude && c.location_info?.lat && c.location_info?.lng
+        ? haversineDistance(latitude, longitude, c.location_info.lat, c.location_info.lng)
+        : null;
+      const m = perComp[i];
+      const monthCells = months.flatMap(mo => {
+        const d = m.get(mo);
+        if (!d) return ["", "", ""];
+        const adr = d.rateCount > 0 ? d.totalRate / d.rateCount : 0;
+        const occ = d.total > 0 ? d.booked / d.total : 0;
+        return [num(adr), num(occ * 100, 1), num(adr * occ)];
+      });
+      return [
+        c.is_selected ? "Yes" : "No",
+        c.listing_name ?? "",
+        c.host_name ?? "",
+        c.superhost ? "Yes" : "No",
+        c.location_info?.locality ?? c.location_info?.district ?? "",
+        dist != null ? num(dist, 2) : "",
+        String(c.property_details?.bedrooms ?? ""),
+        String(c.property_details?.baths ?? ""),
+        String(c.property_details?.beds ?? ""),
+        String(c.property_details?.guests ?? ""),
+        c.ratings?.rating_overall != null ? num(c.ratings.rating_overall, 2) : "",
+        String(c.ratings?.num_reviews ?? ""),
+        num(c.ttm_revenue ?? c.performance_metrics?.ttm_revenue ?? null, 0),
+        num(c.ttm_adr ?? c.performance_metrics?.ttm_adr ?? null),
+        num(((c.ttm_occupancy ?? c.performance_metrics?.ttm_occupancy) ?? 0) * 100, 1),
+        num(c.ttm_revpar ?? c.performance_metrics?.ttm_revpar ?? null),
+        ...monthCells,
+      ];
+    });
+
+    const date = new Date().toISOString().slice(0, 10);
+    downloadCsv(`compset-${listingId}-${date}.csv`, [header, ...body]);
+    toast({ title: `Exported ${rows.length} comparables` });
+  };
+
+
   // Cached comparables that match current filter criteria (must be before early return)
   const cachedMatchingComps = useMemo(() => {
     if (!comparables.length || !latitude || !longitude) return [];
