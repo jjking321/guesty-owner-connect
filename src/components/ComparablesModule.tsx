@@ -678,7 +678,7 @@ export function ComparablesModule({
 
     // Aggregate future_rates per comparable into monthly ADR/Occ/RevPAR
     const aggregateMonthly = (comp: Comparable) => {
-      const map = new (globalThis as any).Map() as globalThis.Map<string, { totalRate: number; rateCount: number; booked: number; total: number }>;
+      const map = new Map<string, { totalRate: number; rateCount: number; booked: number; total: number }>();
       const days = comp.future_rates?.rates ?? [];
       for (const d of days) {
         if (!d?.date) continue;
