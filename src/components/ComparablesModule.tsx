@@ -999,7 +999,7 @@ export function ComparablesModule({
                     onCheckedChange={setShowMap}
                   />
                   <Label htmlFor="show-map" className="flex items-center gap-2 cursor-pointer">
-                    <Map className="h-4 w-4" />
+                    <MapIcon className="h-4 w-4" />
                     Show Map
                   </Label>
                 </div>
