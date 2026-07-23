@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus, Trash2, Save, FolderInput, ChevronDown } from "lucide-react";
+import { RefreshCw, Star, Users, Bed, Bath, Building, ExternalLink, Map, BarChart3, X, TrendingUp, TrendingDown, Minus, Trash2, Save, FolderInput, ChevronDown, Download } from "lucide-react";
+import { downloadCsv } from "@/lib/reports/format";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { ComparablesMap } from "./ComparablesMap";
