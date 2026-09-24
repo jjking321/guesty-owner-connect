@@ -954,7 +954,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error('Error in sync-guesty-data:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    const errorMessage = describeError(error);
     return new Response(
       JSON.stringify({ error: errorMessage }),
       {
