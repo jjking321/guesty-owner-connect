@@ -23,6 +23,8 @@ import { RevenueForecast } from "@/components/RevenueForecast";
 import { ReviewsSummary } from "@/components/ReviewsSummary";
 import { ReviewsTable } from "@/components/ReviewsTable";
 import { ComparablesModule } from "@/components/ComparablesModule";
+import { PortfolioComparables } from "@/components/PortfolioComparables";
+
 import { ListingCalendar } from "@/components/ListingCalendar";
 import { CallPrepDialog } from "@/components/CallPrepDialog";
 import { RevenueActionsDialog } from "@/components/RevenueActionsDialog";
