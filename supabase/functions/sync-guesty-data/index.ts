@@ -772,7 +772,7 @@ Deno.serve(async (req) => {
       } catch (error) {
         await updateSyncJob(supabase, jobId, {
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Unknown error',
+          error_message: describeError(error),
           completed_at: new Date().toISOString(),
         });
         throw error;
@@ -926,7 +926,7 @@ Deno.serve(async (req) => {
           .eq('id', accountId);
 
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        const errorMsg = describeError(error);
         console.error('Reservation sync failed:', errorMsg);
         
         await updateSyncJob(supabase, jobId, {
