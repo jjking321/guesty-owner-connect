@@ -88,10 +88,41 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
     },
   });
 
+  const { data: stayProfiles } = useQuery({
+    queryKey: ["listing-stay-profiles"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_listing_stay_profiles", {
+        p_listing_ids: null,
+      });
+      if (error) throw error;
+      const map = new Map<string, StayProfile>();
+      (data || []).forEach((row: any) => map.set(row.listing_id, row as StayProfile));
+      return map;
+    },
+  });
+
+  const minNightsOf = (id: string) => {
+    const v = stayProfiles?.get(id)?.typical_min_nights;
+    return v == null ? null : Number(v);
+  };
+  const tierOf = (id: string) => stayTierOf(minNightsOf(id));
+
   const subject = useMemo(
     () => (listings || []).find((l) => l.id === listingId) || null,
     [listings, listingId],
   );
+
+  const subjectTier = tierOf(listingId);
+  const subjectMinNights = minNightsOf(listingId);
+
+  const cityOptions = useMemo(() => {
+    const set = new Set<string>();
+    (listings || []).forEach((l) => {
+      const c = listingCity(l).city;
+      if (c) set.add(c);
+    });
+    return Array.from(set).sort();
+  }, [listings]);
 
   const peerListings = useMemo(
     () =>
@@ -104,11 +135,21 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
     [peerRows, listings],
   );
 
+  const filterPool = (pool: PortfolioListing[]) =>
+    pool.filter((l) => {
+      if (tierFilter !== "all" && tierOf(l.id) !== tierFilter) return false;
+      if (cityFilter !== "all" && listingCity(l).city !== cityFilter) return false;
+      return true;
+    });
+
   const suggestions = useMemo(() => {
     if (!subject || !listings) return [];
-    const pool = listings.filter((l) => l.is_listed !== false && !peerIds.includes(l.id));
-    return suggestPeers(subject, pool, 8);
-  }, [subject, listings, peerIds]);
+    const pool = filterPool(
+      listings.filter((l) => l.is_listed !== false && !peerIds.includes(l.id)),
+    );
+    return suggestPeers(subject, pool, 8, stayProfiles);
+  }, [subject, listings, peerIds, stayProfiles, tierFilter, cityFilter]);
+
 
   const addPeers = useMutation({
     mutationFn: async (rows: { peer_listing_id: string; match_score?: number | null; match_reasons?: any }[]) => {
