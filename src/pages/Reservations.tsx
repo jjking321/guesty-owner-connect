@@ -16,8 +16,10 @@ import { RefreshCw, Filter, X, CalendarIcon, Columns, ArrowUpDown, ArrowUp, Arro
 import { format } from "date-fns";
 import { cn, formatDateDisplay } from "@/lib/utils";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RateAuditor } from "@/components/RateAuditor";
 
-export default function Reservations() {
+function ReservationsList() {
   const { toast } = useToast();
   const [reservations, setReservations] = useState<any[]>([]);
   const [listings, setListings] = useState<any[]>([]);
@@ -440,7 +442,7 @@ export default function Reservations() {
   const totalPages = Math.ceil(filteredCount / pageSize);
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         {/* Sync Progress Card */}
         {currentAccountId && (
@@ -1018,6 +1020,21 @@ export default function Reservations() {
           </div>
         )}
       </div>
+    </>
+  );
+}
+
+export default function Reservations() {
+  return (
+    <DashboardLayout>
+      <Tabs defaultValue="list" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="list">All Reservations</TabsTrigger>
+          <TabsTrigger value="auditor">Pickup &amp; Rate Auditor</TabsTrigger>
+        </TabsList>
+        <TabsContent value="list"><ReservationsList /></TabsContent>
+        <TabsContent value="auditor"><RateAuditor /></TabsContent>
+      </Tabs>
     </DashboardLayout>
   );
 }
