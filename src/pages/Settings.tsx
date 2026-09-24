@@ -621,8 +621,36 @@ export default function Settings() {
     }
   };
 
+
+  const [syncingAmenities, setSyncingAmenities] = useState(false);
+
+  const handleSyncAmenities = async (accountId: string) => {
+    setSyncingAmenities(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-listing-amenities", {
+        body: { accountId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      toast({
+        title: "Amenities updated",
+        description: `${data?.updated ?? 0} properties refreshed, ${data?.with_amenities ?? 0} have amenities listed.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Amenity sync failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingAmenities(false);
+    }
+  };
+
   // Get first account ID for Airbnb ratings sync job tracking
   const firstAccountId = guestyAccounts.length > 0 ? guestyAccounts[0].id : null;
+
 
   return (
     <DashboardLayout>
