@@ -5,6 +5,29 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Postgres/PostgREST and network failures are not always Error instances,
+// so `error instanceof Error` swallowed the real cause as "Unknown error".
+function describeError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || error.name || 'Error with no message';
+  }
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') {
+    const e = error as Record<string, unknown>;
+    const parts = [e.message, e.details, e.hint, e.code]
+      .filter((v) => typeof v === 'string' && v.length > 0);
+    if (parts.length > 0) {
+      return `${parts.join(' | ')}`;
+    }
+    try {
+      return JSON.stringify(error).slice(0, 1000);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error ?? 'Unknown error');
+}
+
 interface GuestyReservation {
   _id: string;
   status: string;
@@ -749,7 +772,7 @@ Deno.serve(async (req) => {
       } catch (error) {
         await updateSyncJob(supabase, jobId, {
           status: 'failed',
-          error_message: error instanceof Error ? error.message : 'Unknown error',
+          error_message: describeError(error),
           completed_at: new Date().toISOString(),
         });
         throw error;
@@ -903,7 +926,7 @@ Deno.serve(async (req) => {
           .eq('id', accountId);
 
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        const errorMsg = describeError(error);
         console.error('Reservation sync failed:', errorMsg);
         
         await updateSyncJob(supabase, jobId, {
@@ -931,7 +954,7 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error('Error in sync-guesty-data:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    const errorMessage = describeError(error);
     return new Response(
       JSON.stringify({ error: errorMessage }),
       {
