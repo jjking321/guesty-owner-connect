@@ -621,8 +621,36 @@ export default function Settings() {
     }
   };
 
+
+  const [syncingAmenities, setSyncingAmenities] = useState(false);
+
+  const handleSyncAmenities = async (accountId: string) => {
+    setSyncingAmenities(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("backfill-listing-amenities", {
+        body: { accountId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      toast({
+        title: "Amenities updated",
+        description: `${data?.updated ?? 0} properties refreshed, ${data?.with_amenities ?? 0} have amenities listed.`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Amenity sync failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSyncingAmenities(false);
+    }
+  };
+
   // Get first account ID for Airbnb ratings sync job tracking
   const firstAccountId = guestyAccounts.length > 0 ? guestyAccounts[0].id : null;
+
 
   return (
     <DashboardLayout>
@@ -1081,6 +1109,45 @@ export default function Settings() {
             </CardContent>
           </Card>
         )}
+
+        {/* Property Amenities */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <RefreshCw className="h-5 w-5 text-primary" />
+                Property Amenities
+              </CardTitle>
+              <CardDescription>
+                Pull pool, hot tub, waterfront and other amenity details so peer matching is accurate
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Amenities are used to suggest similar properties inside your own portfolio. Run this
+                once after connecting, then it stays current with each sync.
+              </p>
+              <Button
+                onClick={() => handleSyncAmenities(firstAccountId)}
+                disabled={syncingAmenities}
+              >
+                {syncingAmenities ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Updating amenities...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Update amenities
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+
 
         {/* Revenue Forecasts */}
         {firstAccountId && (

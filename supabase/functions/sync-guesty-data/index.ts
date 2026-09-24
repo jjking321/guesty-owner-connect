@@ -44,6 +44,8 @@ interface GuestyListing {
   propertyType: string;
   accommodates: number;
   bedrooms: number;
+  bathrooms?: number;
+  amenities?: string[];
   address: any;
   picture?: {
     thumbnail?: string;
@@ -704,6 +706,9 @@ Deno.serve(async (req) => {
       property_type: listing.propertyType,
       accommodates: listing.accommodates,
       bedrooms: listing.bedrooms,
+      bathrooms: listing.bathrooms ?? null,
+      amenities: Array.isArray(listing.amenities) ? listing.amenities : [],
+      amenities_synced_at: new Date().toISOString(),
       address: listing.address,
       thumbnail: thumbnail,
       pictures: pictures,
