@@ -1110,6 +1110,45 @@ export default function Settings() {
           </Card>
         )}
 
+        {/* Property Amenities */}
+        {firstAccountId && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <RefreshCw className="h-5 w-5 text-primary" />
+                Property Amenities
+              </CardTitle>
+              <CardDescription>
+                Pull pool, hot tub, waterfront and other amenity details so peer matching is accurate
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Amenities are used to suggest similar properties inside your own portfolio. Run this
+                once after connecting, then it stays current with each sync.
+              </p>
+              <Button
+                onClick={() => handleSyncAmenities(firstAccountId)}
+                disabled={syncingAmenities}
+              >
+                {syncingAmenities ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Updating amenities...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Update amenities
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+
+
         {/* Revenue Forecasts */}
         {firstAccountId && (
           <Card>
