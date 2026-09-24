@@ -44,6 +44,8 @@ interface GuestyListing {
   propertyType: string;
   accommodates: number;
   bedrooms: number;
+  bathrooms?: number;
+  amenities?: string[];
   address: any;
   picture?: {
     thumbnail?: string;
