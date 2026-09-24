@@ -8,6 +8,13 @@
       "when": 1790279975551,
       "tag": "0000_add_amenities_and_portfolio_comparables",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790281711956,
+      "tag": "0001_add_listing_stay_profile_rpc",
+      "breakpoints": true
     }
   ]
 }
