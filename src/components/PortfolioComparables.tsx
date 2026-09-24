@@ -216,13 +216,22 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
 
   const addOptions = useMemo(
     () =>
-      (listings || [])
-        .filter((l) => l.id !== listingId && !peerIds.includes(l.id))
-        .map((l) => ({
-          value: l.id,
-          label: `${l.nickname || l.id}${l.bedrooms != null ? ` · ${l.bedrooms} BR` : ""}`,
-        })),
-    [listings, listingId, peerIds],
+      filterPool((listings || []).filter((l) => l.id !== listingId && !peerIds.includes(l.id))).map(
+        (l) => {
+          const mn = minNightsOf(l.id);
+          const city = listingCity(l).city;
+          const bits = [
+            l.bedrooms != null ? `${l.bedrooms} BR` : null,
+            mn != null ? formatMinNights(mn) : null,
+            city || null,
+          ].filter(Boolean);
+          return {
+            value: l.id,
+            label: `${l.nickname || l.id}${bits.length ? ` · ${bits.join(" · ")}` : ""}`,
+          };
+        },
+      ),
+    [listings, listingId, peerIds, stayProfiles, tierFilter, cityFilter],
   );
 
   const loading = listingsLoading || peersLoading;
@@ -239,6 +248,19 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
             <CardDescription>
               Similar properties from your own portfolio, benchmarked on live PMS data.
             </CardDescription>
+            {subject && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <CalendarClock className="h-3 w-3" />
+                  {stayTierLabel(subjectTier)}
+                  {subjectMinNights != null ? ` · ${formatMinNights(subjectMinNights)}` : ""}
+                </Badge>
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <MapPin className="h-3 w-3" />
+                  {cityLabel(subject)}
+                </Badge>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -255,6 +277,46 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as StayTier | "all")}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Minimum stay" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All minimum stays</SelectItem>
+              {STAY_TIERS.map((t) => (
+                <SelectItem key={t.key} value={t.key}>
+                  {t.label} ({t.description})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={cityFilter} onValueChange={setCityFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="City" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All cities</SelectItem>
+              {cityOptions.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {subjectTier !== "unknown" && tierFilter === "all" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setTierFilter(subjectTier)}
+              className="text-xs"
+            >
+              Match this property&apos;s stay type
+            </Button>
+          )}
+        </div>
+
         {/* Add by search */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-[260px] flex-1">
@@ -279,6 +341,7 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
             Add peer
           </Button>
         </div>
+
 
         {/* Suggestions */}
         {showSuggestions && (
