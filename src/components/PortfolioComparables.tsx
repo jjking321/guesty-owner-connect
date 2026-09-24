@@ -473,6 +473,12 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
                       </div>
                     </TableCell>
                     <TableCell>
+                      <div className="text-sm">{formatMinNights(subjectMinNights)}</div>
+                      <div className="text-xs text-muted-foreground">{stayTierLabel(subjectTier)}</div>
+                    </TableCell>
+                    <TableCell className="text-sm">{cityLabel(subject)}</TableCell>
+                    <TableCell>
+
                       <div className="flex flex-wrap gap-1">
                         {amenityBadges(subject.amenities).map((a) => (
                           <Badge key={a} variant="secondary" className="text-xs">{a}</Badge>
