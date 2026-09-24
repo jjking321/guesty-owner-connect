@@ -1016,13 +1016,25 @@ export default function PropertyDetail() {
             <RevenueForecast listingId={id!} />
 
             {/* Property Comparables */}
-            <ComparablesModule
-              listingId={id!}
-              latitude={(listing?.address as any)?.lat}
-              longitude={(listing?.address as any)?.lng}
-              bedrooms={listing?.bedrooms}
-              guests={listing?.accommodates}
-            />
+            <Tabs defaultValue="market-comps" className="space-y-4">
+              <TabsList>
+                <TabsTrigger value="market-comps">Market Comps</TabsTrigger>
+                <TabsTrigger value="portfolio-peers">Portfolio Peers</TabsTrigger>
+              </TabsList>
+              <TabsContent value="market-comps">
+                <ComparablesModule
+                  listingId={id!}
+                  latitude={(listing?.address as any)?.lat}
+                  longitude={(listing?.address as any)?.lng}
+                  bedrooms={listing?.bedrooms}
+                  guests={listing?.accommodates}
+                />
+              </TabsContent>
+              <TabsContent value="portfolio-peers">
+                <PortfolioComparables listingId={id!} />
+              </TabsContent>
+            </Tabs>
+
           </TabsContent>
 
           <TabsContent value="calendar" className="space-y-6">
