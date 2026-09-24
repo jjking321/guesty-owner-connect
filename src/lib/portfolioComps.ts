@@ -14,6 +14,40 @@ export interface PortfolioListing {
   is_listed: boolean | null;
 }
 
+export interface StayProfile {
+  listing_id: string;
+  typical_min_nights: number | null;
+  max_min_nights: number | null;
+  min_min_nights: number | null;
+  days_sampled: number | null;
+}
+
+export type StayTier = 'short' | 'mid' | 'monthly' | 'unknown';
+
+export const STAY_TIERS: { key: StayTier; label: string; description: string }[] = [
+  { key: 'short', label: 'Short-term', description: '1-6 night minimum' },
+  { key: 'mid', label: 'Weekly / mid-term', description: '7-20 night minimum' },
+  { key: 'monthly', label: 'Monthly / long-term', description: '21+ night minimum' },
+  { key: 'unknown', label: 'Unknown', description: 'No calendar minimums synced' },
+];
+
+export function stayTierOf(minNights: number | null | undefined): StayTier {
+  if (minNights == null || !Number.isFinite(Number(minNights))) return 'unknown';
+  const n = Number(minNights);
+  if (n >= 21) return 'monthly';
+  if (n >= 7) return 'mid';
+  return 'short';
+}
+
+export function stayTierLabel(tier: StayTier): string {
+  return STAY_TIERS.find((t) => t.key === tier)?.label ?? 'Unknown';
+}
+
+export function formatMinNights(minNights: number | null | undefined): string {
+  if (minNights == null || !Number.isFinite(Number(minNights))) return '—';
+  return `${Math.round(Number(minNights))}-nt min`;
+}
+
 export interface PeerMetrics {
   listing_id: string;
   ttm_revenue: number | null;
@@ -32,6 +66,7 @@ export interface Suggestion {
   reasons: string[];
   distanceMiles: number | null;
 }
+
 
 // Amenities that move revenue the most, with the synonyms Guesty uses.
 export const KEY_AMENITIES: { key: string; label: string; weight: number; match: string[] }[] = [
