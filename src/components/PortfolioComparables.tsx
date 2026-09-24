@@ -446,7 +446,10 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Property</TableHead>
+                  <TableHead>Min stay</TableHead>
+                  <TableHead>City</TableHead>
                   <TableHead>Key amenities</TableHead>
+
                   <TableHead className="text-right">TTM revenue</TableHead>
                   <TableHead className="text-right">TTM ADR</TableHead>
                   <TableHead className="text-right">Occupancy</TableHead>
