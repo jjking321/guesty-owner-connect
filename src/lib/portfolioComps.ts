@@ -109,32 +109,57 @@ export function haversineMiles(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function coords(listing: PortfolioListing) {
-  const addr = listing.address || {};
+export function listingCity(listing: PortfolioListing | null | undefined) {
+  const addr = listing?.address || {};
   return {
     lat: typeof addr.lat === 'number' ? addr.lat : null,
     lng: typeof addr.lng === 'number' ? addr.lng : null,
     city: (addr.city || addr.locality || '') as string,
+    state: (addr.state || addr.region || '') as string,
   };
+}
+
+const coords = listingCity;
+
+export function cityLabel(listing: PortfolioListing | null | undefined): string {
+  const { city, state } = listingCity(listing);
+  if (!city) return '—';
+  return state ? `${city}, ${state}` : city;
 }
 
 /**
  * Score portfolio listings against a subject property.
- * Bedrooms are the strongest signal, then key amenities (pool/hot tub/waterfront),
- * then proximity, capacity and property type.
+ * Stay tier (minimum-night requirement) and bedrooms are the strongest signals,
+ * then key amenities (pool/hot tub/waterfront), then market/city, proximity,
+ * capacity and property type.
  */
 export function suggestPeers(
   subject: PortfolioListing,
   candidates: PortfolioListing[],
   limit = 8,
+  stayProfiles?: Map<string, StayProfile>,
 ): Suggestion[] {
   const subj = coords(subject);
+  const subjMin = stayProfiles?.get(subject.id)?.typical_min_nights ?? null;
+  const subjTier = stayTierOf(subjMin);
 
   const scored = candidates
     .filter((c) => c.id !== subject.id)
     .map<Suggestion>((c) => {
       const reasons: string[] = [];
       let score = 0;
+
+      // Stay tier — a 30-night minimum rental performs nothing like a weekend rental
+      const peerMin = stayProfiles?.get(c.id)?.typical_min_nights ?? null;
+      const peerTier = stayTierOf(peerMin);
+      if (subjTier !== 'unknown' && peerTier !== 'unknown') {
+        if (subjTier === peerTier) {
+          score += 25;
+          reasons.push(`${stayTierLabel(peerTier)} (${formatMinNights(peerMin)})`);
+        } else {
+          score -= 30;
+        }
+      }
 
       // Bedrooms
       if (subject.bedrooms != null && c.bedrooms != null) {
@@ -163,8 +188,17 @@ export function suggestPeers(
         }
       }
 
-      // Location
+      // Market / city — scored explicitly, not just as a fallback for missing coordinates
       const peer = coords(c);
+      const sameCity = !!subj.city && !!peer.city && norm(subj.city) === norm(peer.city);
+      if (sameCity) {
+        score += 15;
+        reasons.push(peer.city);
+      } else if (subj.city && peer.city) {
+        score -= 12;
+      }
+
+      // Proximity
       const distance = haversineMiles(subj.lat, subj.lng, peer.lat, peer.lng);
       if (distance != null) {
         if (distance <= 1) {
@@ -179,9 +213,6 @@ export function suggestPeers(
         } else {
           score -= 10;
         }
-      } else if (subj.city && peer.city && norm(subj.city) === norm(peer.city)) {
-        score += 10;
-        reasons.push(subj.city);
       }
 
       // Capacity
@@ -208,6 +239,7 @@ export function suggestPeers(
 
   return scored.slice(0, limit);
 }
+
 
 export function median(values: number[]): number | null {
   const nums = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
