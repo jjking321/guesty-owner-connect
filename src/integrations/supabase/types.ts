@@ -2775,6 +2775,16 @@ export type Database = {
         Args: { p_end_date: string; p_listing_id: string; p_start_date: string }
         Returns: number
       }
+      get_listing_stay_profiles: {
+        Args: { p_listing_ids?: string[] }
+        Returns: {
+          days_sampled: number
+          listing_id: string
+          max_min_nights: number
+          min_min_nights: number
+          typical_min_nights: number
+        }[]
+      }
       get_monthly_rating_trend: {
         Args: {
           p_end_date?: string

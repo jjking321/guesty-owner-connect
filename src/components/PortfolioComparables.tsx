@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Bed, Bath, Users, Plus, Trash2, Wand2, Pin, PinOff, Building2 } from "lucide-react";
+import { Bed, Bath, Users, Plus, Trash2, Wand2, Pin, PinOff, Building2, CalendarClock, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -15,8 +16,16 @@ import {
   amenityBadges,
   average,
   median,
+  stayTierOf,
+  stayTierLabel,
+  formatMinNights,
+  cityLabel,
+  listingCity,
+  STAY_TIERS,
   type PortfolioListing,
   type PeerMetrics,
+  type StayProfile,
+  type StayTier,
 } from "@/lib/portfolioComps";
 
 interface PortfolioComparablesProps {
@@ -32,6 +41,9 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
   const queryClient = useQueryClient();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [listingToAdd, setListingToAdd] = useState("");
+  const [tierFilter, setTierFilter] = useState<StayTier | "all">("all");
+  const [cityFilter, setCityFilter] = useState<string>("all");
+
 
   const { data: listings, isLoading: listingsLoading } = useQuery({
     queryKey: ["portfolio-listings-for-comps"],
@@ -76,10 +88,41 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
     },
   });
 
+  const { data: stayProfiles } = useQuery({
+    queryKey: ["listing-stay-profiles"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_listing_stay_profiles", {
+        p_listing_ids: null,
+      });
+      if (error) throw error;
+      const map = new Map<string, StayProfile>();
+      (data || []).forEach((row: any) => map.set(row.listing_id, row as StayProfile));
+      return map;
+    },
+  });
+
+  const minNightsOf = (id: string) => {
+    const v = stayProfiles?.get(id)?.typical_min_nights;
+    return v == null ? null : Number(v);
+  };
+  const tierOf = (id: string) => stayTierOf(minNightsOf(id));
+
   const subject = useMemo(
     () => (listings || []).find((l) => l.id === listingId) || null,
     [listings, listingId],
   );
+
+  const subjectTier = tierOf(listingId);
+  const subjectMinNights = minNightsOf(listingId);
+
+  const cityOptions = useMemo(() => {
+    const set = new Set<string>();
+    (listings || []).forEach((l) => {
+      const c = listingCity(l).city;
+      if (c) set.add(c);
+    });
+    return Array.from(set).sort();
+  }, [listings]);
 
   const peerListings = useMemo(
     () =>
@@ -92,11 +135,21 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
     [peerRows, listings],
   );
 
+  const filterPool = (pool: PortfolioListing[]) =>
+    pool.filter((l) => {
+      if (tierFilter !== "all" && tierOf(l.id) !== tierFilter) return false;
+      if (cityFilter !== "all" && listingCity(l).city !== cityFilter) return false;
+      return true;
+    });
+
   const suggestions = useMemo(() => {
     if (!subject || !listings) return [];
-    const pool = listings.filter((l) => l.is_listed !== false && !peerIds.includes(l.id));
-    return suggestPeers(subject, pool, 8);
-  }, [subject, listings, peerIds]);
+    const pool = filterPool(
+      listings.filter((l) => l.is_listed !== false && !peerIds.includes(l.id)),
+    );
+    return suggestPeers(subject, pool, 8, stayProfiles);
+  }, [subject, listings, peerIds, stayProfiles, tierFilter, cityFilter]);
+
 
   const addPeers = useMutation({
     mutationFn: async (rows: { peer_listing_id: string; match_score?: number | null; match_reasons?: any }[]) => {
@@ -163,13 +216,22 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
 
   const addOptions = useMemo(
     () =>
-      (listings || [])
-        .filter((l) => l.id !== listingId && !peerIds.includes(l.id))
-        .map((l) => ({
-          value: l.id,
-          label: `${l.nickname || l.id}${l.bedrooms != null ? ` · ${l.bedrooms} BR` : ""}`,
-        })),
-    [listings, listingId, peerIds],
+      filterPool((listings || []).filter((l) => l.id !== listingId && !peerIds.includes(l.id))).map(
+        (l) => {
+          const mn = minNightsOf(l.id);
+          const city = listingCity(l).city;
+          const bits = [
+            l.bedrooms != null ? `${l.bedrooms} BR` : null,
+            mn != null ? formatMinNights(mn) : null,
+            city || null,
+          ].filter(Boolean);
+          return {
+            value: l.id,
+            label: `${l.nickname || l.id}${bits.length ? ` · ${bits.join(" · ")}` : ""}`,
+          };
+        },
+      ),
+    [listings, listingId, peerIds, stayProfiles, tierFilter, cityFilter],
   );
 
   const loading = listingsLoading || peersLoading;
@@ -186,6 +248,19 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
             <CardDescription>
               Similar properties from your own portfolio, benchmarked on live PMS data.
             </CardDescription>
+            {subject && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <CalendarClock className="h-3 w-3" />
+                  {stayTierLabel(subjectTier)}
+                  {subjectMinNights != null ? ` · ${formatMinNights(subjectMinNights)}` : ""}
+                </Badge>
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <MapPin className="h-3 w-3" />
+                  {cityLabel(subject)}
+                </Badge>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -202,6 +277,46 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
       </CardHeader>
 
       <CardContent className="space-y-6">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as StayTier | "all")}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Minimum stay" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All minimum stays</SelectItem>
+              {STAY_TIERS.map((t) => (
+                <SelectItem key={t.key} value={t.key}>
+                  {t.label} ({t.description})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={cityFilter} onValueChange={setCityFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="City" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All cities</SelectItem>
+              {cityOptions.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {subjectTier !== "unknown" && tierFilter === "all" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setTierFilter(subjectTier)}
+              className="text-xs"
+            >
+              Match this property&apos;s stay type
+            </Button>
+          )}
+        </div>
+
         {/* Add by search */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-[260px] flex-1">
@@ -226,6 +341,7 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
             Add peer
           </Button>
         </div>
+
 
         {/* Suggestions */}
         {showSuggestions && (
@@ -330,7 +446,10 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Property</TableHead>
+                  <TableHead>Min stay</TableHead>
+                  <TableHead>City</TableHead>
                   <TableHead>Key amenities</TableHead>
+
                   <TableHead className="text-right">TTM revenue</TableHead>
                   <TableHead className="text-right">TTM ADR</TableHead>
                   <TableHead className="text-right">Occupancy</TableHead>
@@ -354,6 +473,12 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
                       </div>
                     </TableCell>
                     <TableCell>
+                      <div className="text-sm">{formatMinNights(subjectMinNights)}</div>
+                      <div className="text-xs text-muted-foreground">{stayTierLabel(subjectTier)}</div>
+                    </TableCell>
+                    <TableCell className="text-sm">{cityLabel(subject)}</TableCell>
+                    <TableCell>
+
                       <div className="flex flex-wrap gap-1">
                         {amenityBadges(subject.amenities).map((a) => (
                           <Badge key={a} variant="secondary" className="text-xs">{a}</Badge>
@@ -371,6 +496,14 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
 
                 {peerListings.map(({ row, listing }) => {
                   const m = metrics?.get(listing.id);
+                  const peerMin = minNightsOf(listing.id);
+                  const peerTier = stayTierOf(peerMin);
+                  const tierMismatch =
+                    subjectTier !== "unknown" && peerTier !== "unknown" && peerTier !== subjectTier;
+                  const cityMismatch =
+                    !!listingCity(subject).city &&
+                    !!listingCity(listing).city &&
+                    listingCity(subject).city !== listingCity(listing).city;
                   const adrDelta =
                     m?.ttm_adr != null && subjectMetrics?.ttm_adr != null && Number(subjectMetrics.ttm_adr) > 0
                       ? ((Number(m.ttm_adr) - Number(subjectMetrics.ttm_adr)) / Number(subjectMetrics.ttm_adr)) * 100
@@ -390,6 +523,23 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
                         </div>
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center gap-1 text-sm">
+                          {formatMinNights(peerMin)}
+                          {tierMismatch && (
+                            <Badge variant="outline" className="text-[10px] text-amber-600">
+                              differs
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">{stayTierLabel(peerTier)}</div>
+                      </TableCell>
+                      <TableCell>
+                        <span className={cn("text-sm", cityMismatch && "text-muted-foreground")}>
+                          {cityLabel(listing)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+
                         <div className="flex flex-wrap gap-1">
                           {amenityBadges(listing.amenities).map((a) => (
                             <Badge key={a} variant="secondary" className="text-xs">{a}</Badge>
