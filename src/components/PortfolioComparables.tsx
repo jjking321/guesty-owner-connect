@@ -6,8 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Bed, Bath, Users, Plus, Trash2, Wand2, Pin, PinOff, Building2 } from "lucide-react";
+import { Bed, Bath, Users, Plus, Trash2, Wand2, Pin, PinOff, Building2, CalendarClock, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -15,8 +16,16 @@ import {
   amenityBadges,
   average,
   median,
+  stayTierOf,
+  stayTierLabel,
+  formatMinNights,
+  cityLabel,
+  listingCity,
+  STAY_TIERS,
   type PortfolioListing,
   type PeerMetrics,
+  type StayProfile,
+  type StayTier,
 } from "@/lib/portfolioComps";
 
 interface PortfolioComparablesProps {
@@ -32,6 +41,9 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
   const queryClient = useQueryClient();
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [listingToAdd, setListingToAdd] = useState("");
+  const [tierFilter, setTierFilter] = useState<StayTier | "all">("all");
+  const [cityFilter, setCityFilter] = useState<string>("all");
+
 
   const { data: listings, isLoading: listingsLoading } = useQuery({
     queryKey: ["portfolio-listings-for-comps"],
