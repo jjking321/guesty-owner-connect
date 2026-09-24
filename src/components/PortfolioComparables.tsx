@@ -496,6 +496,14 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
 
                 {peerListings.map(({ row, listing }) => {
                   const m = metrics?.get(listing.id);
+                  const peerMin = minNightsOf(listing.id);
+                  const peerTier = stayTierOf(peerMin);
+                  const tierMismatch =
+                    subjectTier !== "unknown" && peerTier !== "unknown" && peerTier !== subjectTier;
+                  const cityMismatch =
+                    !!listingCity(subject).city &&
+                    !!listingCity(listing).city &&
+                    listingCity(subject).city !== listingCity(listing).city;
                   const adrDelta =
                     m?.ttm_adr != null && subjectMetrics?.ttm_adr != null && Number(subjectMetrics.ttm_adr) > 0
                       ? ((Number(m.ttm_adr) - Number(subjectMetrics.ttm_adr)) / Number(subjectMetrics.ttm_adr)) * 100
@@ -515,6 +523,23 @@ export function PortfolioComparables({ listingId }: PortfolioComparablesProps) {
                         </div>
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center gap-1 text-sm">
+                          {formatMinNights(peerMin)}
+                          {tierMismatch && (
+                            <Badge variant="outline" className="text-[10px] text-amber-600">
+                              differs
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">{stayTierLabel(peerTier)}</div>
+                      </TableCell>
+                      <TableCell>
+                        <span className={cn("text-sm", cityMismatch && "text-muted-foreground")}>
+                          {cityLabel(listing)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+
                         <div className="flex flex-wrap gap-1">
                           {amenityBadges(listing.amenities).map((a) => (
                             <Badge key={a} variant="secondary" className="text-xs">{a}</Badge>
