@@ -943,7 +943,10 @@ export type Database = {
           active: boolean | null
           address: Json | null
           airbnb_listing_id: string | null
+          amenities: string[]
+          amenities_synced_at: string | null
           archived: boolean
+          bathrooms: number | null
           bedrooms: number | null
           created_at_guesty: string | null
           guesty_account_id: string
@@ -969,7 +972,10 @@ export type Database = {
           active?: boolean | null
           address?: Json | null
           airbnb_listing_id?: string | null
+          amenities?: string[]
+          amenities_synced_at?: string | null
           archived?: boolean
+          bathrooms?: number | null
           bedrooms?: number | null
           created_at_guesty?: string | null
           guesty_account_id: string
@@ -995,7 +1001,10 @@ export type Database = {
           active?: boolean | null
           address?: Json | null
           airbnb_listing_id?: string | null
+          amenities?: string[]
+          amenities_synced_at?: string | null
           archived?: boolean
+          bathrooms?: number | null
           bedrooms?: number | null
           created_at_guesty?: string | null
           guesty_account_id?: string
@@ -1347,6 +1356,60 @@ export type Database = {
             columns: ["guesty_account_id"]
             isOneToOne: false
             referencedRelation: "guesty_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      portfolio_comparables: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          is_pinned: boolean
+          listing_id: string
+          match_reasons: Json | null
+          match_score: number | null
+          notes: string | null
+          peer_listing_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_pinned?: boolean
+          listing_id: string
+          match_reasons?: Json | null
+          match_score?: number | null
+          notes?: string | null
+          peer_listing_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_pinned?: boolean
+          listing_id?: string
+          match_reasons?: Json | null
+          match_score?: number | null
+          notes?: string | null
+          peer_listing_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "portfolio_comparables_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "portfolio_comparables_peer_listing_id_fkey"
+            columns: ["peer_listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
             referencedColumns: ["id"]
           },
         ]
@@ -2732,6 +2795,20 @@ export type Database = {
           listing_id: string
           otb_revenue: number
           past_nights: number
+        }[]
+      }
+      get_portfolio_peer_metrics: {
+        Args: { p_listing_ids: string[] }
+        Returns: {
+          future_asking_adr: number
+          future_available_nights: number
+          future_booked_nights: number
+          last30_adr: number
+          listing_id: string
+          ttm_adr: number
+          ttm_nights: number
+          ttm_occupancy: number
+          ttm_revenue: number
         }[]
       }
       get_review_summary_stats: {
