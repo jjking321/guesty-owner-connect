@@ -82,7 +82,7 @@ export function RateAuditor() {
           .select("id, listing_id, check_in, check_out, nights_count, fare_accommodation_adjusted, host_payout, sub_total, source, guest_name, created_at_guesty, status")
           .gte("created_at_guesty", start.toISOString())
           .in("status", CONFIRMED)
-          .neq("source", "owner")
+          .or("source.is.null,source.neq.owner")
           .gt("nights_count", 0)
           .order("created_at_guesty", { ascending: false })
           .range(f, t));
@@ -235,6 +235,7 @@ export function RateAuditor() {
               <SelectItem value="1">Booked yesterday+</SelectItem>
               <SelectItem value="7">Booked last 7 days</SelectItem>
               <SelectItem value="30">Booked last 30 days</SelectItem>
+              <SelectItem value="90">Booked last 90 days</SelectItem>
             </SelectContent>
           </Select>
           <Select value={scoreFilter} onValueChange={setScoreFilter}>
