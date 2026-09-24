@@ -345,17 +345,19 @@ function ReservationsList() {
     try {
       setIsSyncingNew(true);
       
-      // Get first guesty account
+      // Use the active connection (auto sync enabled); skip disabled accounts
       const { data: accounts } = await supabase
         .from('guesty_accounts')
         .select('id')
+        .eq('automated_sync_enabled', true)
+        .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle();
       
       if (!accounts) {
         toast({
-          title: "No Guesty account found",
-          description: "Please set up a Guesty integration in Settings first.",
+          title: "No active Guesty account",
+          description: "Enable auto sync for a Guesty connection in Settings first.",
           variant: "destructive",
         });
         return;
