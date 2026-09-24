@@ -84,9 +84,13 @@ function ReservationsList() {
   }, []);
 
   const loadCurrentAccount = async () => {
+    // Only target accounts that are still active (auto sync enabled).
+    // Disabled connections would fail authentication on every sync attempt.
     const { data: accounts } = await supabase
       .from('guesty_accounts')
       .select('id')
+      .eq('automated_sync_enabled', true)
+      .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle();
     
