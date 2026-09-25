@@ -18,6 +18,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Link } from "react-router-dom";
 import { CompSelectionWizard } from "@/components/CompSelectionWizard";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
+import { BulkPortfolioPeers } from "@/components/BulkPortfolioPeers";
 interface ComparableWithListing {
   id: string;
   listing_id: string;
@@ -465,6 +466,7 @@ export default function Comparables() {
             <TabsTrigger value="cached">All Cached ({stats.totalCached})</TabsTrigger>
             <TabsTrigger value="bulk">Bulk Actions</TabsTrigger>
             <TabsTrigger value="templates">Templates ({templates.length})</TabsTrigger>
+            <TabsTrigger value="peers">Portfolio Peers</TabsTrigger>
           </TabsList>
 
           {/* Setup Tab - Properties needing comps */}
@@ -1115,6 +1117,10 @@ export default function Comparables() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="peers" className="space-y-4">
+            <BulkPortfolioPeers />
           </TabsContent>
         </Tabs>
       </div>
