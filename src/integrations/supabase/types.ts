@@ -2821,6 +2821,23 @@ export type Database = {
           ttm_revenue: number
         }[]
       }
+      get_review_channel_insights: {
+        Args: {
+          p_end_date?: string
+          p_listing_id?: string
+          p_start_date?: string
+        }
+        Returns: {
+          avg_rating: number
+          category_stats: Json
+          five_star_count: number
+          source: string
+          sub_five_count: number
+          total_reviews: number
+          with_categories_count: number
+          with_text_count: number
+        }[]
+      }
       get_review_summary_stats: {
         Args: {
           p_end_date?: string
