@@ -189,7 +189,7 @@ export default function ReviewImpact() {
         <TableHead className="text-right">Rate change</TableHead>
       </TableRow></TableHeader>
       <TableBody>
-        {(rows as Array<{ label: string } & ReturnType<typeof summarize>>).map((g) => (
+        {rows.map((g) => (
           <TableRow key={g.label}>
             <TableCell className="font-medium">{g.label}</TableCell>
             <TableCell className="text-right">{g.count}</TableCell>
