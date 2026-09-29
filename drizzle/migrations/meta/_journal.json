@@ -36,6 +36,13 @@
       "when": 1790367835668,
       "tag": "0004_add_review_channel_insights_rpc",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790717432493,
+      "tag": "0005_add_review_impact_rpc",
+      "breakpoints": true
     }
   ]
 }
