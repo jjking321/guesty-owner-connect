@@ -1,4 +1,4 @@
-import { Calendar, Settings, FolderOpen, LayoutGrid, Users, Wrench, Star, Building2, Target, AlertTriangle, Receipt, FileBarChart, Activity } from "lucide-react";
+import { Calendar, Settings, FolderOpen, LayoutGrid, Users, Wrench, Star, Building2, Target, AlertTriangle, Receipt, FileBarChart, Activity, TrendingDown } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import {
   Sidebar,
@@ -21,6 +21,7 @@ const menuItems = [
   { title: "Owners", url: "/owners", icon: Users, roles: ['super_admin', 'admin', 'member'] },
   { title: "Reservations", url: "/reservations", icon: Calendar, roles: ['super_admin', 'admin', 'member'] },
   { title: "Reviews", url: "/reviews", icon: Star, roles: ['super_admin', 'admin', 'member'] },
+  { title: "Review Impact", url: "/review-impact", icon: TrendingDown, roles: ['super_admin', 'admin', 'member'] },
   { title: "Forecast Admin", url: "/forecast-admin", icon: Wrench, roles: ['super_admin', 'admin'] },
   { title: "Comparables", url: "/comparables", icon: Building2, roles: ['super_admin', 'admin'] },
   { title: "Tax Report", url: "/tax-report", icon: Receipt, roles: ['super_admin', 'admin'] },
