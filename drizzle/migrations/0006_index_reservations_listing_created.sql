@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_reservations_listing_created_guesty ON public.reservations (listing_id, created_at_guesty) INCLUDE (status, source, nights_count, fare_accommodation_adjusted, sub_total);
