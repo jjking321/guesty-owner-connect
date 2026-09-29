@@ -2838,6 +2838,45 @@ export type Database = {
           with_text_count: number
         }[]
       }
+      get_review_impact_events: {
+        Args: {
+          p_end_date: string
+          p_max_rating?: number
+          p_source?: string
+          p_start_date: string
+          p_window_days?: number
+        }
+        Returns: {
+          hist_post_bookings: number
+          hist_post_nights: number
+          hist_post_revenue: number
+          hist_pre_bookings: number
+          hist_pre_nights: number
+          hist_pre_revenue: number
+          is_removed: boolean
+          listing_id: string
+          listing_name: string
+          peer_count: number
+          peer_post_bookings: number
+          peer_post_nights: number
+          peer_post_revenue: number
+          peer_pre_bookings: number
+          peer_pre_nights: number
+          peer_pre_revenue: number
+          post_bookings: number
+          post_complete: boolean
+          post_nights: number
+          post_revenue: number
+          pre_bookings: number
+          pre_nights: number
+          pre_revenue: number
+          rating: number
+          review_date: string
+          review_id: string
+          review_snippet: string
+          source: string
+        }[]
+      }
       get_review_summary_stats: {
         Args: {
           p_end_date?: string
@@ -2897,6 +2936,14 @@ export type Database = {
         Returns: boolean
       }
       is_super_admin_anywhere: { Args: { _user_id: string }; Returns: boolean }
+      review_impact_window_stats: {
+        Args: { p_from: string; p_listing_ids: string[]; p_to: string }
+        Returns: {
+          bookings: number
+          nights: number
+          revenue: number
+        }[]
+      }
     }
     Enums: {
       member_role: "super_admin" | "admin" | "member" | "owner"
