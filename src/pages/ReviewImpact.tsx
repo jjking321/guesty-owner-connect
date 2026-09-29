@@ -16,6 +16,7 @@ import { downloadCsv } from "@/lib/reports/format";
 interface ImpactEvent {
   review_id: string; listing_id: string; listing_name: string | null; review_date: string; rating: number;
   review_snippet: string; is_removed: boolean; peer_count: number; post_complete: boolean;
+  score_before: number | null; score_after: number | null; reviews_before: number;
   pre_bookings: number; pre_nights: number; pre_revenue: number;
   post_bookings: number; post_nights: number; post_revenue: number;
   hist_pre_bookings: number; hist_pre_nights: number; hist_pre_revenue: number;
@@ -31,6 +32,30 @@ const pct = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : ""}${(
 const pts = (v: number | null) => (v === null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)} pts`);
 const money = (v: number | null) => (v === null ? "—" : `$${Math.round(v).toLocaleString()}`);
 const tone = (v: number | null) => (v === null ? "" : v < -0.02 ? "text-destructive" : v > 0.02 ? "text-primary" : "text-muted-foreground");
+const score = (v: number | null) => (v === null || v === undefined ? "—" : Number(v).toFixed(2));
+
+const SCORE_BANDS = [
+  { label: "Below 4.50", min: 0, max: 4.5 },
+  { label: "4.50 – 4.69", min: 4.5, max: 4.7 },
+  { label: "4.70 – 4.79", min: 4.7, max: 4.8 },
+  { label: "4.80 – 4.89", min: 4.8, max: 4.9 },
+  { label: "4.90 and up", min: 4.9, max: 6 },
+];
+
+const VOLUME_BANDS = [
+  { label: "Under 10 reviews", min: 0, max: 10 },
+  { label: "10 – 29 reviews", min: 10, max: 30 },
+  { label: "30 – 99 reviews", min: 30, max: 100 },
+  { label: "100+ reviews", min: 100, max: Infinity },
+];
+
+const THRESHOLDS = [4.9, 4.8, 4.7];
+function crossedThreshold(e: ImpactEvent) {
+  const before = e.score_before === null ? null : Number(e.score_before);
+  const after = e.score_after === null ? null : Number(e.score_after);
+  if (before === null || after === null) return null;
+  return THRESHOLDS.find((t) => before >= t && after < t) ?? null;
+}
 
 function summarize(evs: ImpactEvent[]) {
   const s = (k: keyof ImpactEvent) => evs.reduce((t, e) => t + n(e[k]), 0);
@@ -42,8 +67,11 @@ function summarize(evs: ImpactEvent[]) {
   const ownAdr = ratio(adr(s("post_revenue"), s("post_nights")) ?? 0, adr(s("pre_revenue"), s("pre_nights")) ?? 0);
   const histAdr = ratio(adr(s("hist_post_revenue"), s("hist_post_nights")) ?? 0, adr(s("hist_pre_revenue"), s("hist_pre_nights")) ?? 0);
   const peerAdr = ratio(adr(ps("peer_post_revenue"), ps("peer_post_nights")) ?? 0, adr(ps("peer_pre_revenue"), ps("peer_pre_nights")) ?? 0);
+  const withScore = evs.filter((e) => e.score_before !== null);
   return {
     count: evs.length, own, hist, peer, ownAdr, histAdr, peerAdr,
+    avgScore: withScore.length ? withScore.reduce((t, e) => t + Number(e.score_before), 0) / withScore.length : null,
+    avgVolume: evs.length ? evs.reduce((t, e) => t + n(e.reviews_before), 0) / evs.length : null,
     vsHist: own !== null && hist !== null ? own - hist : null,
     vsPeer: own !== null && peer !== null ? own - peer : null,
     adrVsHist: ownAdr !== null && histAdr !== null ? ownAdr - histAdr : null,
@@ -69,11 +97,13 @@ export default function ReviewImpact() {
   const [months, setMonths] = useState("24");
   const [windowDays, setWindowDays] = useState("30");
   const [maxRating, setMaxRating] = useState("4");
+  const [scoreBand, setScoreBand] = useState("all");
+  const [volumeBand, setVolumeBand] = useState("all");
 
-  const { data: events = [], isLoading, error } = useQuery({
+  const { data: rawEvents = [], isLoading, error } = useQuery({
     queryKey: ["review-impact", months, windowDays, maxRating],
     queryFn: async () => {
-      const { data, error } = await (supabase.rpc as any)("get_review_impact_events", {
+      const { data, error } = await (supabase.rpc as any)("get_review_impact_events_v2", {
         p_start_date: format(subMonths(new Date(), Number(months)), "yyyy-MM-dd"),
         p_end_date: format(new Date(), "yyyy-MM-dd"),
         p_max_rating: Number(maxRating),
@@ -84,6 +114,23 @@ export default function ReviewImpact() {
       return (data ?? []) as ImpactEvent[];
     },
   });
+
+  const events = useMemo(() => {
+    const sb = SCORE_BANDS.find((b) => b.label === scoreBand);
+    const vb = VOLUME_BANDS.find((b) => b.label === volumeBand);
+    return rawEvents.filter((e) => {
+      if (sb) {
+        if (e.score_before === null) return false;
+        const s = Number(e.score_before);
+        if (s < sb.min || s >= sb.max) return false;
+      }
+      if (vb) {
+        const v = n(e.reviews_before);
+        if (v < vb.min || v >= vb.max) return false;
+      }
+      return true;
+    });
+  }, [rawEvents, scoreBand, volumeBand]);
 
   const complete = useMemo(() => events.filter((e) => e.post_complete), [events]);
   const overall = useMemo(() => summarize(complete), [complete]);
@@ -96,19 +143,67 @@ export default function ReviewImpact() {
     [complete],
   );
 
+  const byScore = useMemo(
+    () => SCORE_BANDS.map((b) => ({
+      label: b.label,
+      evs: complete.filter((e) => e.score_before !== null && Number(e.score_before) >= b.min && Number(e.score_before) < b.max),
+    })).filter((g) => g.evs.length > 0).map((g) => ({ label: g.label, ...summarize(g.evs) })),
+    [complete],
+  );
+
+  const byVolume = useMemo(
+    () => VOLUME_BANDS.map((b) => ({
+      label: b.label,
+      evs: complete.filter((e) => n(e.reviews_before) >= b.min && n(e.reviews_before) < b.max),
+    })).filter((g) => g.evs.length > 0).map((g) => ({ label: g.label, ...summarize(g.evs) })),
+    [complete],
+  );
+
+  const crossings = useMemo(() => complete.filter((e) => crossedThreshold(e) !== null), [complete]);
+  const crossingStats = useMemo(() => summarize(crossings), [crossings]);
+
   const handleExport = () => {
-    const header = ["Review date", "Property", "Rating", "Removed", "Pre nights", "Post nights", "Pickup change",
+    const header = ["Review date", "Property", "Rating", "Score before", "Score after", "Reviews before", "Crossed threshold",
+      "Removed", "Pre nights", "Post nights", "Pickup change",
       "Vs own history (pts)", "Vs peers (pts)", "Pre ADR", "Post ADR", "ADR change", "Peers", "Review"];
     const rows = events.map((e) => {
       const m = eventMetrics(e);
       const f = (v: number | null) => (v === null ? "" : (v * 100).toFixed(1));
+      const x = crossedThreshold(e);
       return [format(new Date(e.review_date), "yyyy-MM-dd"), e.listing_name ?? e.listing_id, String(e.rating),
+        score(e.score_before), score(e.score_after), String(n(e.reviews_before)), x ? x.toFixed(2) : "",
         e.is_removed ? "yes" : "no", String(e.pre_nights), String(e.post_nights), f(m.own), f(m.vsHist), f(m.vsPeer),
         m.preAdr ? m.preAdr.toFixed(2) : "", m.postAdr ? m.postAdr.toFixed(2) : "", f(m.adrChange),
         String(e.peer_count), e.review_snippet];
     });
     downloadCsv(`review-impact-airbnb.csv`, [header, ...rows]);
   };
+
+  const bandTable = (rows: ReturnType<typeof summarize> & { label: string }[] | Array<{ label: string } & ReturnType<typeof summarize>>, firstCol: string) => (
+    <Table>
+      <TableHeader><TableRow>
+        <TableHead>{firstCol}</TableHead><TableHead className="text-right">Reviews</TableHead>
+        <TableHead className="text-right">Avg score</TableHead><TableHead className="text-right">Avg review count</TableHead>
+        <TableHead className="text-right">Nights change</TableHead>
+        <TableHead className="text-right">vs history</TableHead><TableHead className="text-right">vs peers</TableHead>
+        <TableHead className="text-right">Rate change</TableHead>
+      </TableRow></TableHeader>
+      <TableBody>
+        {(rows as Array<{ label: string } & ReturnType<typeof summarize>>).map((g) => (
+          <TableRow key={g.label}>
+            <TableCell className="font-medium">{g.label}</TableCell>
+            <TableCell className="text-right">{g.count}</TableCell>
+            <TableCell className="text-right">{score(g.avgScore)}</TableCell>
+            <TableCell className="text-right">{g.avgVolume === null ? "—" : Math.round(g.avgVolume)}</TableCell>
+            <TableCell className={`text-right ${tone(g.own)}`}>{pct(g.own)}</TableCell>
+            <TableCell className={`text-right ${tone(g.vsHist)}`}>{pts(g.vsHist)}</TableCell>
+            <TableCell className={`text-right ${tone(g.vsPeer)}`}>{pts(g.vsPeer)}</TableCell>
+            <TableCell className={`text-right ${tone(g.ownAdr)}`}>{pct(g.ownAdr)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
 
   return (
     <DashboardLayout>
@@ -160,6 +255,26 @@ export default function ReviewImpact() {
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Property score at the time</Label>
+            <Select value={scoreBand} onValueChange={setScoreBand}>
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any score</SelectItem>
+                {SCORE_BANDS.map((b) => <SelectItem key={b.label} value={b.label}>{b.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Reviews collected so far</Label>
+            <Select value={volumeBand} onValueChange={setVolumeBand}>
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any review count</SelectItem>
+                {VOLUME_BANDS.map((b) => <SelectItem key={b.label} value={b.label}>{b.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {isLoading ? (
@@ -187,11 +302,30 @@ export default function ReviewImpact() {
                 <p className="text-xs text-muted-foreground">Same property, same dates last year: {pct(overall.hist)}</p>
               </CardContent></Card>
               <Card><CardContent className="p-6">
-                <p className="text-sm text-muted-foreground">True impact vs portfolio peers</p>
-                <p className={`text-3xl font-bold ${tone(overall.vsPeer)}`}>{pts(overall.vsPeer)}</p>
-                <p className="text-xs text-muted-foreground">Peers over the same days: {pct(overall.peer)}</p>
+                <p className="text-sm text-muted-foreground">Reviews that dropped a score below 4.90 / 4.80 / 4.70</p>
+                <p className={`text-3xl font-bold ${tone(crossingStats.vsHist)}`}>{crossings.length}</p>
+                <p className="text-xs text-muted-foreground">Those properties ran {pts(crossingStats.vsHist)} vs their own history</p>
               </CardContent></Card>
             </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Where the damage starts: impact by property score</CardTitle>
+                <CardDescription>
+                  Each review is grouped by the property's overall Airbnb score just before the review posted.
+                  Negative "pts" means the property did worse than its benchmark afterwards.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>{bandTable(byScore, "Score before review")}</CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Impact by how many reviews the property had</CardTitle>
+                <CardDescription>A single low review moves a young listing's score far more than a mature one's.</CardDescription>
+              </CardHeader>
+              <CardContent>{bandTable(byVolume, "Reviews collected")}</CardContent>
+            </Card>
 
             <Card>
               <CardHeader>
@@ -234,6 +368,8 @@ export default function ReviewImpact() {
                 <Table>
                   <TableHeader><TableRow>
                     <TableHead>Date</TableHead><TableHead>Property</TableHead><TableHead>Rating</TableHead>
+                    <TableHead className="text-right">Score before → after</TableHead>
+                    <TableHead className="text-right">Reviews</TableHead>
                     <TableHead className="text-right">Nights before → after</TableHead>
                     <TableHead className="text-right">vs history</TableHead><TableHead className="text-right">vs peers</TableHead>
                     <TableHead className="text-right">Rate before → after</TableHead>
@@ -241,6 +377,7 @@ export default function ReviewImpact() {
                   <TableBody>
                     {events.slice(0, 300).map((e) => {
                       const m = eventMetrics(e);
+                      const crossed = crossedThreshold(e);
                       return (
                         <TableRow key={e.review_id}>
                           <TableCell className="whitespace-nowrap">{format(new Date(e.review_date), "MMM d, yyyy")}</TableCell>
@@ -253,6 +390,11 @@ export default function ReviewImpact() {
                             {e.is_removed && <Badge variant="secondary" className="ml-1">Removed</Badge>}
                             {!e.post_complete && <Badge variant="secondary" className="ml-1">In progress</Badge>}
                           </TableCell>
+                          <TableCell className="text-right whitespace-nowrap">
+                            {score(e.score_before)} → {score(e.score_after)}
+                            {crossed && <Badge variant="destructive" className="ml-1">Fell below {crossed.toFixed(2)}</Badge>}
+                          </TableCell>
+                          <TableCell className="text-right">{n(e.reviews_before)}</TableCell>
                           <TableCell className="text-right whitespace-nowrap">{n(e.pre_nights)} → {n(e.post_nights)}</TableCell>
                           <TableCell className={`text-right ${tone(m.vsHist)}`}>{pts(m.vsHist)}</TableCell>
                           <TableCell className={`text-right ${tone(m.vsPeer)}`}>{e.peer_count ? pts(m.vsPeer) : "No peers"}</TableCell>
