@@ -179,7 +179,7 @@ export default function ReviewImpact() {
     downloadCsv(`review-impact-airbnb.csv`, [header, ...rows]);
   };
 
-  const bandTable = (rows: ReturnType<typeof summarize> & { label: string }[] | Array<{ label: string } & ReturnType<typeof summarize>>, firstCol: string) => (
+  const bandTable = (rows: Array<{ label: string } & ReturnType<typeof summarize>>, firstCol: string) => (
     <Table>
       <TableHeader><TableRow>
         <TableHead>{firstCol}</TableHead><TableHead className="text-right">Reviews</TableHead>
