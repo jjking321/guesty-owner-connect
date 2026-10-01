@@ -419,7 +419,16 @@ Deno.serve(async (req) => {
 
   // Auth: only service-role (cron / self-invoke) or super_admin users may trigger nightly-sync.
   const authBearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
-  const isServiceRole = authBearer.length > 0 && authBearer === serviceRoleKey;
+  let isServiceRole = authBearer.length > 0 && authBearer === serviceRoleKey;
+  const cronSecret = (req.headers.get('x-cron-secret') ?? '').trim();
+  if (!isServiceRole && cronSecret.length >= 32) {
+    const { data: secretRow } = await supabase
+      .from('cron_secrets' as any)
+      .select('token')
+      .eq('name', 'nightly')
+      .maybeSingle();
+    if ((secretRow as any)?.token && (secretRow as any).token === cronSecret) isServiceRole = true;
+  }
   if (!isServiceRole) {
     if (!authBearer) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }),
