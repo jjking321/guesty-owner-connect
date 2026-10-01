@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Loader2, RefreshCw, Download } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { downloadCsv } from "@/lib/reports/format";
 
@@ -87,6 +88,7 @@ export function RateAuditor() {
   const [audits, setAudits] = useState<Audit[]>([]);
   const [listingNames, setListingNames] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Audit | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -341,52 +343,90 @@ export function RateAuditor() {
             ) : !filtered.length ? (
               <p className="p-10 text-center text-sm text-muted-foreground">No bookings picked up in this period.</p>
             ) : (
+              <div className="max-h-[70vh] overflow-auto">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow>
-                    <TableHead>Property</TableHead><TableHead>Guest / channel</TableHead><TableHead>Stay</TableHead><TableHead>Booking window</TableHead>
-                    <TableHead className="text-right">Gross ADR</TableHead><TableHead className="text-right">Net ADR</TableHead>
-                    <TableHead className="text-right">Benchmark</TableHead><TableHead className="text-right">Weekday</TableHead>
-                    <TableHead className="text-right">Weekend</TableHead><TableHead className="text-right">Overall</TableHead>
-                    <TableHead className="text-center">Score</TableHead>
+                    <TableHead>Property</TableHead><TableHead>Stay</TableHead><TableHead>Booking window</TableHead>
+                    <TableHead className="text-right">Booked rate</TableHead><TableHead className="text-right">vs benchmark</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((a) => (
-                    <TableRow key={a.res.id}>
-                      <TableCell className="font-medium">{listingNames[a.res.listing_id] || a.res.listing_id}</TableCell>
-                      <TableCell><div>{a.res.guest_name || "—"}</div><div className="text-xs text-muted-foreground">{a.res.source}</div></TableCell>
+                  {filtered.map((a) => {
+                    const diverge = a.weekdayVar !== null && a.weekendVar !== null && Math.abs(a.weekdayVar - a.weekendVar) >= 10;
+                    const earlyLeak = a.leadVar !== null && a.leadVar >= 14 && (a.overallVar ?? 0) < -10;
+                    return (
+                    <TableRow key={a.res.id} className="cursor-pointer odd:bg-muted/30 hover:bg-muted/60" onClick={() => setSelected(a)}>
+                      <TableCell className="py-3">
+                        <div className="flex items-center gap-2">
+                          {a.score ? <Badge className={cn("w-6 justify-center", scoreClass[a.score])}>{a.score}</Badge> : <Badge variant="outline">–</Badge>}
+                          <span className="font-medium">{listingNames[a.res.listing_id] || a.res.listing_id}</span>
+                        </div>
+                        <div className="ml-8 text-xs text-muted-foreground">{a.res.guest_name || "Guest"} · {a.res.source || "unknown"}</div>
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
-                        {format(parseISO(a.res.check_in), "MMM d")} – {format(parseISO(a.res.check_out), "MMM d, yyyy")}
-                        <div className="text-xs text-muted-foreground">{a.res.nights_count} nts · {a.weekdayNights} wkday / {a.weekendNights} wkend</div>
+                        {format(parseISO(a.res.check_in), "MMM d")} – {format(parseISO(a.res.check_out), "MMM d")}
+                        <div className="text-xs text-muted-foreground">{a.res.nights_count} nights</div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <div className="text-sm">{a.leadDays === null ? "—" : `${a.leadDays}d out`} <Badge variant="outline" className="ml-1">{a.windowBucket}</Badge></div>
-                        <div className={cn("text-xs text-muted-foreground", a.leadVar !== null && Math.abs(a.leadVar) >= 14 && "text-foreground font-medium")}>
-                          {a.leadVar === null ? "No history" : `typ. ${Math.round(a.typicalLead!)}d · ${Math.abs(Math.round(a.leadVar))}d ${a.leadVar >= 0 ? "earlier" : "later"}`}
+                        <div className="text-sm">{a.leadDays === null ? "—" : `${a.leadDays}d out`} <Badge variant="outline" className={cn("ml-1", earlyLeak && "border-accent text-accent-foreground bg-accent")}>{a.windowBucket}</Badge></div>
+                        <div className="text-xs text-muted-foreground">
+                          {a.leadVar === null ? "No history" : Math.abs(a.leadVar) < 3 ? `About typical (${Math.round(a.typicalLead!)}d)` : `${Math.abs(Math.round(a.leadVar))}d ${a.leadVar >= 0 ? "earlier" : "later"} than typical (${Math.round(a.typicalLead!)}d)`}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">{fmt(a.grossAdr)}</TableCell>
                       <TableCell className="text-right">
-                        <Tooltip><TooltipTrigger className="underline decoration-dotted">{fmt(a.netAdr)}</TooltipTrigger>
-                          <TooltipContent>Gross {fmt(a.grossAdr)}/nt − {fmt(a.fee / a.res.nights_count)} est. channel fee = {fmt(a.netAdr)} net</TooltipContent></Tooltip>
+                        <div className="font-semibold">{fmt(a.grossAdr)}</div>
+                        <div className="text-xs text-muted-foreground">{fmt(a.netAdr)} net</div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Tooltip><TooltipTrigger>{fmt(a.benchmarkAdr)}</TooltipTrigger><TooltipContent>{a.benchmarkSource}</TooltipContent></Tooltip>
-                      </TableCell>
-                      {[a.weekdayVar, a.weekendVar, a.overallVar].map((v, i) => (
-                        <TableCell key={i} className={cn("text-right", v !== null && v < -10 && "text-destructive", v !== null && v >= 0 && "text-primary", i === 2 && "font-semibold")}>{pct(v)}</TableCell>
-                      ))}
-                      <TableCell className="text-center">
-                        {a.score ? <Badge className={scoreClass[a.score]}>{a.score}</Badge> : <span className="text-xs text-muted-foreground">n/a</span>}
+                        <Badge variant="outline" className={cn(a.overallVar !== null && a.overallVar < -10 && "border-destructive text-destructive", a.overallVar !== null && a.overallVar >= 0 && "border-primary text-primary")}>{pct(a.overallVar)}</Badge>
+                        <div className="text-xs text-muted-foreground mt-1">vs {fmt(a.benchmarkAdr)}</div>
+                        {diverge && <div className="text-xs text-muted-foreground">Wkday {pct(a.weekdayVar)} · Wkend {pct(a.weekendVar)}</div>}
                       </TableCell>
                     </TableRow>
-                  ))}
+                  );})}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>
+
+        <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+          <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+            {selected && (() => {
+              const s = selected;
+              const rows: [string, string][] = [
+                ["Guest", s.res.guest_name || "—"], ["Channel", s.res.source || "—"],
+                ["Booked", s.res.created_at_guesty ? format(new Date(s.res.created_at_guesty), "MMM d, yyyy") : "—"],
+                ["Stay", `${format(parseISO(s.res.check_in), "MMM d")} – ${format(parseISO(s.res.check_out), "MMM d, yyyy")}`],
+                ["Nights", `${s.res.nights_count} (${s.weekdayNights} weekday / ${s.weekendNights} weekend)`],
+                ["Booking window", s.leadDays === null ? "—" : `${s.leadDays} days · ${s.windowBucket}`],
+                ["Typical window", s.typicalLead === null ? "No history" : `${Math.round(s.typicalLead)} days`],
+                ["Accommodation fare", fmt(Number(s.res.fare_accommodation_adjusted || 0))],
+                ["Subtotal", fmt(Number(s.res.sub_total || 0))],
+                ["Est. channel fee", fmt(s.fee)],
+                ["Gross rate / night", fmt(s.grossAdr)], ["Net rate / night", fmt(s.netAdr)],
+                ["Benchmark / night", fmt(s.benchmarkAdr)], ["Benchmark based on", s.benchmarkSource],
+                ["Weekday vs benchmark", pct(s.weekdayVar)], ["Weekend vs benchmark", pct(s.weekendVar)],
+                ["Overall vs benchmark", pct(s.overallVar)],
+              ];
+              return (<>
+                <SheetHeader>
+                  <SheetTitle className="flex items-center gap-2">
+                    {s.score && <Badge className={scoreClass[s.score]}>{s.score}</Badge>}
+                    {listingNames[s.res.listing_id] || s.res.listing_id}
+                  </SheetTitle>
+                </SheetHeader>
+                <dl className="mt-4 divide-y text-sm">
+                  {rows.map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-4 py-2"><dt className="text-muted-foreground">{k}</dt><dd className="text-right font-medium">{v}</dd></div>
+                  ))}
+                </dl>
+              </>);
+            })()}
+          </SheetContent>
+        </Sheet>
         <p className="text-xs text-muted-foreground">
           Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point.
         </p>
