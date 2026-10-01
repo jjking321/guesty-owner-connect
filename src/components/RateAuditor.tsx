@@ -23,7 +23,23 @@ type Audit = {
   weekdayVar: number | null; weekendVar: number | null; overallVar: number | null;
   benchmarkAdr: number | null; benchmarkSource: string; score: number | null;
   weekdayNights: number; weekendNights: number;
+  leadDays: number | null; windowBucket: string; typicalLead: number | null; leadVar: number | null;
 };
+
+const WINDOWS: [string, number, number][] = [
+  ["Last-minute", 0, 7], ["Near-term", 8, 30], ["Standard", 31, 60], ["Advance", 61, 120], ["Far advance", 121, 99999],
+];
+const bucketOf = (d: number | null) => (d === null ? "Unknown" : (WINDOWS.find(([, a, b]) => d >= a && d <= b)?.[0] ?? "Unknown"));
+const leadOf = (booked: string | null, checkIn: string) =>
+  booked ? Math.max(0, Math.round((parseISO(checkIn).getTime() - new Date(booked).getTime()) / 86400000)) : null;
+
+// Context-aware score: late discounts are expected; early discounts locked in far out are penalized harder
+function adjustScore(base: number | null, lead: number | null, v: number | null): number | null {
+  if (base === null || lead === null || v === null) return base;
+  if (lead <= 7 && v < 0 && v >= -25) return Math.max(base, 3);
+  if (lead > 60 && v < -10) return Math.max(1, base - 1);
+  return base;
+}
 
 const CONFIRMED = ["confirmed", "checked_in", "checked_out"];
 // Fri & Sat nights are weekend nights
@@ -66,6 +82,7 @@ export function RateAuditor() {
   const [period, setPeriod] = useState("1");
   const [scoreFilter, setScoreFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
+  const [windowFilter, setWindowFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [audits, setAudits] = useState<Audit[]>([]);
   const [listingNames, setListingNames] = useState<Record<string, string>>({});
@@ -154,7 +171,33 @@ export function RateAuditor() {
         return null;
       };
 
+      // Typical lead time per listing + stay month, from stays checked in over the past 2 years
+      const histFrom = format(subDays(new Date(), 730), "yyyy-MM-dd");
+      const histTo = format(new Date(), "yyyy-MM-dd");
+      const leadMap = new Map<string, number[]>();
+      for (let i = 0; i < listingIds.length; i += 50) {
+        const hist = await fetchAllPaged<any>((f, t) =>
+          supabase.from("reservations").select("listing_id, check_in, created_at_guesty")
+            .in("listing_id", listingIds.slice(i, i + 50)).in("status", CONFIRMED)
+            .or("source.is.null,source.neq.owner").gte("check_in", histFrom).lt("check_in", histTo)
+            .not("created_at_guesty", "is", null).order("id").range(f, t));
+        for (const h of hist) {
+          const l = leadOf(h.created_at_guesty, h.check_in);
+          if (l === null) continue;
+          for (const k of [`${h.listing_id}|${h.check_in.slice(5, 7)}`, `${h.listing_id}|all`]) {
+            const arr = leadMap.get(k) || []; arr.push(l); leadMap.set(k, arr);
+          }
+        }
+      }
+      const typicalFor = (id: string, checkIn: string) => {
+        const m = leadMap.get(`${id}|${checkIn.slice(5, 7)}`);
+        if (m && m.length >= 3) return avg(m);
+        return avg(leadMap.get(`${id}|all`) || []);
+      };
+
       const result: Audit[] = reservations.map((r) => {
+        const leadDays = leadOf(r.created_at_guesty, r.check_in);
+        const typicalLead = typicalFor(r.listing_id, r.check_in);
         const fare = Number(r.fare_accommodation_adjusted || 0);
         const grossAdr = fare / r.nights_count;
         // Channel fee estimate: share of subtotal not paid out to host, applied to the fare
@@ -187,7 +230,8 @@ export function RateAuditor() {
           res: r, grossAdr, netAdr, fee,
           weekdayVar: v(wkd, bWkd), weekendVar: v(wke, bWke), overallVar,
           benchmarkAdr, benchmarkSource: [...srcs].join(", ") || "No benchmark",
-          score: scoreFor(overallVar), weekdayNights: wkdN, weekendNights: wkeN,
+          score: adjustScore(scoreFor(overallVar), leadDays, overallVar), weekdayNights: wkdN, weekendNights: wkeN,
+          leadDays, windowBucket: bucketOf(leadDays), typicalLead, leadVar: leadDays !== null && typicalLead !== null ? leadDays - typicalLead : null,
         };
       });
       setAudits(result);
@@ -203,17 +247,22 @@ export function RateAuditor() {
   const channels = useMemo(() => [...new Set(audits.map((a) => a.res.source || "unknown"))].sort(), [audits]);
   const filtered = audits.filter((a) =>
     (scoreFilter === "all" || (scoreFilter === "flagged" ? (a.score ?? 5) <= 2 : String(a.score) === scoreFilter)) &&
-    (channelFilter === "all" || (a.res.source || "unknown") === channelFilter));
+    (channelFilter === "all" || (a.res.source || "unknown") === channelFilter) &&
+    (windowFilter === "all" || a.windowBucket === windowFilter));
 
   const totalNights = filtered.reduce((s, a) => s + a.res.nights_count, 0);
   const avgNet = totalNights ? filtered.reduce((s, a) => s + a.netAdr * a.res.nights_count, 0) / totalNights : null;
   const scored = filtered.filter((a) => a.overallVar !== null);
   const avgVar = avg(scored.map((a) => a.overallVar!));
   const flagged = filtered.filter((a) => (a.score ?? 5) <= 2).length;
+  const leads = filtered.filter((a) => a.leadDays !== null);
+  const avgLead = avg(leads.map((a) => a.leadDays!));
+  const lastMinPct = leads.length ? (leads.filter((a) => a.leadDays! <= 7).length / leads.length) * 100 : null;
+  const avgLeadVar = avg(leads.filter((a) => a.leadVar !== null).map((a) => a.leadVar!));
 
   const exportCsv = () => {
     downloadCsv(`rate-audit-${format(new Date(), "yyyy-MM-dd")}.csv`, [
-      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source"],
+      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)"],
       ...filtered.map((a) => [
         listingNames[a.res.listing_id] || a.res.listing_id, a.res.guest_name || "", a.res.source || "",
         a.res.created_at_guesty ? format(new Date(a.res.created_at_guesty), "yyyy-MM-dd") : "",
@@ -221,6 +270,7 @@ export function RateAuditor() {
         a.grossAdr.toFixed(2), a.fee.toFixed(2), a.netAdr.toFixed(2), a.benchmarkAdr?.toFixed(2) ?? "",
         a.weekdayVar?.toFixed(1) ?? "", a.weekendVar?.toFixed(1) ?? "", a.overallVar?.toFixed(1) ?? "",
         a.score ? String(a.score) : "", a.benchmarkSource,
+        a.leadDays?.toString() ?? "", a.windowBucket, a.typicalLead?.toFixed(0) ?? "", a.leadVar?.toFixed(0) ?? "",
       ]),
     ]);
   };
@@ -253,6 +303,13 @@ export function RateAuditor() {
               {channels.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={windowFilter} onValueChange={setWindowFilter}>
+            <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All booking windows</SelectItem>
+              {WINDOWS.map(([w, a, b]) => <SelectItem key={w} value={w}>{w} ({b > 9999 ? `${a}+` : `${a}–${b}`}d)</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />Refresh
           </Button>
@@ -261,12 +318,14 @@ export function RateAuditor() {
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
           {[
             ["Bookings picked up", String(filtered.length), `${totalNights} nights`],
             ["Avg net ADR", fmt(avgNet), "After estimated channel fees"],
             ["Rate vs benchmark", pct(avgVar), `${scored.length} bookings with a benchmark`],
             ["Flagged bookings", String(flagged), "Score 1–2 (more than 10% below)"],
+            ["Avg booking window", avgLead === null ? "—" : `${Math.round(avgLead)}d`, avgLeadVar === null ? "No history" : `${Math.abs(Math.round(avgLeadVar))}d ${avgLeadVar >= 0 ? "earlier" : "later"} than typical`],
+            ["Last-minute share", lastMinPct === null ? "—" : `${lastMinPct.toFixed(0)}%`, "Booked 0–7 days before arrival"],
           ].map(([t, v, d]) => (
             <Card key={t}><CardHeader className="pb-2"><CardDescription>{t}</CardDescription><CardTitle className="text-2xl">{v}</CardTitle></CardHeader>
               <CardContent className="text-xs text-muted-foreground">{d}</CardContent></Card>
@@ -285,7 +344,7 @@ export function RateAuditor() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Property</TableHead><TableHead>Guest / channel</TableHead><TableHead>Stay</TableHead>
+                    <TableHead>Property</TableHead><TableHead>Guest / channel</TableHead><TableHead>Stay</TableHead><TableHead>Booking window</TableHead>
                     <TableHead className="text-right">Gross ADR</TableHead><TableHead className="text-right">Net ADR</TableHead>
                     <TableHead className="text-right">Benchmark</TableHead><TableHead className="text-right">Weekday</TableHead>
                     <TableHead className="text-right">Weekend</TableHead><TableHead className="text-right">Overall</TableHead>
@@ -300,6 +359,12 @@ export function RateAuditor() {
                       <TableCell className="whitespace-nowrap text-sm">
                         {format(parseISO(a.res.check_in), "MMM d")} – {format(parseISO(a.res.check_out), "MMM d, yyyy")}
                         <div className="text-xs text-muted-foreground">{a.res.nights_count} nts · {a.weekdayNights} wkday / {a.weekendNights} wkend</div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <div className="text-sm">{a.leadDays === null ? "—" : `${a.leadDays}d out`} <Badge variant="outline" className="ml-1">{a.windowBucket}</Badge></div>
+                        <div className={cn("text-xs text-muted-foreground", a.leadVar !== null && Math.abs(a.leadVar) >= 14 && "text-foreground font-medium")}>
+                          {a.leadVar === null ? "No history" : `typ. ${Math.round(a.typicalLead!)}d · ${Math.abs(Math.round(a.leadVar))}d ${a.leadVar >= 0 ? "earlier" : "later"}`}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">{fmt(a.grossAdr)}</TableCell>
                       <TableCell className="text-right">
@@ -323,7 +388,7 @@ export function RateAuditor() {
           </CardContent>
         </Card>
         <p className="text-xs text-muted-foreground">
-          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee.
+          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point.
         </p>
       </div>
     </TooltipProvider>
