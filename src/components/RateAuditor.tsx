@@ -84,6 +84,7 @@ export function RateAuditor() {
   const [scoreFilter, setScoreFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [windowFilter, setWindowFilter] = useState("all");
+  const [sortKey, setSortKey] = useState("newest");
   const [loading, setLoading] = useState(false);
   const [audits, setAudits] = useState<Audit[]>([]);
   const [listingNames, setListingNames] = useState<Record<string, string>>({});
@@ -247,10 +248,28 @@ export function RateAuditor() {
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period]);
 
   const channels = useMemo(() => [...new Set(audits.map((a) => a.res.source || "unknown"))].sort(), [audits]);
+  const nullLast = (x: number | null | undefined, y: number | null | undefined, dir: number) =>
+    x == null && y == null ? 0 : x == null ? 1 : y == null ? -1 : (x - y) * dir;
+  const sorters: Record<string, (a: Audit, b: Audit) => number> = {
+    newest: (a, b) => (b.res.created_at_guesty || "").localeCompare(a.res.created_at_guesty || ""),
+    worst: (a, b) => nullLast(a.score, b.score, 1) || nullLast(a.overallVar, b.overallVar, 1),
+    best: (a, b) => nullLast(a.score, b.score, -1) || nullLast(a.overallVar, b.overallVar, -1),
+    discount: (a, b) => nullLast(a.overallVar, b.overallVar, 1),
+    premium: (a, b) => nullLast(a.overallVar, b.overallVar, -1),
+    arrival: (a, b) => a.res.check_in.localeCompare(b.res.check_in),
+    arrival_late: (a, b) => b.res.check_in.localeCompare(a.res.check_in),
+    lead_short: (a, b) => nullLast(a.leadDays, b.leadDays, 1),
+    lead_long: (a, b) => nullLast(a.leadDays, b.leadDays, -1),
+    rate_high: (a, b) => b.grossAdr - a.grossAdr,
+    rate_low: (a, b) => a.grossAdr - b.grossAdr,
+  };
+  const toggle = (x: string, y: string) => setSortKey(sortKey === x ? y : x);
+  const arrow = (x: string, y: string) => (sortKey === x ? " ↑" : sortKey === y ? " ↓" : "");
+
   const filtered = audits.filter((a) =>
     (scoreFilter === "all" || (scoreFilter === "flagged" ? (a.score ?? 5) <= 2 : String(a.score) === scoreFilter)) &&
     (channelFilter === "all" || (a.res.source || "unknown") === channelFilter) &&
-    (windowFilter === "all" || a.windowBucket === windowFilter));
+    (windowFilter === "all" || a.windowBucket === windowFilter)).sort(sorters[sortKey] || sorters.newest);
 
   const totalNights = filtered.reduce((s, a) => s + a.res.nights_count, 0);
   const avgNet = totalNights ? filtered.reduce((s, a) => s + a.netAdr * a.res.nights_count, 0) / totalNights : null;
@@ -312,6 +331,20 @@ export function RateAuditor() {
               {WINDOWS.map(([w, a, b]) => <SelectItem key={w} value={w}>{w} ({b > 9999 ? `${a}+` : `${a}–${b}`}d)</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={sortKey} onValueChange={setSortKey}>
+            <SelectTrigger className="w-[210px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Sort: Newest booked</SelectItem>
+              <SelectItem value="worst">Sort: Worst score first</SelectItem>
+              <SelectItem value="discount">Sort: Steepest discount</SelectItem>
+              <SelectItem value="best">Sort: Best score first</SelectItem>
+              <SelectItem value="arrival">Sort: Soonest arrival</SelectItem>
+              <SelectItem value="rate_high">Sort: Highest booked rate</SelectItem>
+              {["premium", "arrival_late", "lead_short", "lead_long", "rate_low"].includes(sortKey) && (
+                <SelectItem value={sortKey}>Sort: Column ({sortKey.replace("_", " ")})</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />Refresh
           </Button>
@@ -347,8 +380,11 @@ export function RateAuditor() {
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow>
-                    <TableHead>Property</TableHead><TableHead>Stay</TableHead><TableHead>Booking window</TableHead>
-                    <TableHead className="text-right">Booked rate</TableHead><TableHead className="text-right">vs benchmark</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggle("worst", "best")}>Score / Property{arrow("worst", "best")}</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggle("arrival", "arrival_late")}>Stay{arrow("arrival", "arrival_late")}</TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggle("lead_short", "lead_long")}>Booking window{arrow("lead_short", "lead_long")}</TableHead>
+                    <TableHead className="cursor-pointer select-none text-right" onClick={() => toggle("rate_low", "rate_high")}>Booked rate{arrow("rate_low", "rate_high")}</TableHead>
+                    <TableHead className="cursor-pointer select-none text-right" onClick={() => toggle("discount", "premium")}>vs benchmark{arrow("discount", "premium")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
