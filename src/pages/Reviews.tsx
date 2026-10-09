@@ -14,10 +14,11 @@ import { AirbnbIcon } from "@/components/icons/AirbnbIcon";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { DisputePipelineBoard } from "@/components/dispute/DisputePipelineBoard";
 import { ReviewChannelInsights } from "@/components/ReviewChannelInsights";
+import { ReviewRevenueImpact } from "@/components/ReviewRevenueImpact";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, ChevronLeft, ChevronRight, MessageSquare, Gavel, PieChart } from "lucide-react";
+import { RefreshCw, Loader2, ChevronLeft, ChevronRight, MessageSquare, Gavel, PieChart, DollarSign } from "lucide-react";
 
 
 const PAGE_SIZE = 100;
@@ -381,6 +382,10 @@ export default function Reviews() {
               <PieChart className="h-4 w-4" />
               Channel Insights
             </TabsTrigger>
+            <TabsTrigger value="revenue-impact" className="gap-2">
+              <DollarSign className="h-4 w-4" />
+              Revenue Impact
+            </TabsTrigger>
             <TabsTrigger value="airbnb-ratings" className="gap-2">
 
               <AirbnbIcon className="h-4 w-4" />
@@ -471,6 +476,10 @@ export default function Reviews() {
 
           <TabsContent value="insights">
             <ReviewChannelInsights />
+          </TabsContent>
+
+          <TabsContent value="revenue-impact">
+            <ReviewRevenueImpact />
           </TabsContent>
 
           <TabsContent value="airbnb-ratings">

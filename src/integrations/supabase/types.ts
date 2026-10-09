@@ -2856,6 +2856,10 @@ export type Database = {
           with_text_count: number
         }[]
       }
+      get_review_commercial_impact: {
+        Args: { p_end_date: string; p_start_date: string }
+        Returns: Json
+      }
       get_review_impact_events: {
         Args: {
           p_end_date: string
