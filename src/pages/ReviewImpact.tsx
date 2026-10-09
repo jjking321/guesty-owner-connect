@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Loader2, Download, TrendingDown } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { downloadCsv } from "@/lib/reports/format";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ReviewRiskCalculator } from "@/components/ReviewRiskCalculator";
 
 interface ImpactEvent {
   review_id: string; listing_id: string; listing_name: string | null; review_date: string; rating: number;
@@ -207,6 +209,12 @@ export default function ReviewImpact() {
 
   return (
     <DashboardLayout>
+      <Tabs defaultValue="study" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="study">Event Study</TabsTrigger>
+          <TabsTrigger value="calculator">Risk & Concession Calculator</TabsTrigger>
+        </TabsList>
+        <TabsContent value="study">
       <div className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -409,6 +417,9 @@ export default function ReviewImpact() {
           </>
         )}
       </div>
+        </TabsContent>
+        <TabsContent value="calculator"><ReviewRiskCalculator /></TabsContent>
+      </Tabs>
     </DashboardLayout>
   );
 }
