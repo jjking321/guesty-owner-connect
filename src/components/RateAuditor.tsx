@@ -485,7 +485,16 @@ export function RateAuditor() {
         a.adjVar = a.overallVar === null ? null
           : a.overallVar >= 0 ? a.overallVar : Math.min(0, a.overallVar + allow + a.netCredit);
         a.score = adjustScore(scoreFor(a.adjVar), a.leadDays, a.relLead, a.adjVar);
+        // Holidays: majority-holiday stays discounted 10%+ (not last-minute) lose an extra point
+        const holidayHeavy = a.holidayNights > 0 && a.holidayNights >= a.res.nights_count / 2;
+        if (holidayHeavy && a.score !== null && (a.adjVar ?? 0) < -10 && !isLate(a.leadDays, a.relLead)) a.score = Math.max(1, a.score - 1);
         a.diagnosis = diagnose(a);
+        // Origin of the gap: calendar set low vs booking landed under the calendar (beyond the LOS allowance)
+        if (a.calVar !== null && a.calBenchVar !== null) {
+          const underCal = a.calVar + a.losAllowance < -10;
+          const calLow = a.calBenchVar < -10;
+          a.origin = underCal && calLow ? "mixed" : underCal ? "promo" : calLow ? "calendar" : "aligned";
+        }
       });
       if (stale()) return;
       setAudits(result);
