@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { addDays, format, parseISO, subDays } from "date-fns";
+import { addDays, endOfMonth, format, getDaysInMonth, parseISO, subDays, subYears } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -292,12 +292,63 @@ export function RateAuditor() {
         }
         agg.forEach((g, id) => g.b > 0 && futureVarMap.set(id, ((g.a - g.b) / g.b) * 100));
       }
+      // Stay-month RevPAR pacing: on-the-books now vs on-the-books at the same point last year
+      const months = [...new Set(result.map((a) => a.stayMonth))].sort();
+      const curStart = `${months[0]}-01`;
+      const curEnd = format(endOfMonth(parseISO(`${months[months.length - 1]}-01`)), "yyyy-MM-dd");
+      const lyStart = format(subYears(parseISO(curStart), 1), "yyyy-MM-dd");
+      const lyEnd = format(endOfMonth(subYears(parseISO(`${months[months.length - 1]}-01`), 1)), "yyyy-MM-dd");
+      const lyCutoff = subDays(new Date(), 364).toISOString();
+      const nowIso = new Date().toISOString();
+      // key listing|yyyy-MM -> { rev, nights }
+      const cur = new Map<string, { rev: number; n: number }>();
+      const ly = new Map<string, { rev: number; n: number }>();
+      const loadRange = async (from: string, to: string, cutoff: string, target: Map<string, { rev: number; n: number }>) => {
+        for (let i = 0; i < allIds.length; i += 50) {
+          const chunk = allIds.slice(i, i + 50);
+          const resv = await fetchAllPaged<any>((f, t) =>
+            supabase.from("reservations").select("id, created_at_guesty")
+              .in("listing_id", chunk).in("status", CONFIRMED).or("source.is.null,source.neq.owner")
+              .gte("check_out", from).lte("check_in", to).order("id").range(f, t));
+          const ok = new Set(resv.filter((x) => !x.created_at_guesty || x.created_at_guesty <= cutoff).map((x) => x.id));
+          const ns = await fetchAllPaged<any>((f, t) =>
+            supabase.from("reservation_nights").select("listing_id, night_date, revenue_allocation, reservation_id")
+              .in("listing_id", chunk).gte("night_date", from).lte("night_date", to).order("id").range(f, t));
+          for (const n of ns) {
+            if (!ok.has(n.reservation_id)) continue;
+            const k = `${n.listing_id}|${n.night_date.slice(0, 7)}`;
+            const g = target.get(k) || { rev: 0, n: 0 };
+            g.rev += Number(n.revenue_allocation) || 0; g.n += 1; target.set(k, g);
+          }
+        }
+      };
+      await Promise.all([loadRange(curStart, curEnd, nowIso, cur), loadRange(lyStart, lyEnd, lyCutoff, ly)]);
+      const metric = (m: Map<string, { rev: number; n: number }>, id: string, month: string) => {
+        const g = m.get(`${id}|${month}`);
+        const days = getDaysInMonth(parseISO(`${month}-01`));
+        return g ? { revpar: g.rev / days, occ: Math.min(100, (g.n / days) * 100) } : null;
+      };
+
       const lowCount = new Map<string, number>();
       result.forEach((a) => (a.overallVar ?? 0) < -15 && lowCount.set(a.res.listing_id, (lowCount.get(a.res.listing_id) || 0) + 1));
       result.forEach((a) => {
         const fv = futureVarMap.get(a.res.listing_id) ?? null;
         a.futureVar = fv;
         a.recentLowCount = lowCount.get(a.res.listing_id) || 0;
+        const id = a.res.listing_id;
+        const lyMonth = format(subYears(parseISO(`${a.stayMonth}-01`), 1), "yyyy-MM");
+        const mine = metric(cur, id, a.stayMonth) || { revpar: 0, occ: 0 };
+        a.revpar = mine.revpar; a.occ = mine.occ;
+        const own = metric(ly, id, lyMonth);
+        if (own && own.revpar > 0) {
+          a.benchRevpar = own.revpar; a.benchOcc = own.occ; a.revparSource = "Same month LY (pace)";
+        } else {
+          // Fallback: peers' current on-the-books RevPAR for the same month
+          const ps = (peerMap.get(id) || []).map((p) => metric(cur, p, a.stayMonth)).filter((x): x is { revpar: number; occ: number } => !!x);
+          const pr = avg(ps.map((x) => x.revpar));
+          if (pr && pr > 0) { a.benchRevpar = pr; a.benchOcc = avg(ps.map((x) => x.occ)); a.revparSource = `Portfolio peers (${ps.length})`; }
+        }
+        a.revparVar = a.benchRevpar ? ((a.revpar! - a.benchRevpar) / a.benchRevpar) * 100 : null;
         a.diagnosis = diagnose(a);
       });
       setAudits(result);
