@@ -1322,7 +1322,7 @@ export default function PropertiesBulkEdit() {
               <RevenueReview
                 reservations={allReservations}
                 listingIds={effectivePacingListingIds}
-                listings={listings}
+                listings={managedListings}
               />
               <PacingReport 
                 reservations={allReservations} 
