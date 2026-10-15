@@ -297,8 +297,15 @@ export default function PropertiesBulkEdit() {
     return result;
   }, [allReservations]);
 
+  // Only currently managed units (active, listed, not archived) — offboarded units are excluded from pacing
+  const managedListingIdSet = useMemo(
+    () => new Set(listings.filter((l: any) => l.active === true && l.is_listed === true && !l.archived).map((l: any) => String(l.id))),
+    [listings]
+  );
+  const managedListings = useMemo(() => listings.filter((l: any) => managedListingIdSet.has(String(l.id))), [listings, managedListingIdSet]);
+
   // Effective listing IDs for pacing report based on same-store filter
-  const effectivePacingListingIds = sameStoreOnly ? sameStoreListingIds : listingIds;
+  const effectivePacingListingIds = (sameStoreOnly ? sameStoreListingIds : listingIds).filter((id: string) => managedListingIdSet.has(String(id)));
 
   // Create lookup map for fast access to pre-aggregated metrics
   const metricsMap = useMemo(() => {
@@ -1305,7 +1312,7 @@ export default function PropertiesBulkEdit() {
               </div>
               {sameStoreOnly && (
                 <span className="text-xs text-muted-foreground">
-                  Showing {sameStoreListingIds.length} of {listingIds.length} properties with data in both {new Date().getFullYear() - 1} and {new Date().getFullYear()}
+                  Showing {effectivePacingListingIds.length} of {managedListingIdSet.size} active properties with data in both {new Date().getFullYear() - 1} and {new Date().getFullYear()}
                 </span>
               )}
             </div>
@@ -1315,7 +1322,7 @@ export default function PropertiesBulkEdit() {
               <RevenueReview
                 reservations={allReservations}
                 listingIds={effectivePacingListingIds}
-                listings={listings}
+                listings={managedListings}
               />
               <PacingReport 
                 reservations={allReservations} 
