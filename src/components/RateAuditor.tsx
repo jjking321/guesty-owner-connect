@@ -35,22 +35,32 @@ const bucketOf = (d: number | null) => (d === null ? "Unknown" : (WINDOWS.find((
 const leadOf = (booked: string | null, checkIn: string) =>
   booked ? Math.max(0, Math.round((parseISO(checkIn).getTime() - new Date(booked).getTime()) / 86400000)) : null;
 
-type Diagnosis = "systemic" | "tactical" | "isolated" | "on_target" | "unknown";
+type Diagnosis = "distress" | "leak" | "drag" | "systemic" | "yield" | "tactical" | "isolated" | "on_target" | "unknown";
 const DIAG: Record<Diagnosis, { label: string; cls: string; tip: string }> = {
-  systemic: { label: "Systemic leak", cls: "bg-destructive text-destructive-foreground", tip: "Ongoing pricing issue: repeated low pickups or upcoming open dates also priced well below benchmark. Review base/min price." },
+  distress: { label: "Distress selling", cls: "bg-destructive text-destructive-foreground", tip: "Rate over 20% below benchmark AND stay-month RevPAR more than 20% behind. Discounting isn't driving enough volume — review the whole month's strategy." },
+  leak: { label: "True pricing leak", cls: "bg-destructive/80 text-destructive-foreground", tip: "Rate over 10% below benchmark while stay-month RevPAR is behind (over 5%). The discount isn't paying for itself in occupancy." },
+  drag: { label: "Overpriced / pacing drag", cls: "bg-accent text-accent-foreground", tip: "Booked at a premium, but the stay month's RevPAR is more than 15% behind. High rates may be costing occupancy on other nights." },
+  systemic: { label: "Recurring discount", cls: "bg-destructive/60 text-destructive-foreground", tip: "Repeated low pickups or upcoming open dates priced well below benchmark, with no clear RevPAR signal. Review base/min price." },
+  yield: { label: "Yield strategy", cls: "bg-primary text-primary-foreground", tip: "Rate below benchmark, but stay-month RevPAR is ahead (5%+). Trading rate for occupancy is working." },
   tactical: { label: "Last-minute fill", cls: "bg-secondary text-secondary-foreground", tip: "Discount booked within 7 days of arrival — expected liquidation of unsold nights." },
-  isolated: { label: "One-off", cls: "bg-accent text-accent-foreground", tip: "Single discounted booking; future asking rates look fine. Monitor only." },
-  on_target: { label: "On target", cls: "bg-primary/70 text-primary-foreground", tip: "Booked at or near benchmark." },
+  isolated: { label: "One-off", cls: "bg-accent text-accent-foreground", tip: "Single discounted booking; month pacing and future rates look fine. Monitor only." },
+  on_target: { label: "On target", cls: "bg-primary/70 text-primary-foreground", tip: "Booked at or near benchmark with no pacing concern." },
   unknown: { label: "No benchmark", cls: "border bg-transparent text-muted-foreground", tip: "Not enough history to diagnose." },
 };
 
-function diagnose(a: { overallVar: number | null; leadDays: number | null; futureVar: number | null; recentLowCount: number }): Diagnosis {
-  const v = a.overallVar;
+function diagnose(a: { overallVar: number | null; leadDays: number | null; futureVar: number | null; recentLowCount: number; revparVar: number | null }): Diagnosis {
+  const v = a.overallVar, rv = a.revparVar;
   if (v === null) return "unknown";
+  if (rv !== null) {
+    if (v < -20 && rv < -20) return "distress";
+    if (v >= 10 && rv < -15) return "drag";
+    if (v < -10 && rv >= 5) return "yield";
+  }
   if (v >= -10) return "on_target";
+  if (a.leadDays !== null && a.leadDays <= 7) return "tactical";
+  if (rv !== null && rv < -5) return "leak";
   const futureLow = a.futureVar !== null && a.futureVar < -10;
   if (futureLow || a.recentLowCount >= 2 || ((a.leadDays ?? 0) > 30 && v < -20)) return "systemic";
-  if (a.leadDays !== null && a.leadDays <= 7) return "tactical";
   return "isolated";
 }
 
