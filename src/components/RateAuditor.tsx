@@ -282,10 +282,11 @@ export function RateAuditor() {
           res: r, grossAdr, netAdr, fee,
           weekdayVar: v(wkd, bWkd), weekendVar: v(wke, bWke), overallVar,
           benchmarkAdr, benchmarkSource: [...srcs].join(", ") || "No benchmark",
-          score: adjustScore(scoreFor(overallVar), leadDays, overallVar), weekdayNights: wkdN, weekendNights: wkeN,
+          score: scoreFor(overallVar), weekdayNights: wkdN, weekendNights: wkeN,
           leadDays, windowBucket: bucketOf(leadDays), typicalLead, leadVar: leadDays !== null && typicalLead !== null ? leadDays - typicalLead : null,
           futureVar: null, recentLowCount: 0, diagnosis: "unknown" as Diagnosis,
           stayMonth: r.check_in.slice(0, 7), revpar: null, benchRevpar: null, revparVar: null, occ: null, benchOcc: null, revparSource: "—",
+          losTier: "Standard", losAllowance: 0, netCredit: 0, adjVar: overallVar, relLead: null,
         };
       });
       // Forward-looking: open calendar asking rates for the next 60 days vs the same benchmark
@@ -365,6 +366,16 @@ export function RateAuditor() {
           if (pr && pr > 0) { a.benchRevpar = pr; a.benchOcc = avg(ps.map((x) => x.occ)); a.revparSource = `Portfolio peers (${ps.length})`; }
         }
         a.revparVar = a.benchRevpar ? ((a.revpar! - a.benchRevpar) / a.benchRevpar) * 100 : null;
+        // LOS allowance + net-yield credit (channel with better take-home than this listing's average)
+        const [tier, allow] = losOf(a.res.nights_count);
+        a.losTier = tier; a.losAllowance = allow;
+        const avgRatio = netAvg.get(id);
+        const ratio = a.grossAdr > 0 ? a.netAdr / a.grossAdr : 1;
+        a.netCredit = avgRatio && avgRatio > 0 ? Math.max(0, (ratio / avgRatio - 1) * 100) : 0;
+        a.relLead = a.leadDays !== null && a.typicalLead ? a.leadDays / a.typicalLead : null;
+        a.adjVar = a.overallVar === null ? null
+          : a.overallVar >= 0 ? a.overallVar : Math.min(0, a.overallVar + allow + a.netCredit);
+        a.score = adjustScore(scoreFor(a.adjVar), a.leadDays, a.relLead, a.adjVar);
         a.diagnosis = diagnose(a);
       });
       if (stale()) return;
