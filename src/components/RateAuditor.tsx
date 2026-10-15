@@ -29,6 +29,52 @@ type Audit = {
   stayMonth: string; revpar: number | null; benchRevpar: number | null; revparVar: number | null;
   occ: number | null; benchOcc: number | null; revparSource: string;
   losTier: string; losAllowance: number; netCredit: number; adjVar: number | null; relLead: number | null;
+  holiday: string | null; holidayNights: number;
+  calAdr: number | null; calVar: number | null; calBenchVar: number | null; origin: Origin | null;
+};
+
+// ---- Holiday calendar (US). Floating holidays are matched holiday-to-holiday year over year ----
+type HolidayWin = { key: string; name: string; start: Date; nights: number };
+const nthDow = (y: number, m: number, dow: number, n: number) => {
+  const first = new Date(y, m, 1);
+  return new Date(y, m, 1 + ((dow - first.getDay() + 7) % 7) + (n - 1) * 7);
+};
+const lastDow = (y: number, m: number, dow: number) => {
+  const last = new Date(y, m + 1, 0);
+  return new Date(y, m, last.getDate() - ((last.getDay() - dow + 7) % 7));
+};
+const holidayCache = new Map<number, HolidayWin[]>();
+function holidayWindows(y: number): HolidayWin[] {
+  const c = holidayCache.get(y); if (c) return c;
+  const monWeekend = (key: string, name: string, mon: Date) => ({ key, name, start: addDays(mon, -3), nights: 3 }); // Fri, Sat, Sun nights
+  const tg = nthDow(y, 10, 4, 4);
+  const w: HolidayWin[] = [
+    monWeekend("mlk", "MLK weekend", nthDow(y, 0, 1, 3)),
+    monWeekend("presidents", "Presidents' Day weekend", nthDow(y, 1, 1, 3)),
+    monWeekend("memorial", "Memorial Day weekend", lastDow(y, 4, 1)),
+    { key: "july4", name: "July 4th", start: new Date(y, 6, 2), nights: 4 },
+    monWeekend("labor", "Labor Day weekend", nthDow(y, 8, 1, 1)),
+    { key: "thanksgiving", name: "Thanksgiving", start: addDays(tg, -1), nights: 4 },
+    { key: "xmas_ny", name: "Christmas / New Year's", start: new Date(y, 11, 22), nights: 10 },
+  ];
+  holidayCache.set(y, w); return w;
+}
+const dayDiff = (a: Date, b: Date) => Math.round((new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime() - new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime()) / 86400000);
+function holidayOf(d: Date): { win: HolidayWin; offset: number } | null {
+  for (const win of holidayWindows(d.getFullYear())) {
+    const off = dayDiff(d, win.start);
+    if (off >= 0 && off < win.nights) return { win, offset: off };
+  }
+  return null;
+}
+
+// Where a discount came from: the calendar was set low, or the booking landed below the calendar rate
+type Origin = "calendar" | "promo" | "mixed" | "aligned";
+const ORIGIN: Record<Origin, { label: string; tip: string }> = {
+  calendar: { label: "Calendar priced low", tip: "Booked at roughly the calendar rate, but the calendar rate itself is below benchmark. Fix the base/min price or pricing-tool settings." },
+  promo: { label: "Discount below calendar", tip: "Calendar rate looked fine, but the booking came in 10%+ under it beyond the expected stay-length discount. Check OTA promotions, non-refundable / stacked discounts or manual overrides." },
+  mixed: { label: "Calendar + discount", tip: "Calendar rate was low AND the booking came in further below it. Both pricing and discount rules need review." },
+  aligned: { label: "Matches calendar", tip: "Booked rate is in line with the calendar and the calendar is near benchmark." },
 };
 
 const WINDOWS: [string, number, number][] = [
