@@ -29,6 +29,52 @@ type Audit = {
   stayMonth: string; revpar: number | null; benchRevpar: number | null; revparVar: number | null;
   occ: number | null; benchOcc: number | null; revparSource: string;
   losTier: string; losAllowance: number; netCredit: number; adjVar: number | null; relLead: number | null;
+  holiday: string | null; holidayNights: number;
+  calAdr: number | null; calVar: number | null; calBenchVar: number | null; origin: Origin | null;
+};
+
+// ---- Holiday calendar (US). Floating holidays are matched holiday-to-holiday year over year ----
+type HolidayWin = { key: string; name: string; start: Date; nights: number };
+const nthDow = (y: number, m: number, dow: number, n: number) => {
+  const first = new Date(y, m, 1);
+  return new Date(y, m, 1 + ((dow - first.getDay() + 7) % 7) + (n - 1) * 7);
+};
+const lastDow = (y: number, m: number, dow: number) => {
+  const last = new Date(y, m + 1, 0);
+  return new Date(y, m, last.getDate() - ((last.getDay() - dow + 7) % 7));
+};
+const holidayCache = new Map<number, HolidayWin[]>();
+function holidayWindows(y: number): HolidayWin[] {
+  const c = holidayCache.get(y); if (c) return c;
+  const monWeekend = (key: string, name: string, mon: Date) => ({ key, name, start: addDays(mon, -3), nights: 3 }); // Fri, Sat, Sun nights
+  const tg = nthDow(y, 10, 4, 4);
+  const w: HolidayWin[] = [
+    monWeekend("mlk", "MLK weekend", nthDow(y, 0, 1, 3)),
+    monWeekend("presidents", "Presidents' Day weekend", nthDow(y, 1, 1, 3)),
+    monWeekend("memorial", "Memorial Day weekend", lastDow(y, 4, 1)),
+    { key: "july4", name: "July 4th", start: new Date(y, 6, 2), nights: 4 },
+    monWeekend("labor", "Labor Day weekend", nthDow(y, 8, 1, 1)),
+    { key: "thanksgiving", name: "Thanksgiving", start: addDays(tg, -1), nights: 4 },
+    { key: "xmas_ny", name: "Christmas / New Year's", start: new Date(y, 11, 22), nights: 10 },
+  ];
+  holidayCache.set(y, w); return w;
+}
+const dayDiff = (a: Date, b: Date) => Math.round((new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime() - new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime()) / 86400000);
+function holidayOf(d: Date): { win: HolidayWin; offset: number } | null {
+  for (const win of holidayWindows(d.getFullYear())) {
+    const off = dayDiff(d, win.start);
+    if (off >= 0 && off < win.nights) return { win, offset: off };
+  }
+  return null;
+}
+
+// Where a discount came from: the calendar was set low, or the booking landed below the calendar rate
+type Origin = "calendar" | "promo" | "mixed" | "aligned";
+const ORIGIN: Record<Origin, { label: string; tip: string }> = {
+  calendar: { label: "Calendar priced low", tip: "Booked at roughly the calendar rate, but the calendar rate itself is below benchmark. Fix the base/min price or pricing-tool settings." },
+  promo: { label: "Discount below calendar", tip: "Calendar rate looked fine, but the booking came in 10%+ under it beyond the expected stay-length discount. Check OTA promotions, non-refundable / stacked discounts or manual overrides." },
+  mixed: { label: "Calendar + discount", tip: "Calendar rate was low AND the booking came in further below it. Both pricing and discount rules need review." },
+  aligned: { label: "Matches calendar", tip: "Booked rate is in line with the calendar and the calendar is near benchmark." },
 };
 
 const WINDOWS: [string, number, number][] = [
@@ -209,6 +255,32 @@ export function RateAuditor() {
       }
 
       const benchFor = (listingId: string, night: Date): { v: number; src: string } | null => {
+        // Holiday nights benchmark against the same holiday last year (dates shift year to year)
+        const h = holidayOf(night);
+        if (h) {
+          const lyWin = holidayWindows(night.getFullYear() - 1).find((w) => w.key === h.win.key);
+          if (lyWin) {
+            const same = exact.get(`${listingId}|${format(addDays(lyWin.start, Math.min(h.offset, lyWin.nights - 1)), "yyyy-MM-dd")}`);
+            if (same) return { v: same, src: "Same holiday LY" };
+            const vals: number[] = [];
+            for (let i = 0; i < lyWin.nights; i++) {
+              const x = exact.get(`${listingId}|${format(addDays(lyWin.start, i), "yyyy-MM-dd")}`);
+              if (x) vals.push(x);
+            }
+            const ha = avg(vals);
+            if (ha) return { v: ha, src: "Same holiday LY" };
+            const pv = (peerMap.get(listingId) || []).flatMap((p) => {
+              const out: number[] = [];
+              for (let i = 0; i < lyWin.nights; i++) {
+                const x = exact.get(`${p}|${format(addDays(lyWin.start, i), "yyyy-MM-dd")}`);
+                if (x) out.push(x);
+              }
+              return out;
+            });
+            const pa = avg(pv);
+            if (pa) return { v: pa, src: "Portfolio peers same holiday LY" };
+          }
+        }
         const py = subDays(night, 364);
         const pyKey = format(py, "yyyy-MM-dd");
         const e = exact.get(`${listingId}|${pyKey}`);
@@ -264,11 +336,14 @@ export function RateAuditor() {
         const wkd: number[] = [], wke: number[] = [];
         const bWkd: number[] = [], bWke: number[] = [];
         const srcs = new Set<string>();
-        let wkdN = 0, wkeN = 0;
+        let wkdN = 0, wkeN = 0, holN = 0;
+        const hols = new Set<string>();
         for (let i = 0; i < r.nights_count; i++) {
           const night = addDays(parseISO(r.check_in), i);
           const wk = isWeekend(night);
           wk ? wkeN++ : wkdN++;
+          const h = holidayOf(night);
+          if (h) { holN++; hols.add(h.win.name); }
           const b = benchFor(r.listing_id, night);
           if (!b) continue;
           srcs.add(b.src);
@@ -290,7 +365,34 @@ export function RateAuditor() {
           futureVar: null, recentLowCount: 0, diagnosis: "unknown" as Diagnosis,
           stayMonth: r.check_in.slice(0, 7), revpar: null, benchRevpar: null, revparVar: null, occ: null, benchOcc: null, revparSource: "—",
           losTier: "Standard", losAllowance: 0, netCredit: 0, adjVar: overallVar, relLead: null,
+          holiday: hols.size ? [...hols].join(", ") : null, holidayNights: holN,
+          calAdr: null, calVar: null, calBenchVar: null, origin: null,
         };
+      });
+      // Calendar rate on the stay nights (latest synced Guesty calendar price) to locate where a discount came from
+      const calMap = new Map<string, number>();
+      {
+        const minStay = reservations.reduce((m, r) => (r.check_in < m ? r.check_in : m), reservations[0].check_in);
+        const maxStay = reservations.reduce((m, r) => (r.check_out > m ? r.check_out : m), reservations[0].check_out);
+        for (let i = 0; i < listingIds.length; i += 50) {
+          const cal = await fetchAllPaged<any>((f, t) =>
+            supabase.from("capacity_calendar").select("listing_id, date, price")
+              .in("listing_id", listingIds.slice(i, i + 50)).gte("date", minStay).lt("date", maxStay)
+              .gt("price", 0).order("id").range(f, t));
+          cal.forEach((c) => calMap.set(`${c.listing_id}|${c.date}`, Number(c.price)));
+        }
+      }
+      if (stale()) return;
+      result.forEach((a) => {
+        const ps: number[] = [];
+        for (let i = 0; i < a.res.nights_count; i++) {
+          const p = calMap.get(`${a.res.listing_id}|${format(addDays(parseISO(a.res.check_in), i), "yyyy-MM-dd")}`);
+          if (p) ps.push(p);
+        }
+        if (ps.length < Math.ceil(a.res.nights_count / 2)) return;
+        a.calAdr = avg(ps);
+        a.calVar = a.calAdr ? ((a.grossAdr - a.calAdr) / a.calAdr) * 100 : null;
+        a.calBenchVar = a.calAdr && a.benchmarkAdr ? ((a.calAdr - a.benchmarkAdr) / a.benchmarkAdr) * 100 : null;
       });
       // Forward-looking: open calendar asking rates for the next 60 days vs the same benchmark
       const today = format(new Date(), "yyyy-MM-dd");
@@ -383,7 +485,16 @@ export function RateAuditor() {
         a.adjVar = a.overallVar === null ? null
           : a.overallVar >= 0 ? a.overallVar : Math.min(0, a.overallVar + allow + a.netCredit);
         a.score = adjustScore(scoreFor(a.adjVar), a.leadDays, a.relLead, a.adjVar);
+        // Holidays: majority-holiday stays discounted 10%+ (not last-minute) lose an extra point
+        const holidayHeavy = a.holidayNights > 0 && a.holidayNights >= a.res.nights_count / 2;
+        if (holidayHeavy && a.score !== null && (a.adjVar ?? 0) < -10 && !isLate(a.leadDays, a.relLead)) a.score = Math.max(1, a.score - 1);
         a.diagnosis = diagnose(a);
+        // Origin of the gap: calendar set low vs booking landed under the calendar (beyond the LOS allowance)
+        if (a.calVar !== null && a.calBenchVar !== null) {
+          const underCal = a.calVar + a.losAllowance < -10;
+          const calLow = a.calBenchVar < -10;
+          a.origin = underCal && calLow ? "mixed" : underCal ? "promo" : calLow ? "calendar" : "aligned";
+        }
       });
       if (stale()) return;
       setAudits(result);
@@ -419,7 +530,7 @@ export function RateAuditor() {
     (scoreFilter === "all" || (scoreFilter === "flagged" ? (a.score ?? 5) <= 2 : String(a.score) === scoreFilter)) &&
     (channelFilter === "all" || (a.res.source || "unknown") === channelFilter) &&
     (windowFilter === "all" || a.windowBucket === windowFilter) &&
-    (diagFilter === "all" || (diagFilter === "overdisc" ? overDisc(a) > 0 && a.losTier === "Monthly" : diagFilter === "overdisc_any" ? overDisc(a) > 0 : a.diagnosis === diagFilter))).sort(sorters[sortKey] || sorters.newest);
+    (diagFilter === "all" || (diagFilter === "overdisc" ? overDisc(a) > 0 && a.losTier === "Monthly" : diagFilter === "overdisc_any" ? overDisc(a) > 0 : diagFilter === "holiday" ? a.holidayNights > 0 : diagFilter.startsWith("origin_") ? a.origin === diagFilter.slice(7) : a.diagnosis === diagFilter))).sort(sorters[sortKey] || sorters.newest);
 
   const totalNights = filtered.reduce((s, a) => s + a.res.nights_count, 0);
   const avgNet = totalNights ? filtered.reduce((s, a) => s + a.netAdr * a.res.nights_count, 0) / totalNights : null;
@@ -433,7 +544,7 @@ export function RateAuditor() {
 
   const exportCsv = () => {
     downloadCsv(`rate-audit-${format(new Date(), "yyyy-MM-dd")}.csv`, [
-      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period", "Stay month", "Stay-month RevPAR", "Benchmark RevPAR", "RevPAR var %", "Stay-month occupancy %", "Benchmark occupancy %", "RevPAR benchmark source", "LOS tier", "LOS allowance pts", "LOS discount ceiling %", "Excess discount pts"],
+      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period", "Stay month", "Stay-month RevPAR", "Benchmark RevPAR", "RevPAR var %", "Stay-month occupancy %", "Benchmark occupancy %", "RevPAR benchmark source", "LOS tier", "LOS allowance pts", "LOS discount ceiling %", "Excess discount pts", "Holiday", "Holiday nights", "Calendar rate (latest sync)", "Booked vs calendar %", "Calendar vs benchmark %", "Discount origin"],
       ...filtered.map((a) => [
         listingNames[a.res.listing_id] || a.res.listing_id, a.res.guest_name || "", a.res.source || "",
         a.res.created_at_guesty ? format(new Date(a.res.created_at_guesty), "yyyy-MM-dd") : "",
@@ -445,6 +556,7 @@ export function RateAuditor() {
         DIAG[a.diagnosis].label, a.futureVar?.toFixed(1) ?? "", String(a.recentLowCount),
         a.stayMonth, a.revpar?.toFixed(2) ?? "", a.benchRevpar?.toFixed(2) ?? "", a.revparVar?.toFixed(1) ?? "", a.occ?.toFixed(1) ?? "", a.benchOcc?.toFixed(1) ?? "", a.revparSource,
         a.losTier, String(a.losAllowance), String(losCeiling(a.losTier) || ""), overDisc(a) ? overDisc(a).toFixed(1) : "",
+        a.holiday || "", String(a.holidayNights), a.calAdr?.toFixed(2) ?? "", a.calVar?.toFixed(1) ?? "", a.calBenchVar?.toFixed(1) ?? "", a.origin ? ORIGIN[a.origin].label : "",
       ]),
     ]);
   };
@@ -489,6 +601,10 @@ export function RateAuditor() {
             <SelectContent>
               <SelectItem value="all">All diagnoses</SelectItem>
               <SelectItem value="overdisc">Excessive monthly discounts</SelectItem>
+              <SelectItem value="holiday">Holiday stays</SelectItem>
+              <SelectItem value="origin_calendar">Origin: calendar priced low</SelectItem>
+              <SelectItem value="origin_promo">Origin: discount below calendar</SelectItem>
+              <SelectItem value="origin_mixed">Origin: calendar + discount</SelectItem>
               <SelectItem value="overdisc_any">Any stay over discount ceiling</SelectItem>
               {(Object.keys(DIAG) as Diagnosis[]).map((d) => <SelectItem key={d} value={d}>{d === "leak" ? "True pricing leaks" : DIAG[d].label}</SelectItem>)}
             </SelectContent>
@@ -567,6 +683,10 @@ export function RateAuditor() {
                         <Tooltip><TooltipTrigger asChild><Badge className={cn("whitespace-nowrap", DIAG[a.diagnosis].cls)}>{DIAG[a.diagnosis].label}</Badge></TooltipTrigger>
                           <TooltipContent className="max-w-xs">{DIAG[a.diagnosis].tip}</TooltipContent></Tooltip>
                         {overDisc(a) > 0 && <Badge variant="outline" className="ml-1 border-destructive text-destructive whitespace-nowrap">Excessive {a.losTier.toLowerCase()} discount</Badge>}
+                        {a.holiday && <Badge variant="outline" className="ml-1 whitespace-nowrap">{a.holiday}</Badge>}
+                        {a.origin && a.origin !== "aligned" && (a.overallVar ?? 0) < -10 && (
+                          <Tooltip><TooltipTrigger asChild><div className="text-xs mt-1 text-muted-foreground underline decoration-dotted">{ORIGIN[a.origin].label}</div></TooltipTrigger>
+                            <TooltipContent className="max-w-xs">{ORIGIN[a.origin].tip}</TooltipContent></Tooltip>)}
                         <div className={cn("text-xs mt-1", a.revparVar !== null && a.revparVar < -5 ? "text-destructive" : "text-muted-foreground")}>{monthLabel(a.stayMonth)} RevPAR {pct(a.revparVar)}</div>
                         {a.futureVar !== null && <div className="text-xs text-muted-foreground">Next 60d {pct(a.futureVar)}</div>}
                       </TableCell>
@@ -617,6 +737,10 @@ export function RateAuditor() {
                 ["Weekday vs benchmark", pct(s.weekdayVar)], ["Weekend vs benchmark", pct(s.weekendVar)],
                 ["Overall vs benchmark", pct(s.overallVar)],
                 ["Diagnosis", DIAG[s.diagnosis].label],
+                ["Holiday", s.holiday ? `${s.holiday} (${s.holidayNights} of ${s.res.nights_count} nights)` : "None"],
+                ["Calendar rate / night (latest sync)", fmt(s.calAdr)],
+                ["Booked vs calendar", pct(s.calVar)], ["Calendar vs benchmark", pct(s.calBenchVar)],
+                ["Discount origin", s.origin ? ORIGIN[s.origin].label : "No calendar data"],
                 ["Stay length tier", s.losTier === "Standard" ? "Standard (no LOS allowance)" : `${s.losTier} · ${s.losAllowance}% allowance · ${losCeiling(s.losTier)}% max`],
                 ...(overDisc(s) > 0 ? [["Over-discount", `Raw ${pct(s.overallVar)} vs ${losCeiling(s.losTier)}% max allowed: ${overDisc(s).toFixed(1)} pts excess`] as [string, string]] : []),
                 ["Stay-month RevPAR (on the books)", `${fmt(s.revpar)} · ${s.occ === null ? "—" : s.occ.toFixed(0)}% occ`],
@@ -643,7 +767,7 @@ export function RateAuditor() {
           </SheetContent>
         </Sheet>
         <p className="text-xs text-muted-foreground">
-          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point. Diagnosis weighs rate against stay-month RevPAR pacing: the property's on-the-books RevPAR for the arrival month vs what it had on the books for the same month at this point last year (falls back to Portfolio Peers' current RevPAR for that month). Yield strategy = rate 10%+ below but RevPAR 5%+ ahead; True pricing leak = rate 10%+ below and RevPAR 5%+ behind; Distress selling = rate 20%+ below and RevPAR 20%+ behind; Overpriced = rate 10%+ above but RevPAR 15%+ behind; Last-minute fill = discounted within 7 days of arrival; Recurring discount = repeated low pickups or low upcoming rates without a RevPAR signal; One-off = isolated discount. Monthly goals are not used as the benchmark.
+          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point. Diagnosis weighs rate against stay-month RevPAR pacing: the property's on-the-books RevPAR for the arrival month vs what it had on the books for the same month at this point last year (falls back to Portfolio Peers' current RevPAR for that month). Yield strategy = rate 10%+ below but RevPAR 5%+ ahead; True pricing leak = rate 10%+ below and RevPAR 5%+ behind; Distress selling = rate 20%+ below and RevPAR 20%+ behind; Overpriced = rate 10%+ above but RevPAR 15%+ behind; Last-minute fill = discounted within 7 days of arrival; Recurring discount = repeated low pickups or low upcoming rates without a RevPAR signal; One-off = isolated discount. Monthly goals are not used as the benchmark. Holiday nights (MLK, Presidents' Day, Memorial Day, July 4th, Labor Day, Thanksgiving, Christmas–New Year's) are compared to the same holiday last year even when its dates moved; holiday-heavy stays discounted 10%+ (not last-minute) lose an extra point. Discount origin compares the booked rate with the latest synced calendar rate for those nights: "Calendar priced low" = calendar itself 10%+ under benchmark; "Discount below calendar" = booking 10%+ under the calendar after the stay-length allowance.
         </p>
       </div>
     </TooltipProvider>
