@@ -336,11 +336,14 @@ export function RateAuditor() {
         const wkd: number[] = [], wke: number[] = [];
         const bWkd: number[] = [], bWke: number[] = [];
         const srcs = new Set<string>();
-        let wkdN = 0, wkeN = 0;
+        let wkdN = 0, wkeN = 0, holN = 0;
+        const hols = new Set<string>();
         for (let i = 0; i < r.nights_count; i++) {
           const night = addDays(parseISO(r.check_in), i);
           const wk = isWeekend(night);
           wk ? wkeN++ : wkdN++;
+          const h = holidayOf(night);
+          if (h) { holN++; hols.add(h.win.name); }
           const b = benchFor(r.listing_id, night);
           if (!b) continue;
           srcs.add(b.src);
@@ -362,7 +365,34 @@ export function RateAuditor() {
           futureVar: null, recentLowCount: 0, diagnosis: "unknown" as Diagnosis,
           stayMonth: r.check_in.slice(0, 7), revpar: null, benchRevpar: null, revparVar: null, occ: null, benchOcc: null, revparSource: "—",
           losTier: "Standard", losAllowance: 0, netCredit: 0, adjVar: overallVar, relLead: null,
+          holiday: hols.size ? [...hols].join(", ") : null, holidayNights: holN,
+          calAdr: null, calVar: null, calBenchVar: null, origin: null,
         };
+      });
+      // Calendar rate on the stay nights (latest synced Guesty calendar price) to locate where a discount came from
+      const calMap = new Map<string, number>();
+      {
+        const minStay = reservations.reduce((m, r) => (r.check_in < m ? r.check_in : m), reservations[0].check_in);
+        const maxStay = reservations.reduce((m, r) => (r.check_out > m ? r.check_out : m), reservations[0].check_out);
+        for (let i = 0; i < listingIds.length; i += 50) {
+          const cal = await fetchAllPaged<any>((f, t) =>
+            supabase.from("capacity_calendar").select("listing_id, date, price")
+              .in("listing_id", listingIds.slice(i, i + 50)).gte("date", minStay).lt("date", maxStay)
+              .gt("price", 0).order("id").range(f, t));
+          cal.forEach((c) => calMap.set(`${c.listing_id}|${c.date}`, Number(c.price)));
+        }
+      }
+      if (stale()) return;
+      result.forEach((a) => {
+        const ps: number[] = [];
+        for (let i = 0; i < a.res.nights_count; i++) {
+          const p = calMap.get(`${a.res.listing_id}|${format(addDays(parseISO(a.res.check_in), i), "yyyy-MM-dd")}`);
+          if (p) ps.push(p);
+        }
+        if (ps.length < Math.ceil(a.res.nights_count / 2)) return;
+        a.calAdr = avg(ps);
+        a.calVar = a.calAdr ? ((a.grossAdr - a.calAdr) / a.calAdr) * 100 : null;
+        a.calBenchVar = a.calAdr && a.benchmarkAdr ? ((a.calAdr - a.benchmarkAdr) / a.benchmarkAdr) * 100 : null;
       });
       // Forward-looking: open calendar asking rates for the next 60 days vs the same benchmark
       const today = format(new Date(), "yyyy-MM-dd");
