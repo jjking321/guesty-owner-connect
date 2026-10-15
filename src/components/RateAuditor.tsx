@@ -110,7 +110,7 @@ async function fetchAllPaged<T>(build: (from: number, to: number) => any): Promi
 const fmt = (n: number | null | undefined) =>
   n === null || n === undefined || !isFinite(n) ? "—" : `$${Math.round(n).toLocaleString("en-US")}`;
 const monthLabel = (m?: string) => { const d = m ? parseISO(`${m}-01`) : null; return d && !isNaN(d.getTime()) ? format(d, "MMM") : "Stay-month"; };
-const pct = (n: number | null) => (n === null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`);
+const pct = (n: number | null | undefined) => (n == null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`);
 
 export function RateAuditor() {
   const [period, setPeriod] = useState("1");
