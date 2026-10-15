@@ -220,7 +220,15 @@ export function RevenueReview({ reservations, listingIds, listings }: Props) {
       if (!n30.get(h.id) && b30 < 25)
         issues.push({ id: h.id, name: h.name, severity: "high", issue: "No bookings in next 30 days", fix: "Check listing visibility and pricing; run last-minute discount" });
     }
-    issues.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "high" ? -1 : 1));
+    const grouped = new Map<string, { id: string; name: string; severity: "high" | "medium"; items: { issue: string; fix: string; severity: "high" | "medium" }[] }>();
+    for (const i of issues) {
+      const g = grouped.get(i.id) ?? { id: i.id, name: i.name, severity: "medium" as const, items: [] };
+      g.items.push({ issue: i.issue, fix: i.fix, severity: i.severity });
+      if (i.severity === "high") g.severity = "high";
+      grouped.set(i.id, g);
+    }
+    const groupedIssues = [...grouped.values()].sort((a, b) =>
+      a.severity !== b.severity ? (a.severity === "high" ? -1 : 1) : b.items.length - a.items.length);
 
     return {
       mtd: { rev: c.revenue, lyRev: l.revenue, goalMtd, occ: availC ? (c.nights / availC) * 100 : 0, lyOcc: availL ? (l.nights / availL) * 100 : 0,
@@ -228,7 +236,7 @@ export function RevenueReview({ reservations, listingIds, listings }: Props) {
         revpar: availC ? c.revenue / availC : 0, lyRevpar: availL ? l.revenue / availL : 0,
         goalRevpar: availC ? goalMtd / availC : 0 },
       pace: { cur: cf.revenue, ly: lf.revenue, goal: goalTotal },
-      otb, bottom, issues,
+      otb, bottom, issues: groupedIssues, issueCount: issues.length,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [res, listingIds, blockedByListing, goals, benchmark, listings]);
@@ -277,7 +285,7 @@ export function RevenueReview({ reservations, listingIds, listings }: Props) {
       [], ["Bottom 10 homes", "Month OTB", "Benchmark", "Variance", "Driver"],
       ...data.bottom.map((h) => [h.name, money(h.revenue), money(useTarget ? h.goal : h.ly), pct(h.varPct), h.occ < h.lyOcc ? "Occupancy" : "ADR"]),
       [], ["Owner-impacting issues", "Issue", "Fix"],
-      ...data.issues.map((i) => [i.name, i.issue, i.fix])];
+      ...data.issues.map((i) => [i.name, i.items.map((x) => x.issue).join("; "), i.items.map((x) => x.fix).join("; ")])];
     const csv = lines.map((l) => l.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -353,19 +361,19 @@ export function RevenueReview({ reservations, listingIds, listings }: Props) {
         </div>
 
         <div>
-          <h3 className="font-semibold mb-2">Owner-impacting issues <Badge variant="secondary" className="ml-1">{data.issues.length}</Badge></h3>
+          <h3 className="font-semibold mb-2">Owner-impacting issues <Badge variant="secondary" className="ml-1">{data.issues.length} properties · {data.issueCount} issues</Badge></h3>
           <Table>
             <TableHeader>
-              <TableRow><TableHead>Property</TableHead><TableHead>Severity</TableHead><TableHead>Issue</TableHead><TableHead>Fix</TableHead></TableRow>
+              <TableRow><TableHead>Property</TableHead><TableHead>Severity</TableHead><TableHead>Issues</TableHead><TableHead>Fix</TableHead></TableRow>
             </TableHeader>
             <TableBody>
               {data.issues.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">No issues detected</TableCell></TableRow>}
-              {data.issues.slice(0, 25).map((i, idx) => (
-                <TableRow key={i.id + idx} className="cursor-pointer" onClick={() => navigate(`/listings/${i.id}`)}>
+              {data.issues.slice(0, 25).map((i) => (
+                <TableRow key={i.id} className="cursor-pointer align-top" onClick={() => navigate(`/listings/${i.id}`)}>
                   <TableCell className="font-medium">{i.name}</TableCell>
                   <TableCell><Badge variant={i.severity === "high" ? "destructive" : "secondary"}>{i.severity}</Badge></TableCell>
-                  <TableCell>{i.issue}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{i.fix}</TableCell>
+                  <TableCell><ul className="list-disc pl-4 space-y-1">{i.items.map((x, k) => <li key={k}>{x.issue}</li>)}</ul></TableCell>
+                  <TableCell className="text-sm text-muted-foreground"><ul className="list-disc pl-4 space-y-1">{i.items.map((x, k) => <li key={k}>{x.fix}</li>)}</ul></TableCell>
                 </TableRow>
               ))}
             </TableBody>
