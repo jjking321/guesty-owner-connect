@@ -398,7 +398,7 @@ export function RateAuditor() {
 
   const exportCsv = () => {
     downloadCsv(`rate-audit-${format(new Date(), "yyyy-MM-dd")}.csv`, [
-      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period"],
+      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period", "Stay month", "Stay-month RevPAR", "Benchmark RevPAR", "RevPAR var %", "Stay-month occupancy %", "Benchmark occupancy %", "RevPAR benchmark source"],
       ...filtered.map((a) => [
         listingNames[a.res.listing_id] || a.res.listing_id, a.res.guest_name || "", a.res.source || "",
         a.res.created_at_guesty ? format(new Date(a.res.created_at_guesty), "yyyy-MM-dd") : "",
@@ -408,6 +408,7 @@ export function RateAuditor() {
         a.score ? String(a.score) : "", a.benchmarkSource,
         a.leadDays?.toString() ?? "", a.windowBucket, a.typicalLead?.toFixed(0) ?? "", a.leadVar?.toFixed(0) ?? "",
         DIAG[a.diagnosis].label, a.futureVar?.toFixed(1) ?? "", String(a.recentLowCount),
+        a.stayMonth, a.revpar?.toFixed(2) ?? "", a.benchRevpar?.toFixed(2) ?? "", a.revparVar?.toFixed(1) ?? "", a.occ?.toFixed(1) ?? "", a.benchOcc?.toFixed(1) ?? "", a.revparSource,
       ]),
     ]);
   };
@@ -451,7 +452,7 @@ export function RateAuditor() {
             <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All diagnoses</SelectItem>
-              {(Object.keys(DIAG) as Diagnosis[]).map((d) => <SelectItem key={d} value={d}>{d === "systemic" ? "Systemic leaks only" : DIAG[d].label}</SelectItem>)}
+              {(Object.keys(DIAG) as Diagnosis[]).map((d) => <SelectItem key={d} value={d}>{d === "leak" ? "True pricing leaks" : DIAG[d].label}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={sortKey} onValueChange={setSortKey}>
@@ -481,7 +482,7 @@ export function RateAuditor() {
             ["Bookings picked up", String(filtered.length), `${totalNights} nights`],
             ["Avg net ADR", fmt(avgNet), "After estimated channel fees"],
             ["Rate vs benchmark", pct(avgVar), `${scored.length} bookings with a benchmark`],
-            ["Flagged bookings", String(flagged), `${filtered.filter((a) => a.diagnosis === "systemic").length} systemic pricing leaks`],
+            ["Flagged bookings", String(flagged), `${filtered.filter((a) => ["leak", "distress"].includes(a.diagnosis)).length} true leaks · ${filtered.filter((a) => a.diagnosis === "yield").length} yield plays`],
             ["Avg booking window", avgLead === null ? "—" : `${Math.round(avgLead)}d`, avgLeadVar === null ? "No history" : `${Math.abs(Math.round(avgLeadVar))}d ${avgLeadVar >= 0 ? "earlier" : "later"} than typical`],
             ["Last-minute share", lastMinPct === null ? "—" : `${lastMinPct.toFixed(0)}%`, "Booked 0–7 days before arrival"],
           ].map(([t, v, d]) => (
@@ -527,7 +528,8 @@ export function RateAuditor() {
                       <TableCell>
                         <Tooltip><TooltipTrigger asChild><Badge className={cn("whitespace-nowrap", DIAG[a.diagnosis].cls)}>{DIAG[a.diagnosis].label}</Badge></TooltipTrigger>
                           <TooltipContent className="max-w-xs">{DIAG[a.diagnosis].tip}</TooltipContent></Tooltip>
-                        {a.futureVar !== null && <div className="text-xs text-muted-foreground mt-1">Next 60d {pct(a.futureVar)}</div>}
+                        <div className={cn("text-xs mt-1", a.revparVar !== null && a.revparVar < -5 ? "text-destructive" : "text-muted-foreground")}>{format(parseISO(`${a.stayMonth}-01`), "MMM")} RevPAR {pct(a.revparVar)}</div>
+                        {a.futureVar !== null && <div className="text-xs text-muted-foreground">Next 60d {pct(a.futureVar)}</div>}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
                         {format(parseISO(a.res.check_in), "MMM d")} – {format(parseISO(a.res.check_out), "MMM d")}
@@ -576,6 +578,9 @@ export function RateAuditor() {
                 ["Weekday vs benchmark", pct(s.weekdayVar)], ["Weekend vs benchmark", pct(s.weekendVar)],
                 ["Overall vs benchmark", pct(s.overallVar)],
                 ["Diagnosis", DIAG[s.diagnosis].label],
+                ["Stay-month RevPAR (on the books)", `${fmt(s.revpar)} · ${s.occ === null ? "—" : s.occ.toFixed(0)}% occ`],
+                ["Benchmark RevPAR", `${fmt(s.benchRevpar)} · ${s.benchOcc === null ? "—" : s.benchOcc.toFixed(0)}% occ`],
+                ["RevPAR vs benchmark", pct(s.revparVar)], ["RevPAR benchmark", s.revparSource],
                 ["Next 60d open-date rates vs benchmark", pct(s.futureVar)],
                 ["Low pickups (>15% below) this period", String(s.recentLowCount)],
               ];
@@ -597,7 +602,7 @@ export function RateAuditor() {
           </SheetContent>
         </Sheet>
         <p className="text-xs text-muted-foreground">
-          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point. Diagnosis: Systemic leak = 2+ bookings over 15% below benchmark in this period, open dates in the next 60 days priced over 10% below benchmark, or a 30+ day-out booking over 20% below; Last-minute fill = discounted within 7 days of arrival; One-off = an isolated discount with healthy future rates.
+          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point. Diagnosis weighs rate against stay-month RevPAR pacing: the property's on-the-books RevPAR for the arrival month vs what it had on the books for the same month at this point last year (falls back to Portfolio Peers' current RevPAR for that month). Yield strategy = rate 10%+ below but RevPAR 5%+ ahead; True pricing leak = rate 10%+ below and RevPAR 5%+ behind; Distress selling = rate 20%+ below and RevPAR 20%+ behind; Overpriced = rate 10%+ above but RevPAR 15%+ behind; Last-minute fill = discounted within 7 days of arrival; Recurring discount = repeated low pickups or low upcoming rates without a RevPAR signal; One-off = isolated discount. Monthly goals are not used as the benchmark.
         </p>
       </div>
     </TooltipProvider>
