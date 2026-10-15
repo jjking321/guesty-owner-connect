@@ -173,23 +173,25 @@ export function RevenueReview({ reservations, listingIds, listings }: Props) {
 
     // Per-listing month pace (full month OTB vs LY pace)
     const name = new Map(listings.map((x: any) => [String(x.id), x.nickname || x.id]));
-    const perListing = listingIds.map((id) => {
-      const cur = curFull.get(id) || { revenue: 0, nights: 0 };
-      const ly = statsFor(fullMLY, false).get(id); // computed lazily below
-      return { id, cur, ly };
-    });
+    const listingById = new Map(listings.map((x: any) => [String(x.id), x]));
+    const goalById = new Map(goals.map((g: any) => [g.listing_id, g]));
+    const perListing = listingIds.map((id) => ({ id, cur: curFull.get(id) || { revenue: 0, nights: 0 } }));
     const lyFullActual = statsFor(fullMLY, false);
     const daysM = daysInMonth;
+    const mS = iso(monthStart), mE = iso(monthEnd);
     const homes = perListing.map((p) => {
       const ly = lyFullPace.get(p.id) || lyFullActual.get(p.id) || { revenue: 0, nights: 0 };
-      const availNow = Math.max(1, daysM - [...(blockedByListing.get(p.id) || [])].filter((d) => d >= iso(monthStart) && d < iso(monthEnd)).length);
+      let blockedM = 0;
+      const bs = blockedByListing.get(p.id);
+      if (bs) bs.forEach((d) => { if (d >= mS && d < mE) blockedM++; });
+      const availNow = Math.max(1, daysM - blockedM);
       const revpar = p.cur.revenue / availNow;
       const lyRevpar = ly.revenue / daysM;
       const adr = p.cur.nights ? p.cur.revenue / p.cur.nights : 0;
       const lyAdr = ly.nights ? ly.revenue / ly.nights : 0;
       const occ = (p.cur.nights / availNow) * 100;
       const lyOcc = (ly.nights / daysM) * 100;
-      const g = goals.find((x) => x.listing_id === p.id);
+      const g = goalById.get(p.id);
       const goal = g ? Number(g.goal_revenue) || Number(g.projection_revenue) || 0 : 0;
       return {
         id: p.id, name: String(name.get(p.id) || p.id), revenue: p.cur.revenue, ly: ly.revenue, goal,
@@ -206,7 +208,7 @@ export function RevenueReview({ reservations, listingIds, listings }: Props) {
     const n30 = statsFor(next30, false);
     const issues: { id: string; name: string; issue: string; fix: string; severity: "high" | "medium" }[] = [];
     for (const h of homes) {
-      const l = listings.find((x: any) => String(x.id) === h.id);
+      const l: any = listingById.get(h.id);
       if (h.hasBench && h.varPct !== null && h.varPct < -25)
         issues.push({ id: h.id, name: h.name, severity: "high", issue: `Month revenue ${pct(h.varPct)} vs ${benchmark === "ly" ? "LY" : "target"}`, fix: h.occ < h.lyOcc ? "Lower near-term rates / relax min-stay to recover occupancy" : "Occupancy is fine — review rate strategy (ADR down)" });
       const r = Number(l?.live_airbnb_rating);
