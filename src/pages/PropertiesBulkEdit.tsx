@@ -1312,7 +1312,7 @@ export default function PropertiesBulkEdit() {
               </div>
               {sameStoreOnly && (
                 <span className="text-xs text-muted-foreground">
-                  Showing {sameStoreListingIds.length} of {listingIds.length} properties with data in both {new Date().getFullYear() - 1} and {new Date().getFullYear()}
+                  Showing {effectivePacingListingIds.length} of {managedListingIdSet.size} active properties with data in both {new Date().getFullYear() - 1} and {new Date().getFullYear()}
                 </span>
               )}
             </div>
