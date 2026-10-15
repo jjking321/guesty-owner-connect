@@ -530,7 +530,7 @@ export function RateAuditor() {
     (scoreFilter === "all" || (scoreFilter === "flagged" ? (a.score ?? 5) <= 2 : String(a.score) === scoreFilter)) &&
     (channelFilter === "all" || (a.res.source || "unknown") === channelFilter) &&
     (windowFilter === "all" || a.windowBucket === windowFilter) &&
-    (diagFilter === "all" || (diagFilter === "overdisc" ? overDisc(a) > 0 && a.losTier === "Monthly" : diagFilter === "overdisc_any" ? overDisc(a) > 0 : a.diagnosis === diagFilter))).sort(sorters[sortKey] || sorters.newest);
+    (diagFilter === "all" || (diagFilter === "overdisc" ? overDisc(a) > 0 && a.losTier === "Monthly" : diagFilter === "overdisc_any" ? overDisc(a) > 0 : diagFilter === "holiday" ? a.holidayNights > 0 : diagFilter.startsWith("origin_") ? a.origin === diagFilter.slice(7) : a.diagnosis === diagFilter))).sort(sorters[sortKey] || sorters.newest);
 
   const totalNights = filtered.reduce((s, a) => s + a.res.nights_count, 0);
   const avgNet = totalNights ? filtered.reduce((s, a) => s + a.netAdr * a.res.nights_count, 0) / totalNights : null;
@@ -544,7 +544,7 @@ export function RateAuditor() {
 
   const exportCsv = () => {
     downloadCsv(`rate-audit-${format(new Date(), "yyyy-MM-dd")}.csv`, [
-      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period", "Stay month", "Stay-month RevPAR", "Benchmark RevPAR", "RevPAR var %", "Stay-month occupancy %", "Benchmark occupancy %", "RevPAR benchmark source", "LOS tier", "LOS allowance pts", "LOS discount ceiling %", "Excess discount pts"],
+      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period", "Stay month", "Stay-month RevPAR", "Benchmark RevPAR", "RevPAR var %", "Stay-month occupancy %", "Benchmark occupancy %", "RevPAR benchmark source", "LOS tier", "LOS allowance pts", "LOS discount ceiling %", "Excess discount pts", "Holiday", "Holiday nights", "Calendar rate (latest sync)", "Booked vs calendar %", "Calendar vs benchmark %", "Discount origin"],
       ...filtered.map((a) => [
         listingNames[a.res.listing_id] || a.res.listing_id, a.res.guest_name || "", a.res.source || "",
         a.res.created_at_guesty ? format(new Date(a.res.created_at_guesty), "yyyy-MM-dd") : "",
@@ -556,6 +556,7 @@ export function RateAuditor() {
         DIAG[a.diagnosis].label, a.futureVar?.toFixed(1) ?? "", String(a.recentLowCount),
         a.stayMonth, a.revpar?.toFixed(2) ?? "", a.benchRevpar?.toFixed(2) ?? "", a.revparVar?.toFixed(1) ?? "", a.occ?.toFixed(1) ?? "", a.benchOcc?.toFixed(1) ?? "", a.revparSource,
         a.losTier, String(a.losAllowance), String(losCeiling(a.losTier) || ""), overDisc(a) ? overDisc(a).toFixed(1) : "",
+        a.holiday || "", String(a.holidayNights), a.calAdr?.toFixed(2) ?? "", a.calVar?.toFixed(1) ?? "", a.calBenchVar?.toFixed(1) ?? "", a.origin ? ORIGIN[a.origin].label : "",
       ]),
     ]);
   };
@@ -600,6 +601,10 @@ export function RateAuditor() {
             <SelectContent>
               <SelectItem value="all">All diagnoses</SelectItem>
               <SelectItem value="overdisc">Excessive monthly discounts</SelectItem>
+              <SelectItem value="holiday">Holiday stays</SelectItem>
+              <SelectItem value="origin_calendar">Origin: calendar priced low</SelectItem>
+              <SelectItem value="origin_promo">Origin: discount below calendar</SelectItem>
+              <SelectItem value="origin_mixed">Origin: calendar + discount</SelectItem>
               <SelectItem value="overdisc_any">Any stay over discount ceiling</SelectItem>
               {(Object.keys(DIAG) as Diagnosis[]).map((d) => <SelectItem key={d} value={d}>{d === "leak" ? "True pricing leaks" : DIAG[d].label}</SelectItem>)}
             </SelectContent>
@@ -678,6 +683,10 @@ export function RateAuditor() {
                         <Tooltip><TooltipTrigger asChild><Badge className={cn("whitespace-nowrap", DIAG[a.diagnosis].cls)}>{DIAG[a.diagnosis].label}</Badge></TooltipTrigger>
                           <TooltipContent className="max-w-xs">{DIAG[a.diagnosis].tip}</TooltipContent></Tooltip>
                         {overDisc(a) > 0 && <Badge variant="outline" className="ml-1 border-destructive text-destructive whitespace-nowrap">Excessive {a.losTier.toLowerCase()} discount</Badge>}
+                        {a.holiday && <Badge variant="outline" className="ml-1 whitespace-nowrap">{a.holiday}</Badge>}
+                        {a.origin && a.origin !== "aligned" && (a.overallVar ?? 0) < -10 && (
+                          <Tooltip><TooltipTrigger asChild><div className="text-xs mt-1 text-muted-foreground underline decoration-dotted">{ORIGIN[a.origin].label}</div></TooltipTrigger>
+                            <TooltipContent className="max-w-xs">{ORIGIN[a.origin].tip}</TooltipContent></Tooltip>)}
                         <div className={cn("text-xs mt-1", a.revparVar !== null && a.revparVar < -5 ? "text-destructive" : "text-muted-foreground")}>{monthLabel(a.stayMonth)} RevPAR {pct(a.revparVar)}</div>
                         {a.futureVar !== null && <div className="text-xs text-muted-foreground">Next 60d {pct(a.futureVar)}</div>}
                       </TableCell>
@@ -728,6 +737,10 @@ export function RateAuditor() {
                 ["Weekday vs benchmark", pct(s.weekdayVar)], ["Weekend vs benchmark", pct(s.weekendVar)],
                 ["Overall vs benchmark", pct(s.overallVar)],
                 ["Diagnosis", DIAG[s.diagnosis].label],
+                ["Holiday", s.holiday ? `${s.holiday} (${s.holidayNights} of ${s.res.nights_count} nights)` : "None"],
+                ["Calendar rate / night (latest sync)", fmt(s.calAdr)],
+                ["Booked vs calendar", pct(s.calVar)], ["Calendar vs benchmark", pct(s.calBenchVar)],
+                ["Discount origin", s.origin ? ORIGIN[s.origin].label : "No calendar data"],
                 ["Stay length tier", s.losTier === "Standard" ? "Standard (no LOS allowance)" : `${s.losTier} · ${s.losAllowance}% allowance · ${losCeiling(s.losTier)}% max`],
                 ...(overDisc(s) > 0 ? [["Over-discount", `Raw ${pct(s.overallVar)} vs ${losCeiling(s.losTier)}% max allowed: ${overDisc(s).toFixed(1)} pts excess`] as [string, string]] : []),
                 ["Stay-month RevPAR (on the books)", `${fmt(s.revpar)} · ${s.occ === null ? "—" : s.occ.toFixed(0)}% occ`],
@@ -754,7 +767,7 @@ export function RateAuditor() {
           </SheetContent>
         </Sheet>
         <p className="text-xs text-muted-foreground">
-          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point. Diagnosis weighs rate against stay-month RevPAR pacing: the property's on-the-books RevPAR for the arrival month vs what it had on the books for the same month at this point last year (falls back to Portfolio Peers' current RevPAR for that month). Yield strategy = rate 10%+ below but RevPAR 5%+ ahead; True pricing leak = rate 10%+ below and RevPAR 5%+ behind; Distress selling = rate 20%+ below and RevPAR 20%+ behind; Overpriced = rate 10%+ above but RevPAR 15%+ behind; Last-minute fill = discounted within 7 days of arrival; Recurring discount = repeated low pickups or low upcoming rates without a RevPAR signal; One-off = isolated discount. Monthly goals are not used as the benchmark.
+          Each night is compared to the same weekday last year (364 days back), falling back to last year's same-month weekday/weekend average, then to your Portfolio Peers. Weekend = Fri & Sat nights. Score: 5 = 10%+ above, 4 = at/above, 3 = up to 10% below, 2 = 10–25% below, 1 = more than 25% below. Rates compare gross accommodation fare; net ADR subtracts the estimated channel fee. Booking window = days between booking and check-in, compared to the property's typical lead time for that arrival month (past 2 years). Last-minute discounts (0–7d) score no lower than 3; bookings locked in 60+ days out at more than 10% below benchmark lose an extra point. Diagnosis weighs rate against stay-month RevPAR pacing: the property's on-the-books RevPAR for the arrival month vs what it had on the books for the same month at this point last year (falls back to Portfolio Peers' current RevPAR for that month). Yield strategy = rate 10%+ below but RevPAR 5%+ ahead; True pricing leak = rate 10%+ below and RevPAR 5%+ behind; Distress selling = rate 20%+ below and RevPAR 20%+ behind; Overpriced = rate 10%+ above but RevPAR 15%+ behind; Last-minute fill = discounted within 7 days of arrival; Recurring discount = repeated low pickups or low upcoming rates without a RevPAR signal; One-off = isolated discount. Monthly goals are not used as the benchmark. Holiday nights (MLK, Presidents' Day, Memorial Day, July 4th, Labor Day, Thanksgiving, Christmas–New Year's) are compared to the same holiday last year even when its dates moved; holiday-heavy stays discounted 10%+ (not last-minute) lose an extra point. Discount origin compares the booked rate with the latest synced calendar rate for those nights: "Calendar priced low" = calendar itself 10%+ under benchmark; "Discount below calendar" = booking 10%+ under the calendar after the stay-length allowance.
         </p>
       </div>
     </TooltipProvider>
