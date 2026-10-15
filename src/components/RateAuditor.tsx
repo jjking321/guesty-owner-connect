@@ -28,6 +28,7 @@ type Audit = {
   futureVar: number | null; recentLowCount: number; diagnosis: Diagnosis;
   stayMonth: string; revpar: number | null; benchRevpar: number | null; revparVar: number | null;
   occ: number | null; benchOcc: number | null; revparSource: string;
+  losTier: string; losAllowance: number; netCredit: number; adjVar: number | null; relLead: number | null;
 };
 
 const WINDOWS: [string, number, number][] = [
@@ -50,8 +51,13 @@ const DIAG: Record<Diagnosis, { label: string; cls: string; tip: string }> = {
   unknown: { label: "No benchmark", cls: "border bg-transparent text-muted-foreground", tip: "Not enough history to diagnose." },
 };
 
-function diagnose(a: { overallVar: number | null; leadDays: number | null; futureVar: number | null; recentLowCount: number; revparVar: number | null }): Diagnosis {
-  const v = a.overallVar, rv = a.revparVar;
+// Length-of-stay tiers: expected discount tolerance (pts) for longer stays
+const losOf = (n: number): [string, number] => (n >= 28 ? ["Monthly", 25] : n >= 7 ? ["Weekly", 12] : ["Standard", 0]);
+// Late relative to this property's own curve: within 30% of typical lead (or ≤7d absolute)
+const isLate = (lead: number | null, rel: number | null) => (lead !== null && lead <= 7) || (rel !== null && rel <= 0.3);
+
+function diagnose(a: { adjVar: number | null; leadDays: number | null; relLead: number | null; futureVar: number | null; recentLowCount: number; revparVar: number | null }): Diagnosis {
+  const v = a.adjVar, rv = a.revparVar;
   if (v === null) return "unknown";
   if (rv !== null) {
     if (v < -20 && rv < -20) return "distress";
@@ -59,18 +65,20 @@ function diagnose(a: { overallVar: number | null; leadDays: number | null; futur
     if (v < -10 && rv >= 5) return "yield";
   }
   if (v >= -10) return "on_target";
-  if (a.leadDays !== null && a.leadDays <= 7) return "tactical";
+  if (isLate(a.leadDays, a.relLead)) return "tactical";
   if (rv !== null && rv < -5) return "leak";
   const futureLow = a.futureVar !== null && a.futureVar < -10;
-  if (futureLow || a.recentLowCount >= 2 || ((a.leadDays ?? 0) > 30 && v < -20)) return "systemic";
+  const farAhead = (a.relLead !== null ? a.relLead > 1.5 : (a.leadDays ?? 0) > 30) && v < -20;
+  if (futureLow || a.recentLowCount >= 2 || farAhead) return "systemic";
   return "isolated";
 }
 
-// Context-aware score: late discounts are expected; early discounts locked in far out are penalized harder
-function adjustScore(base: number | null, lead: number | null, v: number | null): number | null {
-  if (base === null || lead === null || v === null) return base;
-  if (lead <= 7 && v < 0 && v >= -25) return Math.max(base, 3);
-  if (lead > 60 && v < -10) return Math.max(1, base - 1);
+// Context-aware score: late discounts (vs the property's own curve) are expected; discounts locked in far ahead are penalized harder
+function adjustScore(base: number | null, lead: number | null, rel: number | null, v: number | null): number | null {
+  if (base === null || v === null) return base;
+  if (isLate(lead, rel) && v < 0 && v >= -25) return Math.max(base, 3);
+  const far = rel !== null ? rel > 1.5 : (lead ?? 0) > 60;
+  if (far && v < -10) return Math.max(1, base - 1);
   return base;
 }
 
