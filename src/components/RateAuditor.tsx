@@ -26,6 +26,8 @@ type Audit = {
   weekdayNights: number; weekendNights: number;
   leadDays: number | null; windowBucket: string; typicalLead: number | null; leadVar: number | null;
   futureVar: number | null; recentLowCount: number; diagnosis: Diagnosis;
+  stayMonth: string; revpar: number | null; benchRevpar: number | null; revparVar: number | null;
+  occ: number | null; benchOcc: number | null; revparSource: string;
 };
 
 const WINDOWS: [string, number, number][] = [
@@ -267,6 +269,7 @@ export function RateAuditor() {
           score: adjustScore(scoreFor(overallVar), leadDays, overallVar), weekdayNights: wkdN, weekendNights: wkeN,
           leadDays, windowBucket: bucketOf(leadDays), typicalLead, leadVar: leadDays !== null && typicalLead !== null ? leadDays - typicalLead : null,
           futureVar: null, recentLowCount: 0, diagnosis: "unknown" as Diagnosis,
+          stayMonth: r.check_in.slice(0, 7), revpar: null, benchRevpar: null, revparVar: null, occ: null, benchOcc: null, revparSource: "—",
         };
       });
       // Forward-looking: open calendar asking rates for the next 60 days vs the same benchmark
