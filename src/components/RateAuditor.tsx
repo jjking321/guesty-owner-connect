@@ -109,6 +109,7 @@ async function fetchAllPaged<T>(build: (from: number, to: number) => any): Promi
 
 const fmt = (n: number | null | undefined) =>
   n === null || n === undefined || !isFinite(n) ? "—" : `$${Math.round(n).toLocaleString("en-US")}`;
+const monthLabel = (m?: string) => { const d = m ? parseISO(`${m}-01`) : null; return d && !isNaN(d.getTime()) ? format(d, "MMM") : "Stay-month"; };
 const pct = (n: number | null) => (n === null ? "—" : `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`);
 
 export function RateAuditor() {
@@ -528,7 +529,7 @@ export function RateAuditor() {
                       <TableCell>
                         <Tooltip><TooltipTrigger asChild><Badge className={cn("whitespace-nowrap", DIAG[a.diagnosis].cls)}>{DIAG[a.diagnosis].label}</Badge></TooltipTrigger>
                           <TooltipContent className="max-w-xs">{DIAG[a.diagnosis].tip}</TooltipContent></Tooltip>
-                        <div className={cn("text-xs mt-1", a.revparVar !== null && a.revparVar < -5 ? "text-destructive" : "text-muted-foreground")}>{format(parseISO(`${a.stayMonth}-01`), "MMM")} RevPAR {pct(a.revparVar)}</div>
+                        <div className={cn("text-xs mt-1", a.revparVar !== null && a.revparVar < -5 ? "text-destructive" : "text-muted-foreground")}>{monthLabel(a.stayMonth)} RevPAR {pct(a.revparVar)}</div>
                         {a.futureVar !== null && <div className="text-xs text-muted-foreground">Next 60d {pct(a.futureVar)}</div>}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
