@@ -25,14 +25,27 @@ type Audit = {
   benchmarkAdr: number | null; benchmarkSource: string; score: number | null;
   weekdayNights: number; weekendNights: number;
   leadDays: number | null; windowBucket: string; typicalLead: number | null; leadVar: number | null;
+  futureVar: number | null; recentLowCount: number; diagnosis: Diagnosis;
 };
 
-const WINDOWS: [string, number, number][] = [
-  ["Last-minute", 0, 7], ["Near-term", 8, 30], ["Standard", 31, 60], ["Advance", 61, 120], ["Far advance", 121, 99999],
-];
-const bucketOf = (d: number | null) => (d === null ? "Unknown" : (WINDOWS.find(([, a, b]) => d >= a && d <= b)?.[0] ?? "Unknown"));
-const leadOf = (booked: string | null, checkIn: string) =>
-  booked ? Math.max(0, Math.round((parseISO(checkIn).getTime() - new Date(booked).getTime()) / 86400000)) : null;
+type Diagnosis = "systemic" | "tactical" | "isolated" | "on_target" | "unknown";
+const DIAG: Record<Diagnosis, { label: string; cls: string; tip: string }> = {
+  systemic: { label: "Systemic leak", cls: "bg-destructive text-destructive-foreground", tip: "Ongoing pricing issue: repeated low pickups or upcoming open dates also priced well below benchmark. Review base/min price." },
+  tactical: { label: "Last-minute fill", cls: "bg-secondary text-secondary-foreground", tip: "Discount booked within 7 days of arrival — expected liquidation of unsold nights." },
+  isolated: { label: "One-off", cls: "bg-accent text-accent-foreground", tip: "Single discounted booking; future asking rates look fine. Monitor only." },
+  on_target: { label: "On target", cls: "bg-primary/70 text-primary-foreground", tip: "Booked at or near benchmark." },
+  unknown: { label: "No benchmark", cls: "border bg-transparent text-muted-foreground", tip: "Not enough history to diagnose." },
+};
+
+function diagnose(a: { overallVar: number | null; leadDays: number | null; futureVar: number | null; recentLowCount: number }): Diagnosis {
+  const v = a.overallVar;
+  if (v === null) return "unknown";
+  if (v >= -10) return "on_target";
+  const futureLow = a.futureVar !== null && a.futureVar < -10;
+  if (futureLow || a.recentLowCount >= 2 || ((a.leadDays ?? 0) > 30 && v < -20)) return "systemic";
+  if (a.leadDays !== null && a.leadDays <= 7) return "tactical";
+  return "isolated";
+}
 
 // Context-aware score: late discounts are expected; early discounts locked in far out are penalized harder
 function adjustScore(base: number | null, lead: number | null, v: number | null): number | null {
@@ -235,7 +248,36 @@ export function RateAuditor() {
           benchmarkAdr, benchmarkSource: [...srcs].join(", ") || "No benchmark",
           score: adjustScore(scoreFor(overallVar), leadDays, overallVar), weekdayNights: wkdN, weekendNights: wkeN,
           leadDays, windowBucket: bucketOf(leadDays), typicalLead, leadVar: leadDays !== null && typicalLead !== null ? leadDays - typicalLead : null,
+          futureVar: null, recentLowCount: 0, diagnosis: "unknown" as Diagnosis,
         };
+      });
+      // Forward-looking: open calendar asking rates for the next 60 days vs the same benchmark
+      const today = format(new Date(), "yyyy-MM-dd");
+      const fwdTo = format(addDays(new Date(), 60), "yyyy-MM-dd");
+      const futureVarMap = new Map<string, number>();
+      for (let i = 0; i < listingIds.length; i += 50) {
+        const cal = await fetchAllPaged<any>((f, t) =>
+          supabase.from("capacity_calendar").select("listing_id, date, price, is_available")
+            .in("listing_id", listingIds.slice(i, i + 50)).gte("date", today).lte("date", fwdTo)
+            .eq("is_available", true).order("id").range(f, t));
+        const agg = new Map<string, { a: number; b: number }>();
+        for (const c of cal) {
+          const p = Number(c.price);
+          if (!(p > 0)) continue;
+          const b = benchFor(c.listing_id, parseISO(c.date));
+          if (!b) continue;
+          const g = agg.get(c.listing_id) || { a: 0, b: 0 };
+          g.a += p; g.b += b.v; agg.set(c.listing_id, g);
+        }
+        agg.forEach((g, id) => g.b > 0 && futureVarMap.set(id, ((g.a - g.b) / g.b) * 100));
+      }
+      const lowCount = new Map<string, number>();
+      result.forEach((a) => (a.overallVar ?? 0) < -15 && lowCount.set(a.res.listing_id, (lowCount.get(a.res.listing_id) || 0) + 1));
+      result.forEach((a) => {
+        const fv = futureVarMap.get(a.res.listing_id) ?? null;
+        a.futureVar = fv;
+        a.recentLowCount = lowCount.get(a.res.listing_id) || 0;
+        a.diagnosis = diagnose(a);
       });
       setAudits(result);
     } catch (e: any) {
