@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { addDays, endOfMonth, format, getDaysInMonth, parseISO, subDays, subYears } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -147,12 +147,14 @@ export function RateAuditor() {
           .range(f, t));
 
       const listingIds = [...new Set(reservations.map((r) => r.listing_id))];
+      if (stale()) return;
       if (!listingIds.length) { setAudits([]); return; }
 
       const [{ data: listings }, { data: peers }] = await Promise.all([
         supabase.from("listings").select("id, nickname").in("id", listingIds),
         supabase.from("portfolio_comparables").select("listing_id, peer_listing_id").in("listing_id", listingIds),
       ]);
+      if (stale()) return;
       setListingNames(Object.fromEntries((listings || []).map((l: any) => [l.id, l.nickname || l.id])));
       const peerMap = new Map<string, string[]>();
       (peers || []).forEach((p: any) => peerMap.set(p.listing_id, [...(peerMap.get(p.listing_id) || []), p.peer_listing_id]));
@@ -357,11 +359,12 @@ export function RateAuditor() {
         a.revparVar = a.benchRevpar ? ((a.revpar! - a.benchRevpar) / a.benchRevpar) * 100 : null;
         a.diagnosis = diagnose(a);
       });
+      if (stale()) return;
       setAudits(result);
     } catch (e: any) {
-      setError(e?.message || "Could not load bookings");
+      if (!stale()) setError(e?.message || "Could not load bookings");
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
   };
 
