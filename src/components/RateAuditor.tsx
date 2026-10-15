@@ -52,7 +52,10 @@ const DIAG: Record<Diagnosis, { label: string; cls: string; tip: string }> = {
 };
 
 // Length-of-stay tiers: expected discount tolerance (pts) for longer stays
-const losOf = (n: number): [string, number] => (n >= 28 ? ["Monthly", 25] : n >= 7 ? ["Weekly", 12] : ["Standard", 0]);
+const losOf = (n: number): [string, number] => (n >= 28 ? ["Monthly", 15] : n >= 7 ? ["Weekly", 10] : ["Standard", 0]);
+// Max acceptable LOS discount before it counts as over-discounting (weekly 5–15%, monthly 10–20%)
+const losCeiling = (tier: string) => (tier === "Monthly" ? 20 : tier === "Weekly" ? 15 : 0);
+const overDisc = (a: { losTier: string; overallVar: number | null }) => { const c = losCeiling(a.losTier); return c && a.overallVar !== null && -a.overallVar > c ? -a.overallVar - c : 0; };
 // Late relative to this property's own curve: within 30% of typical lead (or ≤7d absolute)
 const isLate = (lead: number | null, rel: number | null) => (lead !== null && lead <= 7) || (rel !== null && rel <= 0.3);
 
@@ -416,7 +419,7 @@ export function RateAuditor() {
     (scoreFilter === "all" || (scoreFilter === "flagged" ? (a.score ?? 5) <= 2 : String(a.score) === scoreFilter)) &&
     (channelFilter === "all" || (a.res.source || "unknown") === channelFilter) &&
     (windowFilter === "all" || a.windowBucket === windowFilter) &&
-    (diagFilter === "all" || a.diagnosis === diagFilter)).sort(sorters[sortKey] || sorters.newest);
+    (diagFilter === "all" || (diagFilter === "overdisc" ? overDisc(a) > 0 && a.losTier === "Monthly" : diagFilter === "overdisc_any" ? overDisc(a) > 0 : a.diagnosis === diagFilter))).sort(sorters[sortKey] || sorters.newest);
 
   const totalNights = filtered.reduce((s, a) => s + a.res.nights_count, 0);
   const avgNet = totalNights ? filtered.reduce((s, a) => s + a.netAdr * a.res.nights_count, 0) / totalNights : null;
@@ -430,7 +433,7 @@ export function RateAuditor() {
 
   const exportCsv = () => {
     downloadCsv(`rate-audit-${format(new Date(), "yyyy-MM-dd")}.csv`, [
-      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period", "Stay month", "Stay-month RevPAR", "Benchmark RevPAR", "RevPAR var %", "Stay-month occupancy %", "Benchmark occupancy %", "RevPAR benchmark source"],
+      ["Property", "Guest", "Channel", "Booked", "Check-in", "Check-out", "Nights", "Weekday nights", "Weekend nights", "Gross ADR", "Est. channel fee", "Net ADR", "Benchmark ADR", "Weekday var %", "Weekend var %", "Overall var %", "Score", "Benchmark source", "Lead days", "Booking window", "Typical lead days", "Lead vs typical (days)", "Diagnosis", "Next 60d asking vs benchmark %", "Low pickups in period", "Stay month", "Stay-month RevPAR", "Benchmark RevPAR", "RevPAR var %", "Stay-month occupancy %", "Benchmark occupancy %", "RevPAR benchmark source", "LOS tier", "LOS allowance pts", "LOS discount ceiling %", "Excess discount pts"],
       ...filtered.map((a) => [
         listingNames[a.res.listing_id] || a.res.listing_id, a.res.guest_name || "", a.res.source || "",
         a.res.created_at_guesty ? format(new Date(a.res.created_at_guesty), "yyyy-MM-dd") : "",
@@ -441,6 +444,7 @@ export function RateAuditor() {
         a.leadDays?.toString() ?? "", a.windowBucket, a.typicalLead?.toFixed(0) ?? "", a.leadVar?.toFixed(0) ?? "",
         DIAG[a.diagnosis].label, a.futureVar?.toFixed(1) ?? "", String(a.recentLowCount),
         a.stayMonth, a.revpar?.toFixed(2) ?? "", a.benchRevpar?.toFixed(2) ?? "", a.revparVar?.toFixed(1) ?? "", a.occ?.toFixed(1) ?? "", a.benchOcc?.toFixed(1) ?? "", a.revparSource,
+        a.losTier, String(a.losAllowance), String(losCeiling(a.losTier) || ""), overDisc(a) ? overDisc(a).toFixed(1) : "",
       ]),
     ]);
   };
@@ -484,6 +488,8 @@ export function RateAuditor() {
             <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All diagnoses</SelectItem>
+              <SelectItem value="overdisc">Excessive monthly discounts</SelectItem>
+              <SelectItem value="overdisc_any">Any stay over discount ceiling</SelectItem>
               {(Object.keys(DIAG) as Diagnosis[]).map((d) => <SelectItem key={d} value={d}>{d === "leak" ? "True pricing leaks" : DIAG[d].label}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -560,6 +566,7 @@ export function RateAuditor() {
                       <TableCell>
                         <Tooltip><TooltipTrigger asChild><Badge className={cn("whitespace-nowrap", DIAG[a.diagnosis].cls)}>{DIAG[a.diagnosis].label}</Badge></TooltipTrigger>
                           <TooltipContent className="max-w-xs">{DIAG[a.diagnosis].tip}</TooltipContent></Tooltip>
+                        {overDisc(a) > 0 && <Badge variant="outline" className="ml-1 border-destructive text-destructive whitespace-nowrap">Excessive {a.losTier.toLowerCase()} discount</Badge>}
                         <div className={cn("text-xs mt-1", a.revparVar !== null && a.revparVar < -5 ? "text-destructive" : "text-muted-foreground")}>{monthLabel(a.stayMonth)} RevPAR {pct(a.revparVar)}</div>
                         {a.futureVar !== null && <div className="text-xs text-muted-foreground">Next 60d {pct(a.futureVar)}</div>}
                       </TableCell>
@@ -610,6 +617,8 @@ export function RateAuditor() {
                 ["Weekday vs benchmark", pct(s.weekdayVar)], ["Weekend vs benchmark", pct(s.weekendVar)],
                 ["Overall vs benchmark", pct(s.overallVar)],
                 ["Diagnosis", DIAG[s.diagnosis].label],
+                ["Stay length tier", s.losTier === "Standard" ? "Standard (no LOS allowance)" : `${s.losTier} · ${s.losAllowance}% allowance · ${losCeiling(s.losTier)}% max`],
+                ...(overDisc(s) > 0 ? [["Over-discount", `Raw ${pct(s.overallVar)} vs ${losCeiling(s.losTier)}% max allowed: ${overDisc(s).toFixed(1)} pts excess`] as [string, string]] : []),
                 ["Stay-month RevPAR (on the books)", `${fmt(s.revpar)} · ${s.occ === null ? "—" : s.occ.toFixed(0)}% occ`],
                 ["Benchmark RevPAR", `${fmt(s.benchRevpar)} · ${s.benchOcc === null ? "—" : s.benchOcc.toFixed(0)}% occ`],
                 ["RevPAR vs benchmark", pct(s.revparVar)], ["RevPAR benchmark", s.revparSource],
