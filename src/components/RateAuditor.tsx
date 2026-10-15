@@ -255,6 +255,32 @@ export function RateAuditor() {
       }
 
       const benchFor = (listingId: string, night: Date): { v: number; src: string } | null => {
+        // Holiday nights benchmark against the same holiday last year (dates shift year to year)
+        const h = holidayOf(night);
+        if (h) {
+          const lyWin = holidayWindows(night.getFullYear() - 1).find((w) => w.key === h.win.key);
+          if (lyWin) {
+            const same = exact.get(`${listingId}|${format(addDays(lyWin.start, Math.min(h.offset, lyWin.nights - 1)), "yyyy-MM-dd")}`);
+            if (same) return { v: same, src: "Same holiday LY" };
+            const vals: number[] = [];
+            for (let i = 0; i < lyWin.nights; i++) {
+              const x = exact.get(`${listingId}|${format(addDays(lyWin.start, i), "yyyy-MM-dd")}`);
+              if (x) vals.push(x);
+            }
+            const ha = avg(vals);
+            if (ha) return { v: ha, src: "Same holiday LY" };
+            const pv = (peerMap.get(listingId) || []).flatMap((p) => {
+              const out: number[] = [];
+              for (let i = 0; i < lyWin.nights; i++) {
+                const x = exact.get(`${p}|${format(addDays(lyWin.start, i), "yyyy-MM-dd")}`);
+                if (x) out.push(x);
+              }
+              return out;
+            });
+            const pa = avg(pv);
+            if (pa) return { v: pa, src: "Portfolio peers same holiday LY" };
+          }
+        }
         const py = subDays(night, 364);
         const pyKey = format(py, "yyyy-MM-dd");
         const e = exact.get(`${listingId}|${pyKey}`);
