@@ -208,7 +208,7 @@ export function RevenueReview({ reservations, listingIds, listings }: Props) {
     const n30 = statsFor(next30, false);
     const issues: { id: string; name: string; issue: string; fix: string; severity: "high" | "medium" }[] = [];
     for (const h of homes) {
-      const l = listings.find((x: any) => String(x.id) === h.id);
+      const l: any = listingById.get(h.id);
       if (h.hasBench && h.varPct !== null && h.varPct < -25)
         issues.push({ id: h.id, name: h.name, severity: "high", issue: `Month revenue ${pct(h.varPct)} vs ${benchmark === "ly" ? "LY" : "target"}`, fix: h.occ < h.lyOcc ? "Lower near-term rates / relax min-stay to recover occupancy" : "Occupancy is fine — review rate strategy (ADR down)" });
       const r = Number(l?.live_airbnb_rating);
