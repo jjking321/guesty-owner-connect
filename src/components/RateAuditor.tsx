@@ -28,6 +28,13 @@ type Audit = {
   futureVar: number | null; recentLowCount: number; diagnosis: Diagnosis;
 };
 
+const WINDOWS: [string, number, number][] = [
+  ["Last-minute", 0, 7], ["Near-term", 8, 30], ["Standard", 31, 60], ["Advance", 61, 120], ["Far advance", 121, 99999],
+];
+const bucketOf = (d: number | null) => (d === null ? "Unknown" : (WINDOWS.find(([, a, b]) => d >= a && d <= b)?.[0] ?? "Unknown"));
+const leadOf = (booked: string | null, checkIn: string) =>
+  booked ? Math.max(0, Math.round((parseISO(checkIn).getTime() - new Date(booked).getTime()) / 86400000)) : null;
+
 type Diagnosis = "systemic" | "tactical" | "isolated" | "on_target" | "unknown";
 const DIAG: Record<Diagnosis, { label: string; cls: string; tip: string }> = {
   systemic: { label: "Systemic leak", cls: "bg-destructive text-destructive-foreground", tip: "Ongoing pricing issue: repeated low pickups or upcoming open dates also priced well below benchmark. Review base/min price." },
