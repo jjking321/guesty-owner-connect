@@ -7,6 +7,7 @@ import { PropertyMetricsSummary } from "@/components/PropertyMetricsSummary";
 import { BulkGoalsUpload } from "@/components/BulkGoalsUpload";
 import { SyncProgressCard } from "@/components/SyncProgressCard";
 import { PacingReport } from "@/components/PacingReport";
+import { RevenueReview } from "@/components/RevenueReview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -1310,10 +1311,17 @@ export default function PropertiesBulkEdit() {
             </div>
             
             {allReservations.length > 0 ? (
+              <>
+              <RevenueReview
+                reservations={allReservations}
+                listingIds={effectivePacingListingIds}
+                listings={listings}
+              />
               <PacingReport 
                 reservations={allReservations} 
                 listingIds={effectivePacingListingIds} 
               />
+              </>
             ) : (
               <Card>
                 <CardContent className="text-center py-12">
