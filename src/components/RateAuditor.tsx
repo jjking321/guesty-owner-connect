@@ -125,9 +125,13 @@ export function RateAuditor() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Audit | null>(null);
 
+  const reqRef = useRef(0);
   const load = async () => {
+    const reqId = ++reqRef.current;
+    const stale = () => reqId !== reqRef.current;
     setLoading(true);
     setError(null);
+    setAudits([]);
     try {
       const end = new Date();
       const start = subDays(new Date(format(end, "yyyy-MM-dd") + "T00:00:00"), Number(period));
@@ -135,6 +139,7 @@ export function RateAuditor() {
         supabase.from("reservations")
           .select("id, listing_id, check_in, check_out, nights_count, fare_accommodation_adjusted, host_payout, sub_total, source, guest_name, created_at_guesty, status")
           .gte("created_at_guesty", start.toISOString())
+          .lte("created_at_guesty", end.toISOString())
           .in("status", CONFIRMED)
           .or("source.is.null,source.neq.owner")
           .gt("nights_count", 0)
