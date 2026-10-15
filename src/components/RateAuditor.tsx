@@ -349,6 +349,7 @@ export function RateAuditor() {
       const netSums = new Map<string, number[]>();
       result.forEach((a) => a.grossAdr > 0 && netSums.set(a.res.listing_id, [...(netSums.get(a.res.listing_id) || []), a.netAdr / a.grossAdr]));
       const netAvg = new Map<string, number>();
+      const netAvg = new Map<string, number>();
       netSums.forEach((v, k) => netAvg.set(k, avg(v)!));
       const lowCount = new Map<string, number>();
       result.forEach((a) => (a.overallVar ?? 0) < -15 && lowCount.set(a.res.listing_id, (lowCount.get(a.res.listing_id) || 0) + 1));
